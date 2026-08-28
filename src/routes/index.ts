@@ -2,11 +2,13 @@ import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { funcionariosRoutes } from './funcionarios.routes.js';
 import { obrasRoutes } from './obras.routes.js';
+import { prefixosFrotaRoutes } from './prefixos-frota.routes.js';
 
 export const routes = Router();
 
 routes.use('/obras', obrasRoutes);
 routes.use('/funcionarios', funcionariosRoutes);
+routes.use('/prefixos-frota', prefixosFrotaRoutes);
 
 routes.get('/health', (_request, response) => {
   response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });
