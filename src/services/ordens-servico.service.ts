@@ -93,6 +93,12 @@ interface RelationshipResult {
   prefixo_existe: boolean;
 }
 
+interface NaturezaChangeResult {
+  natureza_os: OrdemServicoNatureza;
+  possui_funcionarios: boolean;
+  possui_servicos: boolean;
+}
+
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -347,6 +353,32 @@ export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
 export async function updateOrdemServico(id: string, body: unknown): Promise<OrdemServico> {
   const fields = parseFields(body, true);
   await validateRelationships(fields.obra_id, fields.prefixo_frota_id);
+  const currentResult = await pool.query<NaturezaChangeResult>(
+    `SELECT
+       natureza_os,
+       EXISTS (
+         SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1
+       ) AS possui_funcionarios,
+       EXISTS (
+         SELECT 1 FROM servicos_os WHERE ordem_servico_id = $1
+       ) AS possui_servicos
+     FROM ordens_servico WHERE id = $1`,
+    [id],
+  );
+  if (currentResult.rows.length === 0) {
+    throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
+  }
+  const current = currentResult.rows[0]!;
+  if (
+    current.natureza_os !== 'MATERIAL'
+    && fields.natureza_os === 'MATERIAL'
+    && (current.possui_funcionarios || current.possui_servicos)
+  ) {
+    throw new OrdemServicoServiceError(
+      409,
+      'Remova os funcionários vinculados e os serviços antes de alterar a natureza para MATERIAL.',
+    );
+  }
   try {
     const result = await pool.query<OrdemServico>(
       `UPDATE ordens_servico SET
