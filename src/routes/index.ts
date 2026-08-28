@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
+import { obrasRoutes } from './obras.routes.js';
 
 export const routes = Router();
+
+routes.use('/obras', obrasRoutes);
 
 routes.get('/health', (_request, response) => {
   response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });
