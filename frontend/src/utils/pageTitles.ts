@@ -1,0 +1,2 @@
+const titles: Record<string, string> = {'/':'Dashboard','/ordens-servico':'Ordens de Serviço','/obras':'Obras','/funcionarios':'Funcionários','/frotas':'Frotas','/relatorios':'Relatórios'}
+export const getPageTitle = (pathname: string) => titles[pathname] ?? 'Página não encontrada'

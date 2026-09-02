@@ -1,0 +1,2 @@
+import {Plus} from 'lucide-react';import {EmptyState} from '../components/EmptyState';import {PageHeader} from '../components/PageHeader'
+export function FrotasPage(){return <><PageHeader title="Frotas" subtitle="Gerencie os prefixos de frota." action={<button className="button button--primary" type="button"><Plus size={18} aria-hidden="true"/>Novo Prefixo</button>}/><EmptyState title="Prefixos de frota" description="Os veículos e prefixos cadastrados serão exibidos nesta área."/></>}

@@ -1,0 +1,2 @@
+import {Plus} from 'lucide-react';import {EmptyState} from '../components/EmptyState';import {PageHeader} from '../components/PageHeader'
+export function OrdensServicoPage(){return <><PageHeader title="Ordens de Serviço" subtitle="Gerencie as ordens de serviço da oficina." action={<button className="button button--primary" type="button"><Plus size={18} aria-hidden="true"/>Nova O.S.</button>}/><EmptyState title="Nenhuma ordem exibida" description="A listagem e os filtros das ordens de serviço serão adicionados na próxima etapa."/></>}

@@ -1,0 +1,2 @@
+import {Plus} from 'lucide-react';import {EmptyState} from '../components/EmptyState';import {PageHeader} from '../components/PageHeader'
+export function ObrasPage(){return <><PageHeader title="Obras" subtitle="Gerencie as obras cadastradas." action={<button className="button button--primary" type="button"><Plus size={18} aria-hidden="true"/>Nova Obra</button>}/><EmptyState title="Cadastro de obras" description="A listagem e a manutenção das obras serão disponibilizadas em breve."/></>}

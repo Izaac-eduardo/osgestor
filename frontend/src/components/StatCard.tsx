@@ -1,0 +1,3 @@
+import type { LucideIcon } from 'lucide-react'
+interface Props {label:string;value:string;icon:LucideIcon;tone?:'blue'|'amber'|'green'|'slate'}
+export function StatCard({label,value,icon:Icon,tone='blue'}:Props){return <article className="stat-card"><div className={`stat-card__icon stat-card__icon--${tone}`} aria-hidden="true"><Icon size={20}/></div><div><p className="stat-card__label">{label}</p><strong className="stat-card__value">{value}</strong></div></article>}

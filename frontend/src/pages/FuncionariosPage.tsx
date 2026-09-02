@@ -1,0 +1,2 @@
+import {Plus} from 'lucide-react';import {EmptyState} from '../components/EmptyState';import {PageHeader} from '../components/PageHeader'
+export function FuncionariosPage(){return <><PageHeader title="Funcionários" subtitle="Gerencie os funcionários da oficina." action={<button className="button button--primary" type="button"><Plus size={18} aria-hidden="true"/>Novo Funcionário</button>}/><EmptyState title="Cadastro de funcionários" description="A equipe da oficina será gerenciada por esta área."/></>}

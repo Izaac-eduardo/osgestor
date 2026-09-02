@@ -1,0 +1,2 @@
+import { Menu } from 'lucide-react'
+export function Header({title,onOpenMenu}:{title:string;onOpenMenu:()=>void}){return <header className="topbar"><button className="icon-button topbar__menu" type="button" aria-label="Abrir menu de navegação" aria-controls="main-sidebar" onClick={onOpenMenu}><Menu size={22} aria-hidden="true"/></button><div><span className="topbar__eyebrow">OSGestor</span><p className="topbar__title">{title}</p></div></header>}
