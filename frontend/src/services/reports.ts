@@ -1,20 +1,9 @@
-import type { AxiosRequestConfig } from 'axios'
-import { api } from './api'
-import type { DashboardSummary, ExpensesByProject, OrdersByWeek } from '../types/reports'
-
-const requestConfig = (signal?: AbortSignal): AxiosRequestConfig => ({ signal })
-
-export async function getDashboardSummary(signal?: AbortSignal): Promise<DashboardSummary> {
-  const { data } = await api.get<DashboardSummary>('/relatorios/resumo', requestConfig(signal))
-  return data
-}
-
-export async function getExpensesByProject(signal?: AbortSignal): Promise<ExpensesByProject[]> {
-  const { data } = await api.get<ExpensesByProject[]>('/relatorios/gastos-por-obra', requestConfig(signal))
-  return data
-}
-
-export async function getOrdersByWeek(signal?: AbortSignal): Promise<OrdersByWeek[]> {
-  const { data } = await api.get<OrdersByWeek[]>('/relatorios/os-por-semana', requestConfig(signal))
-  return data
-}
+import type{AxiosRequestConfig}from'axios';import{api}from'./api';import type{DashboardSummary,ExpensesByProject,ExpensesByVehicle,OrdersByWeek,ReportExportKind,ReportFilters}from'../types/reports'
+const params=(filters:ReportFilters={})=>Object.fromEntries(Object.entries(filters).filter(([,v])=>v!==undefined&&v!==null&&v!==''));const config=(filters:ReportFilters={},signal?:AbortSignal):AxiosRequestConfig=>({params:params(filters),signal})
+export async function getDashboardSummary(signal?:AbortSignal,filters:ReportFilters={}):Promise<DashboardSummary>{return(await api.get<DashboardSummary>('/relatorios/resumo',config(filters,signal))).data}
+export async function getExpensesByProject(signal?:AbortSignal,filters:ReportFilters={}):Promise<ExpensesByProject[]>{return(await api.get<ExpensesByProject[]>('/relatorios/gastos-por-obra',config(filters,signal))).data}
+export async function getExpensesByVehicle(filters:ReportFilters={},signal?:AbortSignal):Promise<ExpensesByVehicle[]>{return(await api.get<ExpensesByVehicle[]>('/relatorios/gastos-por-veiculo',config(filters,signal))).data}
+export async function getOrdersByWeek(signal?:AbortSignal,filters:ReportFilters={}):Promise<OrdersByWeek[]>{return(await api.get<OrdersByWeek[]>('/relatorios/os-por-semana',config(filters,signal))).data}
+const paths:Record<ReportExportKind,string>={project:'gastos-por-obra',vehicle:'gastos-por-veiculo',weekly:'os-por-semana'}
+const filename=(header:string|undefined,fallback:string)=>{const utf=header?.match(/filename\*=UTF-8''([^;]+)/i)?.[1],plain=header?.match(/filename="?([^";]+)"?/i)?.[1];try{return decodeURIComponent(utf||plain||fallback).replace(/[\\/:*?"<>|]/g,'-')}catch{return fallback}}
+export async function downloadReport(kind:ReportExportKind,format:'excel'|'pdf',filters:ReportFilters):Promise<void>{const ext=format==='excel'?'xlsx':'pdf',fallback=`relatorio-${paths[kind]}.${ext}`,response=await api.get<Blob>(`/relatorios/${paths[kind]}/${format}`,{params:params(filters),responseType:'blob'}),url=URL.createObjectURL(response.data),link=document.createElement('a');try{link.href=url;link.download=filename(response.headers['content-disposition'],fallback);document.body.appendChild(link);link.click()}finally{link.remove();URL.revokeObjectURL(url)}}
