@@ -82,10 +82,10 @@ const handleDatabaseError = (error: unknown): never => {
   if (isPostgresError(error) && error.code === '23505') {
     throw new PrefixoFrotaServiceError(409, 'Já existe um prefixo de frota com este código.');
   }
-  if (isPostgresError(error) && error.code === '23503') {
+  if (isPostgresError(error) && (error.code === '23503' || error.code === '23001')) {
     throw new PrefixoFrotaServiceError(
       409,
-      'O prefixo de frota está em uso e deve ser inativado em vez de excluído.',
+      'Não é possível excluir este prefixo porque ele está sendo utilizado.',
     );
   }
   throw error;
