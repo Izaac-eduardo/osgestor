@@ -15,3 +15,7 @@ export interface FleetPrefixOption{id:string;codigo:string;descricao:string|null
 export interface OrderPayload{numero_os:number;obra_id:string;prefixo_frota_id:string;frota_numero:number;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null}
 export type CreateOrderPayload=Omit<OrderPayload,'status'>&{status?:OrderStatus}
 export type UpdateOrderPayload=OrderPayload
+export interface EmployeeLinkPayload{funcionario_id:string}
+export interface ServiceItemPayload{descricao:string;valor:number}
+export interface ProductItemPayload{descricao:string;quantidade:number;unidade:string;valor_unitario:number}
+export interface EmployeeOption extends OrderEmployee{created_at:string;updated_at:string}

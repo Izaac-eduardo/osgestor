@@ -8,3 +8,12 @@ export async function getProjects(signal?:AbortSignal){const{data}=await api.get
 export async function getFleetPrefixes(signal?:AbortSignal){const{data}=await api.get<FleetPrefixOption[]>('/prefixos-frota',{signal});return data}
 export async function createServiceOrder(payload:import('../types/orders').CreateOrderPayload){const{data}=await api.post<import('../types/orders').ServiceOrder>('/ordens-servico',payload);return data}
 export async function updateServiceOrder(id:string,payload:import('../types/orders').UpdateOrderPayload){const{data}=await api.put<import('../types/orders').ServiceOrder>(`/ordens-servico/${id}`,payload);return data}
+export async function getEmployees(){const{data}=await api.get<import('../types/orders').EmployeeOption[]>('/funcionarios');return data}
+export async function addOrderEmployee(orderId:string,payload:import('../types/orders').EmployeeLinkPayload){const{data}=await api.post<import('../types/orders').OrderEmployee>(`/ordens-servico/${orderId}/funcionarios`,payload);return data}
+export async function removeOrderEmployee(orderId:string,employeeId:string){await api.delete(`/ordens-servico/${orderId}/funcionarios/${employeeId}`)}
+export async function createOrderService(orderId:string,payload:import('../types/orders').ServiceItemPayload){const{data}=await api.post<import('../types/orders').OrderService>(`/ordens-servico/${orderId}/servicos`,payload);return data}
+export async function updateOrderService(orderId:string,itemId:string,payload:import('../types/orders').ServiceItemPayload){const{data}=await api.put<import('../types/orders').OrderService>(`/ordens-servico/${orderId}/servicos/${itemId}`,payload);return data}
+export async function removeOrderService(orderId:string,itemId:string){await api.delete(`/ordens-servico/${orderId}/servicos/${itemId}`)}
+export async function createOrderProduct(orderId:string,payload:import('../types/orders').ProductItemPayload){const{data}=await api.post<import('../types/orders').OrderProduct>(`/ordens-servico/${orderId}/produtos`,payload);return data}
+export async function updateOrderProduct(orderId:string,itemId:string,payload:import('../types/orders').ProductItemPayload){const{data}=await api.put<import('../types/orders').OrderProduct>(`/ordens-servico/${orderId}/produtos/${itemId}`,payload);return data}
+export async function removeOrderProduct(orderId:string,itemId:string){await api.delete(`/ordens-servico/${orderId}/produtos/${itemId}`)}
