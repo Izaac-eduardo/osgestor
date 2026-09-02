@@ -1,2 +1,2 @@
 import { Construction } from 'lucide-react'
-export function EmptyState({title,description}:{title:string;description:string}){return <section className="empty-state"><span className="empty-state__icon" aria-hidden="true"><Construction size={28}/></span><h2>{title}</h2><p>{description}</p></section>}
+export function EmptyState({title,description,compact=false}:{title:string;description:string;compact?:boolean}){return <section className={`empty-state${compact?' empty-state--compact':''}`}><span className="empty-state__icon" aria-hidden="true"><Construction size={28}/></span><h2>{title}</h2><p>{description}</p></section>}

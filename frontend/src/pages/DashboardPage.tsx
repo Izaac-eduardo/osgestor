@@ -1,5 +1,10 @@
-import {Banknote,ChartNoAxesCombined,CircleCheckBig,CircleGauge,CirclePlay,Clock3} from 'lucide-react'
-import {PageHeader} from '../components/PageHeader'
-import {StatCard} from '../components/StatCard'
-const stats=[{label:'Total de O.S.',icon:CircleGauge,tone:'blue' as const},{label:'O.S. Abertas',icon:Clock3,tone:'amber' as const},{label:'Em Andamento',icon:CirclePlay,tone:'blue' as const},{label:'Finalizadas',icon:CircleCheckBig,tone:'green' as const},{label:'Gasto Total',icon:Banknote,tone:'slate' as const}]
-export function DashboardPage(){return <><PageHeader title="Dashboard" subtitle="Visão geral da oficina"/><section className="stats-grid" aria-label="Indicadores da oficina">{stats.map(s=><StatCard key={s.label}{...s} value="—"/>)}</section><section className="dashboard-grid"><article className="chart-placeholder"><div className="chart-placeholder__heading"><div><h2>Gastos por Obra</h2><p>Distribuição dos custos por frente de trabalho</p></div><ChartNoAxesCombined size={22} aria-hidden="true"/></div><div className="chart-placeholder__canvas" aria-hidden="true"><span/><span/><span/><span/><span/></div></article><article className="chart-placeholder"><div className="chart-placeholder__heading"><div><h2>Ordens de Serviço por Semana</h2><p>Evolução semanal das ordens registradas</p></div><CircleGauge size={22} aria-hidden="true"/></div><div className="line-placeholder" aria-hidden="true"><span/><span/><span/><span/><span/><span/></div></article></section></>}
+import { DashboardStats } from '../components/DashboardStats'
+import { ExpensesByProjectChart } from '../components/ExpensesByProjectChart'
+import { OrdersByWeekChart } from '../components/OrdersByWeekChart'
+import { PageHeader } from '../components/PageHeader'
+import { useDashboardData } from '../hooks/useDashboardData'
+
+export function DashboardPage() {
+  const { summary, expenses, weeklyOrders, loadSummary, loadExpenses, loadWeeklyOrders } = useDashboardData()
+  return <><PageHeader title="Dashboard" subtitle="Visão geral da oficina"/><DashboardStats state={summary} onRetry={()=>void loadSummary()}/><section className="dashboard-grid"><ExpensesByProjectChart state={expenses} onRetry={()=>void loadExpenses()}/><OrdersByWeekChart state={weeklyOrders} onRetry={()=>void loadWeeklyOrders()}/></section></>
+}

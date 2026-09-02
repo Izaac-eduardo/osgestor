@@ -1,0 +1,2 @@
+import { RefreshCw, TriangleAlert } from 'lucide-react'
+export function ErrorState({ onRetry }: { onRetry: () => void }) { return <div className="error-state" role="alert"><TriangleAlert size={24} aria-hidden="true"/><div><strong>Não foi possível carregar os dados do Dashboard.</strong><p>Verifique a conexão e tente novamente.</p></div><button className="button button--secondary" type="button" onClick={onRetry}><RefreshCw size={16} aria-hidden="true"/>Tentar novamente</button></div> }
