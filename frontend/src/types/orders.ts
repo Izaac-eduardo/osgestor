@@ -12,3 +12,6 @@ export interface ServiceOrderDetails extends Omit<ServiceOrder,'total_mao_obra_i
 export interface OrderFilters{numero_os?:string;frota_numero?:string;obra_id?:string;prefixo_frota_id?:string;status?:OrderStatus|'';natureza_os?:OrderNature|'';categoria_servico?:OrderCategory|'';data_inicio?:string;data_fim?:string}
 export interface ProjectOption{id:string;codigo:string;nome:string;status:'ATIVA'|'INATIVA'}
 export interface FleetPrefixOption{id:string;codigo:string;descricao:string|null;status:'ATIVO'|'INATIVO'}
+export interface OrderPayload{numero_os:number;obra_id:string;prefixo_frota_id:string;frota_numero:number;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null}
+export type CreateOrderPayload=Omit<OrderPayload,'status'>&{status?:OrderStatus}
+export type UpdateOrderPayload=OrderPayload
