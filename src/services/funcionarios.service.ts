@@ -80,8 +80,8 @@ const handleDatabaseError = (error: unknown): never => {
   if (isPostgresError(error) && error.code === '23505') {
     throw new FuncionarioServiceError(409, 'Já existe um funcionário com esta matrícula.');
   }
-  if (isPostgresError(error) && error.code === '23503') {
-    throw new FuncionarioServiceError(409, 'O funcionário está em uso e deve ser inativado em vez de excluído.');
+  if (isPostgresError(error) && (error.code === '23503' || error.code === '23001')) {
+    throw new FuncionarioServiceError(409, 'Não é possível excluir este funcionário porque ele está sendo utilizado.');
   }
   throw error;
 };
