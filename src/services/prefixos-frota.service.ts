@@ -48,6 +48,12 @@ const parseCodigo = (value: unknown): string => {
   if (/\s/.test(codigo)) {
     throw new PrefixoFrotaServiceError(400, 'codigo não pode conter espaços.');
   }
+  if (codigo.length > 10) {
+    throw new PrefixoFrotaServiceError(
+      400,
+      'O código do prefixo deve possuir no máximo 10 caracteres.',
+    );
+  }
   return codigo;
 };
 
