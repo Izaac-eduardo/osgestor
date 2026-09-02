@@ -431,12 +431,37 @@ export async function updateOrdemServicoStatus(id: string, body: unknown): Promi
 }
 
 export async function deleteOrdemServico(id: string): Promise<void> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM ordens_servico WHERE id = $1', [id]);
-    if (result.rowCount === 0) {
+    await client.query('BEGIN');
+    const ordemResult = await client.query(
+      'SELECT 1 FROM ordens_servico WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    if (ordemResult.rows.length === 0) {
       throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
     }
+    const relationshipResult = await client.query<{ possui_vinculos: boolean }>(
+      `SELECT
+         EXISTS (
+           SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1
+         ) OR EXISTS (
+           SELECT 1 FROM servicos_os WHERE ordem_servico_id = $1
+         ) OR EXISTS (
+           SELECT 1 FROM produtos_os WHERE ordem_servico_id = $1
+         ) AS possui_vinculos`,
+      [id],
+    );
+    if (relationshipResult.rows[0]!.possui_vinculos) {
+      throw new OrdemServicoServiceError(
+        409,
+        'Não é possível excluir a Ordem de Serviço enquanto houver funcionários, serviços ou produtos vinculados.',
+      );
+    }
+    await client.query('DELETE FROM ordens_servico WHERE id = $1', [id]);
+    await client.query('COMMIT');
   } catch (error) {
+    await client.query('ROLLBACK');
     if (isPostgresError(error) && error.code === '23503') {
       throw new OrdemServicoServiceError(
         409,
@@ -444,5 +469,7 @@ export async function deleteOrdemServico(id: string): Promise<void> {
       );
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
