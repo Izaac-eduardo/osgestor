@@ -17,3 +17,4 @@ export async function removeOrderService(orderId:string,itemId:string){await api
 export async function createOrderProduct(orderId:string,payload:import('../types/orders').ProductItemPayload){const{data}=await api.post<import('../types/orders').OrderProduct>(`/ordens-servico/${orderId}/produtos`,payload);return data}
 export async function updateOrderProduct(orderId:string,itemId:string,payload:import('../types/orders').ProductItemPayload){const{data}=await api.put<import('../types/orders').OrderProduct>(`/ordens-servico/${orderId}/produtos/${itemId}`,payload);return data}
 export async function removeOrderProduct(orderId:string,itemId:string){await api.delete(`/ordens-servico/${orderId}/produtos/${itemId}`)}
+export async function deleteServiceOrder(id:string):Promise<void>{await api.delete(`/ordens-servico/${id}`)}
