@@ -1,5 +1,10 @@
 import { Router } from 'express';
 import {
+  gastosPorObraPdfController,
+  gastosPorVeiculoPdfController,
+  osPorSemanaPdfController,
+} from '../controllers/relatorios-pdf.controller.js';
+import {
   gastosPorObraExcelController,
   gastosPorVeiculoExcelController,
   osPorSemanaExcelController,
@@ -12,6 +17,10 @@ import {
 } from '../controllers/relatorios.controller.js';
 
 export const relatoriosRoutes = Router();
+
+relatoriosRoutes.get('/gastos-por-veiculo/pdf', gastosPorVeiculoPdfController);
+relatoriosRoutes.get('/gastos-por-obra/pdf', gastosPorObraPdfController);
+relatoriosRoutes.get('/os-por-semana/pdf', osPorSemanaPdfController);
 
 relatoriosRoutes.get('/gastos-por-veiculo/excel', gastosPorVeiculoExcelController);
 relatoriosRoutes.get('/gastos-por-obra/excel', gastosPorObraExcelController);
