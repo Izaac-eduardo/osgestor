@@ -15,3 +15,7 @@ export const formatCompactDate = (value: string): string => {
   const [, month, day] = value.split('-')
   return `${day}/${month}`
 }
+
+const dateFormatter=new Intl.DateTimeFormat('pt-BR',{timeZone:'UTC'})
+export const formatDate=(value:string|null):string=>value?dateFormatter.format(new Date(value)):'—'
+export const formatQuantity=(value:number):string=>new Intl.NumberFormat('pt-BR',{maximumFractionDigits:3}).format(value)

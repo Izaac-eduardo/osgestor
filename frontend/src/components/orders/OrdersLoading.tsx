@@ -1,0 +1,1 @@
+﻿export function OrdersLoading(){return <div className="orders-loading" role="status"><span className="sr-only">Carregando Ordens de Serviço</span>{Array.from({length:6},(_,i)=><div className="orders-loading__row" key={i}>{Array.from({length:6},(__,j)=><span key={j}/>)}</div>)}</div>}
