@@ -120,8 +120,8 @@ const handleDatabaseError = (error: unknown): never => {
   if (isPostgresError(error) && error.code === '23505') {
     throw new ObraServiceError(409, 'Já existe uma obra com este código.');
   }
-  if (isPostgresError(error) && error.code === '23503') {
-    throw new ObraServiceError(409, 'A obra já está em uso e deve ser inativada em vez de excluída.');
+  if (isPostgresError(error) && (error.code === '23503' || error.code === '23001')) {
+    throw new ObraServiceError(409, 'Não é possível excluir esta obra porque ela está sendo utilizada.');
   }
   throw error;
 };
