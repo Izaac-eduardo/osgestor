@@ -4,6 +4,7 @@ import { funcionariosRoutes } from './funcionarios.routes.js';
 import { obrasRoutes } from './obras.routes.js';
 import { ordensServicoRoutes } from './ordens-servico.routes.js';
 import { prefixosFrotaRoutes } from './prefixos-frota.routes.js';
+import { relatoriosRoutes } from './relatorios.routes.js';
 
 export const routes = Router();
 
@@ -11,6 +12,7 @@ routes.use('/obras', obrasRoutes);
 routes.use('/funcionarios', funcionariosRoutes);
 routes.use('/ordens-servico', ordensServicoRoutes);
 routes.use('/prefixos-frota', prefixosFrotaRoutes);
+routes.use('/relatorios', relatoriosRoutes);
 
 routes.get('/health', (_request, response) => {
   response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });
