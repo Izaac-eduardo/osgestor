@@ -190,6 +190,27 @@ const numeric = (value: string, field: string): number => {
   return converted;
 };
 
+export interface RelatorioFilterLabels {
+  obra: string;
+  prefixoFrota: string;
+}
+
+export async function getRelatorioFilterLabels(filters: RelatorioFilters): Promise<RelatorioFilterLabels> {
+  const [obraResult, prefixoResult] = await Promise.all([
+    filters.obra_id
+      ? pool.query<{ codigo: string; nome: string }>('SELECT codigo, nome FROM obras WHERE id = $1', [filters.obra_id])
+      : Promise.resolve({ rows: [] }),
+    filters.prefixo_frota_id
+      ? pool.query<{ codigo: string }>('SELECT codigo FROM prefixos_frota WHERE id = $1', [filters.prefixo_frota_id])
+      : Promise.resolve({ rows: [] }),
+  ]);
+  const obra = obraResult.rows[0];
+  const prefixo = prefixoResult.rows[0];
+  return {
+    obra: obra ? `${obra.nome} · ${obra.codigo}` : 'Todas',
+    prefixoFrota: prefixo?.codigo ?? 'Todos',
+  };
+}
 export async function getGastosPorVeiculo(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
     'obra_id', 'prefixo_frota_id', 'frota_numero', 'data_inicio', 'data_fim',

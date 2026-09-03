@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import {
   RelatorioFilters,
   getGastosPorObra,
+  getRelatorioFilterLabels,
   getGastosPorVeiculo,
   getOsPorSemana,
 } from './relatorios.service.js';
@@ -66,9 +67,9 @@ const periodText = (filters: RelatorioFilters): string => {
 
 const filterValue = (value: string | undefined, empty: string): string => value ?? empty;
 
-const commonFilters = (filters: RelatorioFilters): Array<{ label: string; value: string }> => [
+const commonFilters = (filters: RelatorioFilters, obraLabel: string): Array<{ label: string; value: string }> => [
   { label: 'Período', value: periodText(filters) },
-  { label: 'Obra', value: filterValue(filters.obra_id, 'Todas') },
+  { label: 'Obra', value: obraLabel },
 ];
 
 const fitText = (doc: PDFKit.PDFDocument, text: string, width: number): string => {
@@ -197,14 +198,15 @@ const generatePdf = <T>(options: PdfOptions<T>): Promise<Buffer> => new Promise(
 
 export async function exportGastosPorVeiculoPdf(filters: RelatorioFilters): Promise<Buffer> {
   const rows = await getGastosPorVeiculo(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const totalOs = rows.reduce((total, item) => total + item.quantidade_os, 0);
   const totalGeral = rows.reduce((total, item) => total + item.total_gasto, 0);
   return generatePdf({
     title: 'Gastos por Veículo',
     orientation: 'landscape',
     filters: [
-      ...commonFilters(filters),
-      { label: 'Prefixo da Frota', value: filterValue(filters.prefixo_frota_id, 'Todos') },
+      ...commonFilters(filters, displayFilters.obra),
+      { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Número da Frota', value: filterValue(filters.frota_numero, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
@@ -229,13 +231,14 @@ export async function exportGastosPorVeiculoPdf(filters: RelatorioFilters): Prom
 
 export async function exportGastosPorObraPdf(filters: RelatorioFilters): Promise<Buffer> {
   const rows = await getGastosPorObra(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const totalOs = rows.reduce((total, item) => total + item.quantidade_os, 0);
   const totalGeral = rows.reduce((total, item) => total + item.total_gasto, 0);
   return generatePdf({
     title: 'Gastos por Obra',
     orientation: 'landscape',
     filters: [
-      ...commonFilters(filters),
+      ...commonFilters(filters, displayFilters.obra),
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
     ],
@@ -259,12 +262,13 @@ export async function exportGastosPorObraPdf(filters: RelatorioFilters): Promise
 
 export async function exportOsPorSemanaPdf(filters: RelatorioFilters): Promise<Buffer> {
   const rows = await getOsPorSemana(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const totalOs = rows.reduce((total, item) => total + item.quantidade_os, 0);
   return generatePdf({
     title: 'OS por Semana',
     orientation: 'portrait',
     filters: [
-      ...commonFilters(filters),
+      ...commonFilters(filters, displayFilters.obra),
       { label: 'Status', value: filterValue(filters.status, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },

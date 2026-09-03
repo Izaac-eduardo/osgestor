@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import {
   RelatorioFilters,
   getGastosPorObra,
+  getRelatorioFilterLabels,
   getGastosPorVeiculo,
   getOsPorSemana,
 } from './relatorios.service.js';
@@ -67,14 +68,15 @@ const finishWorkbook = async (workbook: ExcelJS.Workbook): Promise<Buffer> => {
 
 export async function exportGastosPorVeiculoExcel(filters: RelatorioFilters): Promise<Buffer> {
   const data = await getGastosPorVeiculo(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const workbook = new ExcelJS.Workbook();
   const { sheet, headerRowNumber } = prepareSheet(
     workbook,
     'Gastos por Veiculo',
     [
       { label: 'Período', value: periodText(filters) },
-      { label: 'Obra', value: filterValue(filters.obra_id, 'Todas') },
-      { label: 'Prefixo da Frota', value: filterValue(filters.prefixo_frota_id, 'Todos') },
+      { label: 'Obra', value: displayFilters.obra },
+      { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Número da Frota', value: filterValue(filters.frota_numero, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
@@ -107,13 +109,14 @@ export async function exportGastosPorVeiculoExcel(filters: RelatorioFilters): Pr
 
 export async function exportGastosPorObraExcel(filters: RelatorioFilters): Promise<Buffer> {
   const data = await getGastosPorObra(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const workbook = new ExcelJS.Workbook();
   const { sheet, headerRowNumber } = prepareSheet(
     workbook,
     'Gastos por Obra',
     [
       { label: 'Período', value: periodText(filters) },
-      { label: 'Obra', value: filterValue(filters.obra_id, 'Todas') },
+      { label: 'Obra', value: displayFilters.obra },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
     ],
@@ -144,13 +147,14 @@ export async function exportGastosPorObraExcel(filters: RelatorioFilters): Promi
 
 export async function exportOsPorSemanaExcel(filters: RelatorioFilters): Promise<Buffer> {
   const data = await getOsPorSemana(filters);
+  const displayFilters = await getRelatorioFilterLabels(filters);
   const workbook = new ExcelJS.Workbook();
   const { sheet, headerRowNumber } = prepareSheet(
     workbook,
     'OS por Semana',
     [
       { label: 'Período', value: periodText(filters) },
-      { label: 'Obra', value: filterValue(filters.obra_id, 'Todas') },
+      { label: 'Obra', value: displayFilters.obra },
       { label: 'Status', value: filterValue(filters.status, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
