@@ -195,6 +195,51 @@ export interface RelatorioFilterLabels {
   prefixoFrota: string;
 }
 
+interface OrdemRelatorioRow {
+  id: string;
+  numero_os: string;
+  obra_codigo: string;
+  obra_nome: string;
+  frota_codigo: string;
+  natureza_os: 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
+  categoria_servico: string | null;
+  prestador_terceiro: string | null;
+  data_abertura: string;
+  status: string;
+  total_mao_obra_interna: string;
+  total_servicos_terceiros: string;
+  total_produtos: string;
+  total_os: string;
+}
+
+interface FuncionarioRelatorioRow { ordem_servico_id: string; nome: string }
+interface ServicoRelatorioRow { ordem_servico_id: string; descricao: string; valor: string }
+interface ProdutoRelatorioRow {
+  ordem_servico_id: string;
+  descricao: string;
+  quantidade: string;
+  unidade: string;
+  valor_unitario: string;
+  valor_total: string;
+}
+
+export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
+  'total_mao_obra_interna' | 'total_servicos_terceiros' | 'total_produtos' | 'total_os'> {
+  total_mao_obra_interna: number;
+  total_servicos_terceiros: number;
+  total_produtos: number;
+  total_os: number;
+  funcionarios: Array<{ nome: string }>;
+  servicos: Array<{ descricao: string; valor: number }>;
+  produtos: Array<{
+    descricao: string;
+    quantidade: number;
+    unidade: string;
+    valor_unitario: number;
+    valor_total: number;
+  }>;
+}
+
 export async function getRelatorioFilterLabels(filters: RelatorioFilters): Promise<RelatorioFilterLabels> {
   const [obraResult, prefixoResult] = await Promise.all([
     filters.obra_id
@@ -210,6 +255,83 @@ export async function getRelatorioFilterLabels(filters: RelatorioFilters): Promi
     obra: obra ? `${obra.nome} · ${obra.codigo}` : 'Todas',
     prefixoFrota: prefixo?.codigo ?? 'Todos',
   };
+}
+
+export async function getOrdensServicoRelatorio(
+  filters: RelatorioFilters,
+): Promise<OrdemServicoRelatorio[]> {
+  const allowed: FilterName[] = [
+    'obra_id', 'prefixo_frota_id', 'frota_numero', 'data_inicio', 'data_fim',
+    'natureza_os', 'categoria_servico', 'status',
+  ];
+  const { where, values } = buildWhere(filters, allowed);
+  const ordensResult = await pool.query<OrdemRelatorioRow>(
+    `SELECT id, numero_os, obra_codigo, obra_nome, frota_codigo, natureza_os,
+       categoria_servico, prestador_terceiro, data_abertura, status,
+       total_mao_obra_interna, total_servicos_terceiros, total_produtos, total_os
+     FROM vw_ordens_servico_resumo
+     ${where}
+     ORDER BY data_abertura ASC, numero_os ASC`,
+    values,
+  );
+  if (ordensResult.rows.length === 0) return [];
+
+  const ids = ordensResult.rows.map((ordem) => ordem.id);
+  const [funcionariosResult, servicosResult, produtosResult] = await Promise.all([
+    pool.query<FuncionarioRelatorioRow>(
+      `SELECT osf.ordem_servico_id, f.nome
+       FROM ordens_servico_funcionarios osf
+       JOIN funcionarios f ON f.id = osf.funcionario_id
+       WHERE osf.ordem_servico_id = ANY($1::uuid[])
+       ORDER BY f.nome ASC`,
+      [ids],
+    ),
+    pool.query<ServicoRelatorioRow>(
+      `SELECT ordem_servico_id, descricao, valor
+       FROM servicos_os WHERE ordem_servico_id = ANY($1::uuid[])
+       ORDER BY created_at ASC`,
+      [ids],
+    ),
+    pool.query<ProdutoRelatorioRow>(
+      `SELECT ordem_servico_id, descricao, quantidade, unidade, valor_unitario, valor_total
+       FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])
+       ORDER BY created_at ASC`,
+      [ids],
+    ),
+  ]);
+
+  const byOrder = <T extends { ordem_servico_id: string }>(rows: T[]): Map<string, T[]> => {
+    const result = new Map<string, T[]>();
+    for (const row of rows) {
+      const group = result.get(row.ordem_servico_id) ?? [];
+      group.push(row);
+      result.set(row.ordem_servico_id, group);
+    }
+    return result;
+  };
+  const funcionarios = byOrder(funcionariosResult.rows);
+  const servicos = byOrder(servicosResult.rows);
+  const produtos = byOrder(produtosResult.rows);
+
+  return ordensResult.rows.map((ordem) => ({
+    ...ordem,
+    total_mao_obra_interna: numeric(ordem.total_mao_obra_interna, 'total_mao_obra_interna'),
+    total_servicos_terceiros: numeric(ordem.total_servicos_terceiros, 'total_servicos_terceiros'),
+    total_produtos: numeric(ordem.total_produtos, 'total_produtos'),
+    total_os: numeric(ordem.total_os, 'total_os'),
+    funcionarios: (funcionarios.get(ordem.id) ?? []).map(({ nome }) => ({ nome })),
+    servicos: (servicos.get(ordem.id) ?? []).map(({ descricao, valor }) => ({
+      descricao,
+      valor: numeric(valor, 'servicos.valor'),
+    })),
+    produtos: (produtos.get(ordem.id) ?? []).map((produto) => ({
+      descricao: produto.descricao,
+      quantidade: numeric(produto.quantidade, 'produtos.quantidade'),
+      unidade: produto.unidade,
+      valor_unitario: numeric(produto.valor_unitario, 'produtos.valor_unitario'),
+      valor_total: numeric(produto.valor_total, 'produtos.valor_total'),
+    })),
+  }));
 }
 export async function getGastosPorVeiculo(filters: RelatorioFilters) {
   const allowed: FilterName[] = [

@@ -4,6 +4,7 @@ import {
   exportGastosPorVeiculoPdf,
   exportOsPorSemanaPdf,
 } from '../services/relatorios-pdf.service.js';
+import { exportOrdensServicoPdf } from '../services/ordens-servico-pdf.service.js';
 import { RelatorioFilters, RelatorioServiceError } from '../services/relatorios.service.js';
 
 const queryText = (value: unknown): string | undefined =>
@@ -25,7 +26,7 @@ const sendError = (response: Response, error: unknown): void => {
     response.status(error.statusCode).json({ message: error.message });
     return;
   }
-  console.error('Erro interno na exportação PDF dos relatórios.');
+  console.error('Erro interno na exportação PDF dos relatórios.', error);
   response.status(500).json({ message: 'Erro interno do servidor.' });
 };
 
@@ -66,6 +67,19 @@ export async function osPorSemanaPdfController(
   try {
     const buffer = await exportOsPorSemanaPdf(reportFilters(request));
     sendPdf(response, buffer, 'relatorio-os-por-semana.pdf');
+  } catch (error) {
+    sendError(response, error);
+  }
+}
+
+
+export async function ordensServicoPdfController(
+  request: Request,
+  response: Response,
+): Promise<void> {
+  try {
+    const buffer = await exportOrdensServicoPdf(reportFilters(request));
+    sendPdf(response, buffer, 'relatorio-ordens-servico.pdf');
   } catch (error) {
     sendError(response, error);
   }
