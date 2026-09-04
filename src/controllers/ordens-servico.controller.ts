@@ -14,7 +14,7 @@ const sendError = (response: Response, error: unknown): void => {
     response.status(error.statusCode).json({ message: error.message });
     return;
   }
-  console.error('Erro interno no CRUD de Ordens de Serviço.');
+  console.error('Erro interno no CRUD de Ordens de Serviço.', error);
   response.status(500).json({ message: 'Erro interno do servidor.' });
 };
 
