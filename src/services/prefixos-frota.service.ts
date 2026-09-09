@@ -85,6 +85,12 @@ const parseFields = (body: unknown, requireStatus: boolean): PrefixoFrotaFields 
 };
 
 const handleDatabaseError = (error: unknown): never => {
+  if (isPostgresError(error) && error.code === '23514') {
+    throw new PrefixoFrotaServiceError(
+      400,
+      'O código do prefixo deve ser compatível com as frotas vinculadas (somente letras).',
+    );
+  }
   if (isPostgresError(error) && error.code === '23505') {
     throw new PrefixoFrotaServiceError(409, 'Já existe um prefixo de frota com este código.');
   }

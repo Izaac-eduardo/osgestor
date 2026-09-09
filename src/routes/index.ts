@@ -1,3 +1,4 @@
+import { frotasRoutes } from './frotas.routes.js';
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { funcionariosRoutes } from './funcionarios.routes.js';
@@ -12,6 +13,7 @@ routes.use('/obras', obrasRoutes);
 routes.use('/funcionarios', funcionariosRoutes);
 routes.use('/ordens-servico', ordensServicoRoutes);
 routes.use('/prefixos-frota', prefixosFrotaRoutes);
+routes.use('/frotas', frotasRoutes);
 routes.use('/relatorios', relatoriosRoutes);
 
 routes.get('/health', (_request, response) => {

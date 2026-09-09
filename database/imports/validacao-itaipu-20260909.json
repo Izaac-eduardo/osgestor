@@ -1,0 +1,257 @@
+{
+  "verified": true,
+  "sourceSha256": "c52ac92522f899b7ed54203943c455b0a279de95d6174ee34b7b5eaac5afa8b0",
+  "matchedRecords": 294,
+  "counts": {
+    "ordens": 45,
+    "prefixos": 44,
+    "frotas": 294
+  },
+  "sourcePrefixes": [
+    "A",
+    "C",
+    "CA",
+    "CC",
+    "CE",
+    "CG",
+    "CI",
+    "CM",
+    "CP",
+    "CS",
+    "CSR",
+    "CT",
+    "CTC",
+    "CV",
+    "EH",
+    "EP",
+    "ER",
+    "FA",
+    "GA",
+    "GE",
+    "I",
+    "M",
+    "MC",
+    "MM",
+    "MN",
+    "O",
+    "ON",
+    "OTR",
+    "PA",
+    "PC",
+    "PH",
+    "PP",
+    "RC",
+    "RCP",
+    "RE",
+    "RH",
+    "SR",
+    "TE",
+    "TR",
+    "UA",
+    "VAN",
+    "VC"
+  ],
+  "duplicateModelGroups": 23,
+  "plateLookup": [
+    "A09"
+  ],
+  "modelLookup": [
+    "EH05",
+    "EH07",
+    "EH08",
+    "EH10",
+    "EH17"
+  ],
+  "ignored": {
+    "Título da relação.": 4,
+    "headers": 85,
+    "Linha vazia nas colunas do cadastro.": 4,
+    "Totalizador da relação.": 3
+  },
+  "adjustments": {
+    "ano": 38,
+    "identificacao": 20
+  },
+  "samples": [
+    {
+      "codigo": "A09",
+      "numero": "09",
+      "descricao": "AUTOMOVEL - VOLKSWAGEN / GOL",
+      "placa": "BER7C25",
+      "modelo": null,
+      "ano": 2021,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 6
+      },
+      "original": {
+        "codigo": "A-09",
+        "descricao": "AUTOMOVEL - VOLKSWAGEN / GOL",
+        "ano": "2021",
+        "identificacao": "BER7C25",
+        "section": "AUTOMÓVEIS",
+        "header": "PLACA"
+      }
+    },
+    {
+      "codigo": "CT04",
+      "numero": "04",
+      "descricao": "CAMINHAO - VOLKSWAGEN / 31.280 CRM 6X4",
+      "placa": "LRE5F83",
+      "modelo": null,
+      "ano": 2014,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 154
+      },
+      "original": {
+        "codigo": "CT-04",
+        "descricao": "CAMINHAO - VOLKSWAGEN / 31.280 CRM 6X4",
+        "ano": "2014",
+        "identificacao": "LRE5F83",
+        "section": "CAMINHÃO TRAÇADO",
+        "header": "PLACA"
+      }
+    },
+    {
+      "codigo": "EH05",
+      "numero": "05",
+      "descricao": "ESCAVADEIRA HIDRAULICA - CAT 320GC",
+      "placa": null,
+      "modelo": "320GC",
+      "ano": 2021,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 199
+      },
+      "original": {
+        "codigo": "EH-05",
+        "descricao": "ESCAVADEIRA HIDRAULICA - CAT 320GC",
+        "ano": "2021",
+        "identificacao": "320GC",
+        "section": "ESCAVADEIRA HIDRAULICA",
+        "header": "MODELO"
+      }
+    },
+    {
+      "codigo": "GE01",
+      "numero": "01",
+      "descricao": "GERADOR DE ENERGIA - DE125GC",
+      "placa": null,
+      "modelo": "DE125GC",
+      "ano": 2022,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 360
+      },
+      "original": {
+        "codigo": "GE-01",
+        "descricao": "GERADOR DE ENERGIA - DE125GC",
+        "ano": "2022",
+        "identificacao": "DE125GC",
+        "section": "GERADOR DE ENERGIA",
+        "header": "MODELO"
+      }
+    },
+    {
+      "codigo": "VAN01",
+      "numero": "01",
+      "descricao": "VOLKSWAGEN / KOMBI",
+      "placa": "APD1F21",
+      "modelo": null,
+      "ano": 2008,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 41
+      },
+      "original": {
+        "codigo": "VAN-01",
+        "descricao": "VOLKSWAGEN / KOMBI",
+        "ano": "2008",
+        "identificacao": "APD1F21",
+        "section": "VAN",
+        "header": "MODELO"
+      }
+    },
+    {
+      "codigo": "RH01",
+      "numero": "01",
+      "descricao": "ROMPEDOR HIDRAULICO - EDT2000",
+      "placa": null,
+      "modelo": "EDT2000",
+      "ano": null,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 333
+      },
+      "original": {
+        "codigo": "RH-01",
+        "descricao": "ROMPEDOR HIDRAULICO - EDT2000",
+        "ano": "-",
+        "identificacao": "EDT2000",
+        "section": "ROMPEDOR HIDRAULICO",
+        "header": "PLACA"
+      }
+    },
+    {
+      "codigo": "GA01",
+      "numero": "01",
+      "descricao": "GRADE ARADORA - GACR",
+      "placa": null,
+      "modelo": null,
+      "ano": null,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 336
+      },
+      "original": {
+        "codigo": "GA-01",
+        "descricao": "GRADE ARADORA - GACR",
+        "ano": "",
+        "identificacao": "GA-01",
+        "section": "GRADE ARADORA",
+        "header": "PLACA"
+      }
+    },
+    {
+      "codigo": "RE06",
+      "numero": "06",
+      "descricao": "RETROESCAVADEIRA - CAT 416E",
+      "placa": null,
+      "modelo": "416",
+      "ano": 2023,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 254
+      },
+      "original": {
+        "codigo": "RE-06",
+        "descricao": "RETROESCAVADEIRA - CAT 416E",
+        "ano": "2023",
+        "identificacao": "416",
+        "section": "RETRO ESCAVADEIRA",
+        "header": "MODELO"
+      }
+    },
+    {
+      "codigo": "CT31",
+      "numero": "31",
+      "descricao": "CAMINHÃO - VOLKSWAGEN / 31.320 CRM 6X4",
+      "placa": "UBP5I21",
+      "modelo": null,
+      "ano": 2025,
+      "source": {
+        "sheet": "FROTA PEDREIRA",
+        "row": 160
+      },
+      "original": {
+        "codigo": "CT-31",
+        "descricao": "CAMINHÃO - VOLKSWAGEN / 31.320 CRM 6X4",
+        "ano": "2025/56",
+        "identificacao": "UBP5I21",
+        "section": "CAMINHÃO TRAÇADO",
+        "header": "PLACA"
+      }
+    }
+  ]
+}
