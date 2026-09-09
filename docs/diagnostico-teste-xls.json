@@ -1,0 +1,61 @@
+{
+  "arquivo": "C:/Users/User/Downloads/TESTE.XLS",
+  "ordens": 47,
+  "intervalo": [
+    46565,
+    46611
+  ],
+  "status": {
+    "ABERTA": 20,
+    "FINALIZADA": 27
+  },
+  "natureza": {
+    "INTERNA": 32,
+    "MATERIAL": 14,
+    "PENDENTE": 1
+  },
+  "comProdutos": 13,
+  "comServicos": 23,
+  "semItens": [
+    46570,
+    46575,
+    46579,
+    46580,
+    46582,
+    46585,
+    46588,
+    46589,
+    46590,
+    46591,
+    46592
+  ],
+  "execucoes": 27,
+  "problemasMultilinha": [],
+  "totalRelatorio": 4492.91,
+  "amostras": [
+    {
+      "numeroOs": 46565,
+      "frota": "TBZ5E14",
+      "problema": "LUBRIFICAR",
+      "parecer": "CONCRETOS",
+      "itens": 1,
+      "execucoes": 1
+    },
+    {
+      "numeroOs": 46566,
+      "frota": "UBP5I23",
+      "problema": "COLOCAR CINTA DO RESERVATORIO DE AGUA",
+      "parecer": "COAMO",
+      "itens": 1,
+      "execucoes": 1
+    },
+    {
+      "numeroOs": 46567,
+      "frota": "UBP5I23",
+      "problema": "RETIRAR MATERIAL",
+      "parecer": "COAMO",
+      "itens": 2,
+      "execucoes": 0
+    }
+  ]
+}
