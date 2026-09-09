@@ -445,6 +445,11 @@ export async function deleteOrdemServico(id: string): Promise<void> {
       'DELETE FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1',
       [id],
     );
+    await client.query(
+      `DELETE FROM servicos_os_execucoes
+       WHERE servico_os_id IN (SELECT id FROM servicos_os WHERE ordem_servico_id = $1)`,
+      [id],
+    );
     await client.query('DELETE FROM servicos_os WHERE ordem_servico_id = $1', [id]);
     await client.query('DELETE FROM produtos_os WHERE ordem_servico_id = $1', [id]);
     await client.query('DELETE FROM ordens_servico WHERE id = $1', [id]);

@@ -213,7 +213,14 @@ interface OrdemRelatorioRow {
 }
 
 interface FuncionarioRelatorioRow { ordem_servico_id: string; nome: string }
-interface ServicoRelatorioRow { ordem_servico_id: string; descricao: string; valor: string }
+interface ServicoRelatorioRow { id: string; ordem_servico_id: string; descricao: string; valor: string }
+interface ExecucaoRelatorioRow {
+  servico_os_id: string;
+  funcionario_nome: string;
+  inicio: string;
+  fim: string;
+  duracao_minutos: string;
+}
 interface ProdutoRelatorioRow {
   ordem_servico_id: string;
   descricao: string;
@@ -230,7 +237,17 @@ export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
   total_produtos: number;
   total_os: number;
   funcionarios: Array<{ nome: string }>;
-  servicos: Array<{ descricao: string; valor: number }>;
+  servicos: Array<{
+    id: string;
+    descricao: string;
+    valor: number;
+    execucoes: Array<{
+      funcionario_nome: string;
+      inicio: string;
+      fim: string;
+      duracao_minutos: number;
+    }>;
+  }>;
   produtos: Array<{
     descricao: string;
     quantidade: number;
@@ -277,7 +294,7 @@ export async function getOrdensServicoRelatorio(
   if (ordensResult.rows.length === 0) return [];
 
   const ids = ordensResult.rows.map((ordem) => ordem.id);
-  const [funcionariosResult, servicosResult, produtosResult] = await Promise.all([
+  const [funcionariosResult, servicosResult, produtosResult, execucoesResult] = await Promise.all([
     pool.query<FuncionarioRelatorioRow>(
       `SELECT osf.ordem_servico_id, f.nome
        FROM ordens_servico_funcionarios osf
@@ -287,7 +304,7 @@ export async function getOrdensServicoRelatorio(
       [ids],
     ),
     pool.query<ServicoRelatorioRow>(
-      `SELECT ordem_servico_id, descricao, valor
+      `SELECT id, ordem_servico_id, descricao, valor
        FROM servicos_os WHERE ordem_servico_id = ANY($1::uuid[])
        ORDER BY created_at ASC`,
       [ids],
@@ -296,6 +313,18 @@ export async function getOrdensServicoRelatorio(
       `SELECT ordem_servico_id, descricao, quantidade, unidade, valor_unitario, valor_total
        FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])
        ORDER BY created_at ASC`,
+      [ids],
+    ),
+    pool.query<ExecucaoRelatorioRow>(
+      `SELECT e.servico_os_id, f.nome funcionario_nome,
+         to_char(e.inicio, 'YYYY-MM-DD"T"HH24:MI') inicio,
+         to_char(e.fim, 'YYYY-MM-DD"T"HH24:MI') fim,
+         floor(extract(epoch FROM (e.fim-e.inicio))/60)::text duracao_minutos
+       FROM servicos_os_execucoes e
+       JOIN funcionarios f ON f.id=e.funcionario_id
+       JOIN servicos_os s ON s.id=e.servico_os_id
+       WHERE s.ordem_servico_id = ANY($1::uuid[])
+       ORDER BY e.inicio, f.nome`,
       [ids],
     ),
   ]);
@@ -312,6 +341,12 @@ export async function getOrdensServicoRelatorio(
   const funcionarios = byOrder(funcionariosResult.rows);
   const servicos = byOrder(servicosResult.rows);
   const produtos = byOrder(produtosResult.rows);
+  const execucoes = new Map<string, ExecucaoRelatorioRow[]>();
+  for (const execucao of execucoesResult.rows) {
+    const group = execucoes.get(execucao.servico_os_id) ?? [];
+    group.push(execucao);
+    execucoes.set(execucao.servico_os_id, group);
+  }
 
   return ordensResult.rows.map((ordem) => ({
     ...ordem,
@@ -320,9 +355,16 @@ export async function getOrdensServicoRelatorio(
     total_produtos: numeric(ordem.total_produtos, 'total_produtos'),
     total_os: numeric(ordem.total_os, 'total_os'),
     funcionarios: (funcionarios.get(ordem.id) ?? []).map(({ nome }) => ({ nome })),
-    servicos: (servicos.get(ordem.id) ?? []).map(({ descricao, valor }) => ({
+    servicos: (servicos.get(ordem.id) ?? []).map(({ id, descricao, valor }) => ({
+      id,
       descricao,
       valor: numeric(valor, 'servicos.valor'),
+      execucoes: (execucoes.get(id) ?? []).map((execucao) => ({
+        funcionario_nome: execucao.funcionario_nome,
+        inicio: execucao.inicio,
+        fim: execucao.fim,
+        duracao_minutos: numeric(execucao.duracao_minutos, 'execucoes.duracao_minutos'),
+      })),
     })),
     produtos: (produtos.get(ordem.id) ?? []).map((produto) => ({
       descricao: produto.descricao,

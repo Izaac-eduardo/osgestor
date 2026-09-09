@@ -21,6 +21,12 @@ const money = new Intl.NumberFormat('pt-BR', {
 const quantity = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 0, maximumFractionDigits: 3,
 }).format;
+const duration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest}min`;
+  return rest ? `${hours}h ${rest}min` : `${hours}h`;
+};
 const label = (value: string): string => value
   .toLocaleLowerCase('pt-BR').replaceAll('_', ' ')
   .replace(/(^|\s)\S/g, (letter) => letter.toLocaleUpperCase('pt-BR'));
@@ -166,6 +172,12 @@ export async function exportOrdensServicoPdf(filters: RelatorioFilters): Promise
       doc.text(`Valor de m\u00e3o de obra: ${money(effective.reduce((sum, order) => sum + order.total_mao_obra_interna, 0))}`);
       doc.text(`Valor de materiais utilizados: ${money(products.reduce((sum, item) => sum + item.valor_total, 0))}`);
       doc.text(`Total apropriado: ${money(effective.reduce((sum, order) => sum + order.total_os, 0))}`);
+      if (filters.natureza_os === 'INTERNA') {
+        const minutes = effective.flatMap((order) => order.servicos)
+          .flatMap((service) => service.execucoes)
+          .reduce((sum, execution) => sum + execution.duracao_minutos, 0);
+        doc.text(`Tempo total de servi\u00e7os registrado: ${duration(minutes)}`);
+      }
     }
 
     section('VIS\u00c3O GERAL DAS O.S.');
@@ -215,10 +227,35 @@ export async function exportOrdensServicoPdf(filters: RelatorioFilters): Promise
       }
       if (order.servicos.length) {
         section('Servi\u00e7os');
-        table(doc, order.servicos, [
-          { title: 'Descri\u00e7\u00e3o', width: 565, value: (service) => service.descricao },
-          { title: 'Valor', width: 132, align: 'right', value: (service) => money(service.valor) },
-        ], ensure);
+        for (const service of order.servicos) {
+          ensure(34);
+          doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(8.5)
+            .text(`${service.descricao} — ${money(service.valor)}`, doc.page.margins.left);
+          if (order.natureza_os === 'INTERNA' && service.execucoes.length) {
+            table(doc, service.execucoes, [
+              { title: 'Funcion\u00e1rio', width: 255, value: (execution) => execution.funcionario_nome },
+              { title: 'Data', width: 105, value: (execution) => date(execution.inicio) },
+              { title: 'In\u00edcio', width: 90, value: (execution) => execution.inicio.slice(11, 16) },
+              { title: 'T\u00e9rmino', width: 90, value: (execution) => execution.fim.slice(11, 16) },
+              { title: 'Tempo', width: 157, align: 'right', value: (execution) => duration(execution.duracao_minutos) },
+            ], ensure);
+            doc.fillColor(colors.muted).font('Helvetica-Bold').fontSize(8)
+              .text(`Tempo registrado no servi\u00e7o: ${duration(service.execucoes.reduce((sum, execution) => sum + execution.duracao_minutos, 0))}`, doc.page.margins.left);
+          } else if (order.natureza_os === 'INTERNA') {
+            doc.fillColor(colors.muted).font('Helvetica-Oblique').fontSize(8)
+              .text('Nenhum per\u00edodo de trabalho registrado.', doc.page.margins.left);
+          } else if (order.prestador_terceiro) {
+            doc.fillColor(colors.muted).font('Helvetica').fontSize(8)
+              .text(`Prestador: ${order.prestador_terceiro}`, doc.page.margins.left);
+          }
+          doc.moveDown(0.4);
+        }
+        if (order.natureza_os === 'INTERNA') {
+          const orderMinutes = order.servicos.flatMap((service) => service.execucoes)
+            .reduce((sum, execution) => sum + execution.duracao_minutos, 0);
+          if (orderMinutes) doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(8.5)
+            .text(`Tempo de servi\u00e7os registrado na O.S.: ${duration(orderMinutes)}`, doc.page.margins.left);
+        }
       }
       if (order.produtos.length) {
         section(order.natureza_os === 'MATERIAL' ? 'Materiais' : 'Materiais utilizados');

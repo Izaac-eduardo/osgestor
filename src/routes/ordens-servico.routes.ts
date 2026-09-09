@@ -21,6 +21,12 @@ import {
   updateProdutoOsController,
   updateServicoOsController,
 } from '../controllers/ordens-servico-itens.controller.js';
+import {
+  createExecucaoController,
+  deleteExecucaoController,
+  listExecucoesController,
+  updateExecucaoController,
+} from '../controllers/servicos-os-execucoes.controller.js';
 
 export const ordensServicoRoutes = Router();
 
@@ -33,6 +39,10 @@ ordensServicoRoutes.get('/:id/servicos', listServicosOsController);
 ordensServicoRoutes.post('/:id/servicos', createServicoOsController);
 ordensServicoRoutes.put('/:id/servicos/:servicoId', updateServicoOsController);
 ordensServicoRoutes.delete('/:id/servicos/:servicoId', deleteServicoOsController);
+ordensServicoRoutes.get('/:id/servicos/:servicoId/execucoes', listExecucoesController);
+ordensServicoRoutes.post('/:id/servicos/:servicoId/execucoes', createExecucaoController);
+ordensServicoRoutes.put('/:id/servicos/:servicoId/execucoes/:execucaoId', updateExecucaoController);
+ordensServicoRoutes.delete('/:id/servicos/:servicoId/execucoes/:execucaoId', deleteExecucaoController);
 ordensServicoRoutes.get('/:id/produtos', listProdutosOsController);
 ordensServicoRoutes.post('/:id/produtos', createProdutoOsController);
 ordensServicoRoutes.put('/:id/produtos/:produtoId', updateProdutoOsController);

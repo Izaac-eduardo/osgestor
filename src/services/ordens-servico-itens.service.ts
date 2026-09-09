@@ -4,6 +4,7 @@ import {
   OrdemServicoServiceError,
   getOrdemServico,
 } from './ordens-servico.service.js';
+import { ExecucaoServico, listExecucoesOrdem } from './servicos-os-execucoes.service.js';
 
 type NaturezaOs = 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
 
@@ -69,7 +70,7 @@ export interface OrdemServicoDetalhes
     | 'total_os'
   > {
   funcionarios: FuncionarioOs[];
-  servicos: Array<Omit<ServicoOs, 'valor'> & { valor: number }>;
+  servicos: Array<Omit<ServicoOs, 'valor'> & { valor: number; execucoes: ExecucaoServico[] }>;
   produtos: Array<
     Omit<ProdutoOs, 'quantidade' | 'valor_unitario' | 'valor_total'> & {
       quantidade: number;
@@ -370,17 +371,25 @@ export async function deleteProdutoOs(ordemServicoId: string, produtoId: string)
 
 export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoDetalhes> {
   const resumo = await getOrdemServico(id);
-  const [funcionarios, servicos, produtos] = await Promise.all([
+  const [funcionarios, servicos, produtos, execucoes] = await Promise.all([
     rawFuncionarios(id),
     rawServicos(id),
     rawProdutos(id),
+    listExecucoesOrdem(id),
   ]);
+  const execucoesPorServico = new Map<string, ExecucaoServico[]>();
+  for (const execucao of execucoes) {
+    const items = execucoesPorServico.get(execucao.servico_os_id) ?? [];
+    items.push(execucao);
+    execucoesPorServico.set(execucao.servico_os_id, items);
+  }
   return {
     ...resumo,
     funcionarios,
     servicos: servicos.map((servico) => ({
       ...servico,
       valor: numericToNumber(servico.valor, 'servicos.valor'),
+      execucoes: execucoesPorServico.get(servico.id) ?? [],
     })),
     produtos: produtos.map((produto) => ({
       ...produto,
