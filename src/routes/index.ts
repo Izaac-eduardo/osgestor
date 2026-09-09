@@ -1,3 +1,4 @@
+import { importacoesOsRoutes } from './importacoes-os.routes.js'
 import { Router } from 'express';
 import { pool } from '../config/database.js';
 import { funcionariosRoutes } from './funcionarios.routes.js';
@@ -13,6 +14,7 @@ routes.use('/funcionarios', funcionariosRoutes);
 routes.use('/ordens-servico', ordensServicoRoutes);
 routes.use('/prefixos-frota', prefixosFrotaRoutes);
 routes.use('/relatorios', relatoriosRoutes);
+routes.use('/importacoes-os', importacoesOsRoutes);
 
 routes.get('/health', (_request, response) => {
   response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });
