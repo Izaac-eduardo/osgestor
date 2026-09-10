@@ -27,8 +27,9 @@ export interface OrdemServico {
   id: string;
   numero_os: string;
   obra_id: string;
-  prefixo_frota_id: string;
-  frota_numero: number;
+  frota_id: string | null;
+  prefixo_frota_id: string | null;
+  frota_numero: number | null;
   natureza_os: OrdemServicoNatureza;
   categoria_servico: OrdemServicoCategoria | null;
   prestador_terceiro: string | null;
@@ -54,8 +55,9 @@ export interface OrdemServicoResumo extends OrdemServico {
 interface OrdemServicoFields {
   numero_os: number;
   obra_id: string;
-  prefixo_frota_id: string;
-  frota_numero: number;
+  frota_id: string | null;
+  prefixo_frota_id: string | null;
+  frota_numero: number | null;
   natureza_os: OrdemServicoNatureza;
   categoria_servico: OrdemServicoCategoria | null;
   prestador_terceiro: string | null;
@@ -90,6 +92,7 @@ interface PostgresError {
 
 interface RelationshipResult {
   obra_existe: boolean;
+  frota_existe: boolean;
   prefixo_existe: boolean;
 }
 
@@ -211,8 +214,9 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
   return {
     numero_os: requiredPositiveInteger(body.numero_os, 'numero_os'),
     obra_id: requiredUuid(body.obra_id, 'obra_id'),
-    prefixo_frota_id: requiredUuid(body.prefixo_frota_id, 'prefixo_frota_id'),
-    frota_numero: requiredPositiveInteger(body.frota_numero, 'frota_numero', 2147483647),
+    frota_id: body.frota_id === undefined || body.frota_id === null || body.frota_id === '' ? null : requiredUuid(body.frota_id, 'frota_id'),
+    prefixo_frota_id: body.frota_id ? null : requiredUuid(body.prefixo_frota_id, 'prefixo_frota_id'),
+    frota_numero: body.frota_id ? null : requiredPositiveInteger(body.frota_numero, 'frota_numero', 2147483647),
     natureza_os: body.natureza_os,
     categoria_servico: categoria,
     prestador_terceiro: prestadorTerceiro,
@@ -223,18 +227,20 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
   };
 };
 
-const validateRelationships = async (obraId: string, prefixoFrotaId: string): Promise<void> => {
+const validateRelationships = async (obraId: string, frotaId: string | null, prefixoFrotaId: string | null): Promise<void> => {
   const result = await pool.query<RelationshipResult>(
     `SELECT
        EXISTS (SELECT 1 FROM obras WHERE id = $1) AS obra_existe,
-       EXISTS (SELECT 1 FROM prefixos_frota WHERE id = $2) AS prefixo_existe`,
-    [obraId, prefixoFrotaId],
+       EXISTS (SELECT 1 FROM frotas WHERE id = $2) AS frota_existe,
+       EXISTS (SELECT 1 FROM prefixos_frota WHERE id = $3) AS prefixo_existe`,
+    [obraId, frotaId, prefixoFrotaId],
   );
   const relationships = result.rows[0]!;
   if (!relationships.obra_existe) {
     throw new OrdemServicoServiceError(400, 'A obra informada não existe.');
   }
-  if (!relationships.prefixo_existe) {
+  if (frotaId && !relationships.frota_existe) throw new OrdemServicoServiceError(400, 'A frota informada não existe.');
+  if (!frotaId && !relationships.prefixo_existe) {
     throw new OrdemServicoServiceError(400, 'O prefixo de frota informado não existe.');
   }
 };
@@ -321,18 +327,19 @@ export async function getOrdemServico(id: string): Promise<OrdemServicoResumo> {
 
 export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
   const fields = parseFields(body, false);
-  await validateRelationships(fields.obra_id, fields.prefixo_frota_id);
+  await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
   try {
     const result = await pool.query<OrdemServico>(
       `INSERT INTO ordens_servico (
-         numero_os, obra_id, prefixo_frota_id, frota_numero, natureza_os,
+         numero_os, obra_id, frota_id, prefixo_frota_id, frota_numero, natureza_os,
          categoria_servico, prestador_terceiro, data_abertura, data_fechamento,
          status, observacoes
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         fields.numero_os,
         fields.obra_id,
+        fields.frota_id,
         fields.prefixo_frota_id,
         fields.frota_numero,
         fields.natureza_os,
@@ -352,7 +359,7 @@ export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
 
 export async function updateOrdemServico(id: string, body: unknown): Promise<OrdemServico> {
   const fields = parseFields(body, true);
-  await validateRelationships(fields.obra_id, fields.prefixo_frota_id);
+  await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
   const currentResult = await pool.query<NaturezaChangeResult>(
     `SELECT
        natureza_os,
@@ -382,13 +389,14 @@ export async function updateOrdemServico(id: string, body: unknown): Promise<Ord
   try {
     const result = await pool.query<OrdemServico>(
       `UPDATE ordens_servico SET
-         numero_os = $1, obra_id = $2, prefixo_frota_id = $3, frota_numero = $4,
-         natureza_os = $5, categoria_servico = $6, prestador_terceiro = $7,
-         data_abertura = $8, data_fechamento = $9, status = $10, observacoes = $11
-       WHERE id = $12 RETURNING *`,
+         numero_os = $1, obra_id = $2, frota_id = $3, prefixo_frota_id = $4, frota_numero = $5,
+         natureza_os = $6, categoria_servico = $7, prestador_terceiro = $8,
+         data_abertura = $9, data_fechamento = $10, status = $11, observacoes = $12
+       WHERE id = $13 RETURNING *`,
       [
         fields.numero_os,
         fields.obra_id,
+        fields.frota_id,
         fields.prefixo_frota_id,
         fields.frota_numero,
         fields.natureza_os,

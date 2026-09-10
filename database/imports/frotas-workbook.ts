@@ -56,8 +56,7 @@ export function analyzeWorkbook(book: ExcelJS.Workbook): WorkbookReport {
         }
         if (!filled) { report.ignored.push({ ...source, reason: 'Linha vazia.' }); return; }
         if (!columns) {
-          let looksLikeCode = false;
-          row.eachCell(cell => { try { splitFleetCode(cellText(cell)); looksLikeCode = true; } catch { /* Title or unrelated value. */ } });
+          const looksLikeCode = false;
           if (looksLikeCode || filled > 1) report.errors.push({ ...source, reason: 'Dados sem cabeçalho reconhecido. Necessário identificar Frota e Descrição.' });
           else report.ignored.push({ ...source, reason: 'Título antes do cabeçalho.' });
           return;
@@ -107,12 +106,12 @@ export async function importFleetRows(client: PoolClient, rows: ImportRow[]) {
   // Serialize imports and register writes while comparing/upserting a complete snapshot.
   await client.query('LOCK TABLE prefixos_frota, frotas IN SHARE ROW EXCLUSIVE MODE');
   for (const row of rows) {
-    const prefix = await ensureFrotaPrefix(client, row.prefixo);
-    if (prefix.created) counts.prefixesCreated++;
+    const prefix = row.prefixo ? await ensureFrotaPrefix(client, row.prefixo) : null;
+    if (prefix?.created) counts.prefixesCreated++;
     const existing = await client.query<{ id: string }>('SELECT id FROM frotas WHERE codigo=$1', [row.codigo]);
     if (!existing.rows[0]) {
-      await client.query('INSERT INTO frotas (prefixo_frota_id,numero,descricao,placa,modelo,ano) VALUES ($1,$2,$3,$4,$5,$6)',
-        [prefix.id, row.numero, row.descricao, row.placa, row.modelo, row.ano]);
+      await client.query('INSERT INTO frotas (prefixo_frota_id,numero,codigo,descricao,placa,modelo,ano) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [prefix?.id ?? null, row.numero, row.codigo, row.descricao, row.placa, row.modelo, row.ano]);
       counts.inserted++;
     } else {
       // Blank source values do not erase manual data; existing inactive records stay inactive.

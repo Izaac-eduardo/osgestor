@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { parsePoliOs, classifyNatureza, mapStatus, productUnit } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyNatureza, mapStatus, productUnit } from '../src/imports/poli-os.js';
 
 test('parser reproduz o bloco exportado pelo Poli OS', () => {
   const rows: unknown[][] = Array.from({ length: 10 }, () => Array(40).fill(null));
@@ -15,4 +15,20 @@ test('parser reproduz o bloco exportado pelo Poli OS', () => {
   assert.equal(productUnit('ÓLEO LUBRIFICANTE'), 'L'); assert.equal(productUnit('FILTRO DE OLEO'), 'UN');
   assert.equal(classifyNatureza('RETIRAR MATERIAL: ESTOPA', 'JOAO', ''), 'MATERIAL'); assert.equal(classifyNatureza('Troca', 'IZAAC EDUARDO', ''), 'TERCEIRO'); assert.equal(classifyNatureza('Troca', 'Izaac', ''), 'INTERNA');
   assert.equal(mapStatus('ENCERRADA POR VENDA'), 'FINALIZADA'); assert.equal(mapStatus('STATUS NOVO'), undefined);
+});
+
+test('reconhece cancelada e consolida pendências repetidas', () => {
+  assert.equal(mapStatus('CANCELADA'), 'CANCELADA');
+  const pending: string[] = [];
+  addPending(pending, 'FUNCIONARIO_PENDENTE');
+  addPending(pending, 'FUNCIONARIO_PENDENTE');
+  addPending(pending, 'FUNCIONARIO_PENDENTE');
+  assert.deepEqual(pending, ['FUNCIONARIO_PENDENTE (3 ocorrências)']);
+});
+
+test('faz matching de frota por código ou placa sem escolher duplicatas', () => {
+  const fleets = [{ id: '1', codigo: 'ON14', placa: 'ABC1D23' }, { id: '2', codigo: 'ON15', placa: 'ABC1D24' }];
+  assert.equal(findFleetId('ON14', fleets), '1');
+  assert.equal(findFleetId('ABC1D23', fleets), '1');
+  assert.equal(findFleetId('ON', fleets), undefined);
 });

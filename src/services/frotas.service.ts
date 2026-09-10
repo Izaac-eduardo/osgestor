@@ -9,12 +9,12 @@ export class FrotaServiceError extends Error {
   }
 }
 export interface Frota {
-  id: string; prefixo_frota_id: string; numero: string; codigo: string;
+  id: string; prefixo_frota_id: string | null; numero: string | null; codigo: string;
   descricao: string | null; placa: string | null; modelo: string | null; ano: number | null;
   status: 'ATIVO' | 'INATIVO'; created_at: Date; updated_at: Date;
 }
 export interface FrotaFields {
-  codigo: string; prefixo: string; numero: string; descricao: string | null;
+  codigo: string; prefixo: string | null; numero: string | null; descricao: string | null;
   placa: string | null; modelo: string | null; ano: number | null; status: 'ATIVO' | 'INATIVO';
 }
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -30,9 +30,9 @@ function parseStatus(value: unknown): 'ATIVO' | 'INATIVO' {
 export function parseFrotaFields(body: unknown, requireStatus = false): FrotaFields {
   if (!record(body)) throw new FrotaServiceError(400, 'O corpo deve ser um objeto.');
   if (typeof body.codigo !== 'string') throw new FrotaServiceError(400, 'codigo é obrigatório.');
-  let code: ReturnType<typeof splitFleetCode>;
-  try { code = splitFleetCode(body.codigo); }
-  catch (error) { throw new FrotaServiceError(400, (error as Error).message); }
+  const rawCode = body.codigo.trim();
+  if (!rawCode) throw new FrotaServiceError(400, 'codigo é obrigatório.');
+  const code = splitFleetCode(rawCode);
   const rawPlate = optionalText(body.placa, 'placa');
   const placa = rawPlate ? normalizePlate(rawPlate) : null;
   if (placa !== null && !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(placa)) {
@@ -88,11 +88,11 @@ export async function saveFrota(body: unknown, id?: string): Promise<Frota> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const prefix = await ensureFrotaPrefix(client, fields.prefixo);
-    const values = [prefix.id, fields.numero, fields.descricao, fields.placa, fields.modelo, fields.ano, fields.status];
+    const prefix = fields.prefixo ? await ensureFrotaPrefix(client, fields.prefixo) : null;
+    const values = [prefix?.id ?? null, fields.numero, fields.codigo, fields.descricao, fields.placa, fields.modelo, fields.ano, fields.status];
     const result = id
-      ? await client.query<Frota>('UPDATE frotas SET prefixo_frota_id=$1, numero=$2, descricao=$3, placa=$4, modelo=$5, ano=$6, status=$7 WHERE id=$8 RETURNING *', [...values, id])
-      : await client.query<Frota>('INSERT INTO frotas (prefixo_frota_id,numero,descricao,placa,modelo,ano,status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', values);
+      ? await client.query<Frota>('UPDATE frotas SET prefixo_frota_id=$1, numero=$2, codigo=$3, descricao=$4, placa=$5, modelo=$6, ano=$7, status=$8 WHERE id=$9 RETURNING *', [...values, id])
+      : await client.query<Frota>('INSERT INTO frotas (prefixo_frota_id,numero,codigo,descricao,placa,modelo,ano,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', values);
     if (!result.rows[0]) throw new FrotaServiceError(404, 'Frota não encontrada.');
     await client.query('COMMIT');
     return result.rows[0];

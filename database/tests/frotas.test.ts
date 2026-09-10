@@ -12,7 +12,8 @@ test('códigos preservam zeros e separam prefixo/número', () => {
   }
   assert.deepEqual(splitFleetCode('CT-04'), { codigo: 'CT04', prefixo: 'CT', numero: '04' });
   assert.equal(splitFleetCode('EH-03').numero, '03');
-  assert.throws(() => splitFleetCode('09'));
+  assert.deepEqual(splitFleetCode('OFICINA'), { codigo: 'OFICINA', prefixo: null, numero: null });
+  assert.deepEqual(splitFleetCode(' oficina '), { codigo: 'OFICINA', prefixo: null, numero: null });
 });
 test('placas equivalentes e modelo com espaço interno', () => {
   assert.equal(normalizePlate('ABC-1234'), normalizePlate(' abc1234 '));
@@ -23,6 +24,12 @@ test('placas equivalentes e modelo com espaço interno', () => {
   assert.throws(() => parseFrotaFields({ codigo: 'A09', ano: '2021' }));
   assert.throws(() => parseFrotaFields({ codigo: 'A09', status: 'OUTRO' }));
   assert.throws(() => parseFrotaFields({ codigo: 'A09' }, true));
+});
+test('aceita códigos livres e normaliza sem perder zeros', () => {
+  assert.equal(parseFrotaFields({ codigo: ' oficina ' }).codigo, 'OFICINA');
+  assert.deepEqual(parseFrotaFields({ codigo: 'a09' }).numero, '09');
+  assert.equal(parseFrotaFields({ codigo: 'SESMT' }).prefixo, null);
+  assert.throws(() => parseFrotaFields({ codigo: '   ' }));
 });
 test('seções com placa e modelo usam cabeçalhos, nunca posição', () => {
   const book = new ExcelJS.Workbook();

@@ -7,6 +7,7 @@ import { OrderDetailsModal } from '../components/orders/OrderDetailsModal'
 import { OrderFormModal } from '../components/orders/OrderFormModal'
 import { OrdersFilters } from '../components/orders/OrdersFilters'
 import { OrdersList } from '../components/orders/OrdersList'
+import { getFleets } from '../services/fleets'
 import { OrdersLoading } from '../components/orders/OrdersLoading'
 import {
   createServiceOrder,
@@ -26,6 +27,7 @@ import type {
   ServiceOrder,
   ServiceOrderDetails,
 } from '../types/orders'
+import type { Fleet } from '../types/fleets'
 
 type DeleteTarget = Pick<ServiceOrder, 'id' | 'numero_os'>
 
@@ -35,6 +37,7 @@ export function OrdensServicoPage() {
   const [orders, setOrders] = useState<ServiceOrder[]>([])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [prefixes, setPrefixes] = useState<FleetPrefixOption[]>([])
+  const [fleets, setFleets] = useState<Fleet[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -71,10 +74,11 @@ export function OrdensServicoPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    Promise.all([getProjects(controller.signal), getFleetPrefixes(controller.signal)])
-      .then(([projectOptions, prefixOptions]) => {
+    Promise.all([getProjects(controller.signal), getFleetPrefixes(controller.signal), getFleets()])
+      .then(([projectOptions, prefixOptions, fleetOptions]) => {
         setProjects(projectOptions)
         setPrefixes(prefixOptions)
+        setFleets(fleetOptions)
       })
       .catch(() => undefined)
     return () => controller.abort()
@@ -280,6 +284,7 @@ export function OrdensServicoPage() {
           success={modalSuccess}
           projects={projects}
           prefixes={prefixes}
+          fleets={fleets}
           saving={saving}
           apiError={saveError}
           onClose={() => {
