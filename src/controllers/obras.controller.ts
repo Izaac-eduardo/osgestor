@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { ObraServiceError, createObra, deleteObra, getObra, listObras, updateObra, updateObraStatus } from '../services/obras.service.js';
+import { ObraServiceError, createObra, deleteObra, getNextObraCodigo, getObra, listObras, updateObra, updateObraStatus } from '../services/obras.service.js';
 
 const sendError = (response: Response, error: unknown): void => {
   if (error instanceof ObraServiceError) {
@@ -52,5 +52,10 @@ export async function updateObraStatusController(request: Request, response: Res
 
 export async function deleteObraController(request: Request, response: Response): Promise<void> {
   try { await deleteObra(routeId(request.params.id)); response.status(204).send(); }
+  catch (error) { sendError(response, error); }
+}
+
+export async function getNextObraCodigoController(_request: Request, response: Response): Promise<void> {
+  try { response.status(200).json(await getNextObraCodigo()); }
   catch (error) { sendError(response, error); }
 }

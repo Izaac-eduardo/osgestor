@@ -52,7 +52,11 @@ export function OrdensServicoPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 20
   const filtered = useMemo(() => Object.values(filters).some(Boolean), [filters])
+  const pageCount = Math.max(1, Math.ceil(orders.length / pageSize))
+  const visibleOrders = orders.slice((page - 1) * pageSize, page * pageSize)
 
   const load = useCallback(async (currentFilters: OrderFilters, signal?: AbortSignal) => {
     setLoading(true)
@@ -71,6 +75,8 @@ export function OrdensServicoPage() {
     void load(filters, controller.signal)
     return () => controller.abort()
   }, [filters, load])
+
+  useEffect(() => { setPage(1) }, [filters])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -232,7 +238,7 @@ export function OrdensServicoPage() {
               />
             : orders.length
               ? <OrdersList
-                  orders={orders}
+                  orders={visibleOrders}
                   deletingId={deleting ? deleteTarget?.id : undefined}
                   onView={(id) => void open(id)}
                   onEdit={(id) => void edit(id)}
@@ -249,6 +255,7 @@ export function OrdensServicoPage() {
                     ? <button className="button button--secondary" onClick={clear}>Limpar filtros</button>
                     : undefined}
                 />}
+        {!loading && !error && orders.length > 0 && <nav className="orders-pagination" aria-label="Paginação das Ordens de Serviço"><button className="button button--secondary" disabled={page === 1} onClick={() => setPage((current) => current - 1)} type="button">Anterior</button><span>Página {page} de {pageCount}</span><button className="button button--secondary" disabled={page === pageCount} onClick={() => setPage((current) => current + 1)} type="button">Próxima</button></nav>}
       </section>
       {selected && (
         <OrderDetailsModal

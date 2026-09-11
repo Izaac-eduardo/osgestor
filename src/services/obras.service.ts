@@ -1,4 +1,5 @@
 import { pool } from '../config/database.js';
+import { normalizeSearchText } from '../utils/text.js';
 
 export const obraStatuses = ['ATIVA', 'INATIVA'] as const;
 type ObraStatus = (typeof obraStatuses)[number];
@@ -133,11 +134,25 @@ export async function listObras(filters: ObraFilters): Promise<Obra[]> {
   const conditions: string[] = [];
   const values: string[] = [];
   if (filters.status) { conditions.push(`status = $${values.length + 1}`); values.push(filters.status); }
-  if (filters.codigo) { conditions.push(`codigo ILIKE $${values.length + 1}`); values.push(`%${filters.codigo}%`); }
-  if (filters.nome) { conditions.push(`nome ILIKE $${values.length + 1}`); values.push(`%${filters.nome}%`); }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await pool.query<Obra>(`SELECT * FROM obras ${where} ORDER BY codigo ASC`, values);
-  return result.rows;
+  const codigo = filters.codigo ? normalizeSearchText(filters.codigo) : undefined;
+  const nome = filters.nome ? normalizeSearchText(filters.nome) : undefined;
+  return result.rows.filter((obra) => (!codigo || normalizeSearchText(obra.codigo).includes(codigo))
+    && (!nome || normalizeSearchText(obra.nome).includes(nome)));
+}
+
+export function nextObraCodigo(codigos: string[]): string {
+  const maior = codigos.reduce((max, codigo) => {
+    const numero = Number(/^OBR([0-9]+)$/i.exec(codigo)?.[1] ?? 0);
+    return Number.isSafeInteger(numero) && numero > max ? numero : max;
+  }, 0);
+  return `OBR${String(maior + 1).padStart(3, '0')}`;
+}
+
+export async function getNextObraCodigo(): Promise<{ codigo: string }> {
+  const result = await pool.query<{ codigo: string }>("SELECT codigo FROM obras WHERE codigo ~* '^OBR[0-9]+$'");
+  return { codigo: nextObraCodigo(result.rows.map((obra) => obra.codigo)) };
 }
 
 export async function getObra(id: string): Promise<Obra> {

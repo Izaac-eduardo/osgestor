@@ -1,7 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyNatureza, mapStatus, productUnit } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
+import { normalizeSearchText } from '../src/utils/text.js';
+import { nextObraCodigo } from '../src/services/obras.service.js';
+
+test('normaliza texto de busca sem criar equivalências indevidas', () => {
+  assert.equal(normalizeSearchText('IPORA'), normalizeSearchText('IPORÃ'));
+  assert.equal(normalizeSearchText('PALMITOPOLIS'), normalizeSearchText('PALMITÓPOLIS'));
+  assert.equal(normalizeSearchText('MAMBORE'), normalizeSearchText('MAMBORÊ'));
+  assert.equal(normalizeSearchText('COAMO'), normalizeSearchText('coamo'));
+  assert.notEqual(normalizeSearchText('IPORA'), normalizeSearchText('ARARUNA'));
+});
+
+test('matching de obra usa igualdade normalizada e mantém ambiguidade segura', () => {
+  const obras = [{ id: '1', codigo: 'IPORÃ', nome: 'Obra Iporã' }, { id: '2', codigo: 'ARARUNA', nome: 'Araruna' }];
+  assert.equal(matchObraId('IPORA', obras), '1');
+  assert.equal(matchObraId('ARARUNA', obras), '2');
+  assert.equal(matchObraId('IPORA X', obras), undefined);
+});
+
+test('próximo código usa o maior OBR numérico e ignora códigos livres', () => {
+  assert.equal(nextObraCodigo(['OBR001', 'OBR002', 'OBR009', 'INTERNA', 'LOGISTICA']), 'OBR010');
+  assert.equal(nextObraCodigo(['OBR157', 'OBR159']), 'OBR160');
+});
 
 test('parser reproduz o bloco exportado pelo Poli OS', () => {
   const rows: unknown[][] = Array.from({ length: 10 }, () => Array(40).fill(null));

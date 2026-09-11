@@ -3,6 +3,7 @@ import {
   createObraController,
   deleteObraController,
   getObraController,
+  getNextObraCodigoController,
   listObrasController,
   updateObraController,
   updateObraStatusController,
@@ -11,6 +12,7 @@ import {
 export const obrasRoutes = Router();
 
 obrasRoutes.get('/', listObrasController);
+obrasRoutes.get('/proximo-codigo', getNextObraCodigoController);
 obrasRoutes.get('/:id', getObraController);
 obrasRoutes.post('/', createObraController);
 obrasRoutes.put('/:id', updateObraController);

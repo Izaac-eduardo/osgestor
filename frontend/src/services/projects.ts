@@ -1,4 +1,5 @@
 import{api}from'./api';import type{CreateProjectPayload,Project,ProjectStatus,UpdateProjectPayload}from'../types/projects'
+export async function getNextProjectCode(){const{data}=await api.get<{codigo:string}>('/obras/proximo-codigo');return data.codigo}
 export async function getProjects(){const{data}=await api.get<Project[]>('/obras');return data}
 export async function getProjectById(id:string){const{data}=await api.get<Project>(`/obras/${id}`);return data}
 export async function createProject(payload:CreateProjectPayload){const{data}=await api.post<Project>('/obras',payload);return data}
