@@ -2,6 +2,7 @@ import { pool } from '../config/database.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 export const ordemServicoCategorias = [
+  'LAVAGEM',
   'MECANICA',
   'AUTO_ELETRICA',
   'BORRACHARIA',

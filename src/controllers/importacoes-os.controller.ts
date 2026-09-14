@@ -4,6 +4,7 @@ import path from 'node:path';
 import { addPending, parsePoliOs, matchPreview, type ParsedOs } from '../imports/poli-os.js';
 import { pool } from '../config/database.js';
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
+import { SynchronizationConflictError, synchronizeOrder } from '../services/sincronizacao-os.service.js';
 
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
@@ -81,10 +82,38 @@ export async function resolve(request: Request, response: Response): Promise<voi
   if (!await saveItem(tokenOf(request), item)) { response.status(404).json({ message: notFoundMessage }); return; }
   response.json(item);
 }
+
+export async function updateExisting(request: Request, response: Response): Promise<void> {
+  const items = await loadPreview(tokenOf(request));
+  if (!items) { response.status(404).json({ message: notFoundMessage }); return; }
+  const item = items.find(x => x.numeroOs === Number(request.params.numeroOs));
+  if (!item) { response.status(404).json({ message: 'O.S. não encontrada na prévia.' }); return; }
+  try {
+    const diff = await synchronizeOrder(item);
+    item.statusPreview = 'SEM_ALTERACOES';
+    item.diff = { ...diff, estado: 'SEM_ALTERACOES' };
+    await saveItem(tokenOf(request), item);
+    response.json({ numeroOs: item.numeroOs, estado: 'SEM_ALTERACOES', diff });
+  } catch (error) { const code = error instanceof SynchronizationConflictError ? error.reason : 'FALHA'; response.status(409).json({ code, message: error instanceof Error ? error.message : 'Não foi possível atualizar a O.S.' }); }
+}
+
+export async function updateSafe(request: Request, response: Response): Promise<void> {
+  const items = await loadPreview(tokenOf(request));
+  if (!items) { response.status(404).json({ message: notFoundMessage }); return; }
+  const result = { atualizadas: 0, jaEstavamAtualizadas: items.filter(x => x.statusPreview === 'SEM_ALTERACOES').length, conflitos: 0, falhas: 0, semAlteracoes: 0, revisao: 0 };
+  for (const item of items.filter(x => x.statusPreview === 'ATUALIZACAO_DISPONIVEL' && x.diff?.podeAtualizarAutomaticamente)) {
+    try { const diff = await synchronizeOrder(item); result.atualizadas++; item.statusPreview = 'SEM_ALTERACOES'; item.diff = { ...diff, estado: 'SEM_ALTERACOES' }; await saveItem(tokenOf(request), item); }
+    catch (error) { if (error instanceof SynchronizationConflictError) result.conflitos++; else result.falhas++; }
+  }
+  result.semAlteracoes = items.filter(x => x.statusPreview === 'SEM_ALTERACOES').length;
+  result.revisao = items.filter(x => x.statusPreview === 'REQUER_REVISAO').length;
+  response.json(result);
+}
+
 export async function confirm(request: Request, response: Response): Promise<void> {
   const token = tokenOf(request), items = await loadPreview(token);
   if (!items) { response.status(404).json({ message: notFoundMessage }); return; }
-  const selected = items.filter(x=>x.statusPreview==='PRONTA');
+  const selected = items.filter(x=>x.statusPreview==='PRONTA' || x.statusPreview==='NOVA');
   const result = { importadas: 0, jaCadastradas: items.filter(x=>x.statusPreview==='JA_CADASTRADA').length, pendentes: items.length-selected.length-items.filter(x=>x.statusPreview==='JA_CADASTRADA').length, falhas: [] as Array<{numeroOs:number;motivo:string}> };
   const client=await pool.connect();
   try {

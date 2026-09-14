@@ -1,6 +1,6 @@
 export const orderStatuses=['ABERTA','EM_ANDAMENTO','AGUARDANDO_PECA','FINALIZADA','CANCELADA'] as const
 export const orderNatures=['INTERNA','TERCEIRO','MATERIAL'] as const
-export const orderCategories=['MECANICA','AUTO_ELETRICA','BORRACHARIA','LUBRIFICACAO','SOLDAGEM','FUNILARIA','HIDRAULICA','OUTROS'] as const
+export const orderCategories=['LAVAGEM','MECANICA','AUTO_ELETRICA','BORRACHARIA','LUBRIFICACAO','SOLDAGEM','FUNILARIA','HIDRAULICA','OUTROS'] as const
 export type OrderStatus=typeof orderStatuses[number]
 export type OrderNature=typeof orderNatures[number]
 export type OrderCategory=typeof orderCategories[number]

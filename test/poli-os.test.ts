@@ -1,14 +1,96 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyNatureza, classifyCategory, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
 import { consolidateExecutions, decideExecution, type ReconcileOrderContext } from '../src/services/reconciliacao-execucoes.service.js';
+import { buildOsUpdateDiff, orderUpdateSql, SynchronizationConflictError, type ExistingOsSnapshot } from '../src/services/sincronizacao-os.service.js';
+import type { ParsedOs } from '../src/imports/poli-os.js';
 
 const aTilde = String.fromCharCode(227);
 const oAcute = String.fromCharCode(211);
 const eCirc = String.fromCharCode(234);
+
+const syncCurrent = (overrides: Partial<ExistingOsSnapshot> = {}): ExistingOsSnapshot => ({
+  id: 'os-1', numeroOs: 10, obraId: 'obra-1', obra: 'Obra', frotaId: 'frota-1', frota: 'ABC', natureza: 'INTERNA', categoria: 'OUTROS', status: 'ABERTA', problema: null, dataFechamento: null, servicos: [], produtos: [], execucoes: [], ...overrides,
+});
+const syncParsed = (overrides: Partial<ParsedOs> = {}): ParsedOs => ({ numeroOs: 10, data: '2026-09-14', cliente: null, frotaOriginal: 'ABC', parecerOriginal: 'Obra', funcionarioAbertura: null, problema: null, natureza: 'INTERNA', categoriaServico: 'OUTROS', status: 'ABERTA', itens: [], execucoes: [], statusPreview: 'NOVA', pendencias: [], origem: 'teste', ...overrides });
+
+test('persistência da sincronização tipa parâmetros opcionais e evita 42P08', () => {
+  assert.match(orderUpdateSql, /status=\$1::varchar\(30\)/);
+  assert.match(orderUpdateSql, /categoria_servico=\$2::varchar\(50\)/);
+  assert.match(orderUpdateSql, /observacoes=\$3::text/);
+  assert.match(orderUpdateSql, /WHEN \$1::varchar\(30\)='FINALIZADA' AND status IS DISTINCT FROM \$1::varchar\(30\)/);
+  assert.match(orderUpdateSql, /WHERE id=\$4::uuid/);
+  const diff = buildOsUpdateDiff(syncParsed({ status: 'FINALIZADA', categoriaServico: 'BORRACHARIA', problema: null }), syncCurrent({ status: 'FINALIZADA', categoria: 'OUTROS', problema: null }));
+  assert.equal(diff.estado, 'ATUALIZACAO_DISPONIVEL');
+  assert.equal(diff.categoria?.atual, 'OUTROS');
+  assert.equal(diff.categoria?.novo, 'BORRACHARIA');
+  assert.equal(diff.status, undefined);
+});
+
+test('diff de sincronização é aditivo, seguro e idempotente', () => {
+  const parsed = syncParsed({ status: 'FINALIZADA', categoriaServico: 'MECANICA', problema: 'Troca de correia', itens: [{ descricao: 'Filtro', quantidade: 1, valorUnitario: 20, total: 20, unidade: 'UN', tipo: 'PRODUTO' }] });
+  const diff = buildOsUpdateDiff(parsed, syncCurrent());
+  assert.equal(diff.estado, 'ATUALIZACAO_DISPONIVEL');
+  assert.equal(diff.podeAtualizarAutomaticamente, true);
+  assert.equal(diff.novosProdutos.length, 1);
+  assert.equal(buildOsUpdateDiff(parsed, syncCurrent({ status: 'FINALIZADA', categoria: 'MECANICA', problema: 'Troca de correia', produtos: [{ id: 'p', descricao: 'Filtro', quantidade: 1, unidade: 'UN', valorUnitario: 20 }] })).estado, 'SEM_ALTERACOES');
+});
+
+test('diff de sincronização manda regressões e alterações de item para revisão', () => {
+  assert.equal(buildOsUpdateDiff(syncParsed({ status: 'ABERTA' }), syncCurrent({ status: 'FINALIZADA' })).estado, 'REQUER_REVISAO');
+  assert.equal(buildOsUpdateDiff(syncParsed({ categoriaServico: 'OUTROS' }), syncCurrent({ categoria: 'MECANICA' })).estado, 'REQUER_REVISAO');
+  assert.equal(buildOsUpdateDiff(syncParsed({ itens: [{ descricao: 'Filtro', quantidade: 2, valorUnitario: 20, total: 40, unidade: 'UN', tipo: 'PRODUTO' }] }), syncCurrent({ produtos: [{ id: 'p', descricao: 'Filtro', quantidade: 1, unidade: 'UN', valorUnitario: 20 }] })).estado, 'REQUER_REVISAO');
+});
+
+test('diff de sincronização reconhece execuções existentes e novas', () => {
+  const execution = { funcionarioOriginal: 'João', funcionarioId: 'func-1', inicio: '2026-09-14T08:00:00', fim: '2026-09-14T09:00:00' };
+  const current = syncCurrent({ execucoes: [{ id: 'e', funcionarioId: 'func-1', inicio: execution.inicio, fim: execution.fim, servicoOsId: null }] });
+  assert.equal(buildOsUpdateDiff(syncParsed({ execucoes: [execution] }), current).estado, 'SEM_ALTERACOES');
+  assert.equal(buildOsUpdateDiff(syncParsed({ execucoes: [{ ...execution, funcionarioId: 'func-2' }] }), current).novasExecucoes.length, 1);
+});
+
+test('diff não bloqueia categoria nula contra OUTROS nem obra/frota divergentes', () => {
+  const parsed = syncParsed({ categoriaServico: 'OUTROS', obraId: 'obra-nova', frotaId: 'frota-nova', status: 'FINALIZADA' });
+  const diff = buildOsUpdateDiff(parsed, syncCurrent({ status: 'ABERTA', categoria: null }));
+  assert.equal(diff.estado, 'ATUALIZACAO_DISPONIVEL');
+  assert.equal(diff.podeAtualizarAutomaticamente, true);
+  assert.deepEqual(diff.divergencias, []);
+  assert.deepEqual(diff.avisos.sort(), ['FROTA_DIVERGENTE_NAO_SUBSTITUIR', 'OBRA_DIVERGENTE_NAO_SUBSTITUIR']);
+});
+
+test('diff reconhece serviços operacionais equivalentes por categoria e valor', () => {
+  const cases: Array<[string, string]> = [
+    ['LUBRIFICAÇÃO', 'MAO DE OBRA LUBRIFICADOR'],
+    ['MECANICA', 'MAO DE OBRA MECANICO'],
+    ['BORRACHARIA', 'SERVICO BORRACHARIA'],
+    ['SOLDAGEM', 'MAO DE OBRA SOLDADOR'],
+    ['FUNILARIA', 'MAO DE OBRA FUNILEIRO'],
+    ['LAVAGEM', 'MAO DE OBRA LAVADOR'],
+  ];
+  for (const [currentDescription, incomingDescription] of cases) {
+    const diff = buildOsUpdateDiff(syncParsed({ itens: [{ descricao: incomingDescription, quantidade: 1, valorUnitario: 100, total: 100, unidade: 'UN', tipo: 'SERVICO' }] }), syncCurrent({ servicos: [{ id: 's', descricao: currentDescription, valor: 100 }] }));
+    assert.equal(diff.novosServicos.length, 0, incomingDescription);
+    assert.equal(diff.estado, 'SEM_ALTERACOES', incomingDescription);
+  }
+});
+
+test('diff reconhece produto equivalente UN/L, mas mantém alteração real em revisão', () => {
+  const equivalent = buildOsUpdateDiff(syncParsed({ itens: [{ descricao: 'OLEO HIDRAULICO', quantidade: 2, valorUnitario: 20, total: 40, unidade: 'L', tipo: 'PRODUTO' }] }), syncCurrent({ produtos: [{ id: 'p', descricao: 'OLEO HIDRAULICO', quantidade: 2, unidade: 'UN', valorUnitario: 20 }] }));
+  assert.equal(equivalent.estado, 'SEM_ALTERACOES');
+  assert.deepEqual(equivalent.avisos, ['PRODUTO_EQUIVALENTE_UN_L']);
+  const changed = buildOsUpdateDiff(syncParsed({ itens: [{ descricao: 'OLEO HIDRAULICO', quantidade: 3, valorUnitario: 20, total: 60, unidade: 'L', tipo: 'PRODUTO' }] }), syncCurrent({ produtos: [{ id: 'p', descricao: 'OLEO HIDRAULICO', quantidade: 2, unidade: 'UN', valorUnitario: 20 }] }));
+  assert.equal(changed.estado, 'REQUER_REVISAO');
+  assert.equal(changed.produtosAlterados.length, 1);
+});
+
+test('conflitos de sincronização possuem códigos e mensagens amigáveis', () => {
+  assert.equal(new SynchronizationConflictError('PREVIEW_DESATUALIZADO', 'A O.S. foi alterada desde a análise. Reanalise o arquivo antes de atualizar.').reason, 'PREVIEW_DESATUALIZADO');
+  assert.match(new SynchronizationConflictError('DIFF_INSEGURO', 'A atualização desta O.S. precisa de revisão antes de ser aplicada.').message, /precisa de revisão/);
+  assert.match(new SynchronizationConflictError('JA_ATUALIZADA', 'Os dados desta O.S. já foram atualizados. Reanalise o arquivo.').message, /já foram atualizados/);
+});
 
 test('normaliza texto de busca sem criar equivalências indevidas', () => {
   assert.equal(normalizeSearchText('IPORA'), normalizeSearchText(`IPOR${aTilde}`));
@@ -104,6 +186,28 @@ test('TERCEIRO sem prestador nÃ£o gera pendÃªncia de fornecedor', () => {
   const pending: string[] = [];
   addPending(pending, 'FORNECEDOR_PENDENTE');
   assert.deepEqual(pending, []);
+});
+
+test('classifica categorias de serviÃ§o por descriÃ§Ã£o normalizada', () => {
+  assert.equal(classifyCategory(['MAO DE OBRA LAVADOR']), 'LAVAGEM');
+  assert.equal(classifyCategory(['MAO DE OBRA SOLDADOR']), 'SOLDAGEM');
+  assert.equal(classifyCategory(['M'+String.fromCharCode(195)+'O DE OBRA MEC'+String.fromCharCode(194)+'NICO']), 'MECANICA');
+  assert.equal(classifyCategory(['M'+String.fromCharCode(195)+'O DE OBRA MEC'+String.fromCharCode(194)+'NICO']), 'MECANICA');
+  assert.equal(classifyCategory(['MAO DE OBRA FUNILEIRO']), 'FUNILARIA');
+  assert.equal(classifyCategory(['SERVICO BORRACHARIA']), 'BORRACHARIA');
+  assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICADOR']), 'LUBRIFICACAO');
+  assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICAR']), 'LUBRIFICACAO');
+  assert.equal(classifyCategory(['SERVICO ESPECIAL']), 'OUTROS');
+  assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO BORRACHARIA']), 'OUTROS');
+});
+
+test('mapeia cancelamento apenas em variantes explÃ­citas', () => {
+  assert.equal(mapStatus('CANCELADA'), 'CANCELADA');
+  assert.equal(mapStatus('CANCELADO'), 'CANCELADA');
+  assert.equal(mapStatus('ENCERRADA POR CANCELAMENTO'), 'CANCELADA');
+  assert.equal(mapStatus('ABERTA'), 'ABERTA');
+  assert.equal(mapStatus('FINALIZADA'), 'FINALIZADA');
+  assert.equal(mapStatus('STATUS DESCONHECIDO'), undefined);
 });
 
 const execution = (overrides: Partial<{ funcionario_original: string; inicio: string; fim: string }> = {}) => ({
