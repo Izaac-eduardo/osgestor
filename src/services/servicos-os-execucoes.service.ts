@@ -3,7 +3,8 @@ import { OrdemServicoServiceError } from './ordens-servico.service.js';
 
 export interface ExecucaoServico {
   id: string;
-  servico_os_id: string;
+  ordem_servico_id: string;
+  servico_os_id: string | null;
   funcionario_id: string;
   funcionario_nome: string;
   inicio: string;
@@ -63,7 +64,7 @@ const map = (row: ExecucaoRow): ExecucaoServico => ({
   duracao_minutos: Number(row.duracao_minutos),
 });
 
-const selectSql = `SELECT e.id, e.servico_os_id, e.funcionario_id, f.nome funcionario_nome,
+const selectSql = `SELECT e.id, e.ordem_servico_id, e.servico_os_id, e.funcionario_id, f.nome funcionario_nome,
   to_char(e.inicio, 'YYYY-MM-DD"T"HH24:MI') inicio,
   to_char(e.fim, 'YYYY-MM-DD"T"HH24:MI') fim,
   floor(extract(epoch FROM (e.fim - e.inicio)) / 60)::text duracao_minutos,
@@ -81,11 +82,33 @@ export async function listExecucoes(ordemId: string, servicoId: string): Promise
 
 export async function listExecucoesOrdem(ordemId: string): Promise<ExecucaoServico[]> {
   const result = await pool.query<ExecucaoRow>(
-    `${selectSql} JOIN servicos_os s ON s.id = e.servico_os_id
-     WHERE s.ordem_servico_id = $1 ORDER BY e.inicio, f.nome`,
+    `${selectSql}
+     WHERE e.ordem_servico_id = $1 ORDER BY e.inicio, f.nome`,
     [ordemId],
   );
   return result.rows.map(map);
+}
+
+export async function createExecucaoGeral(
+  ordemId: string,
+  body: unknown,
+): Promise<ExecucaoServico> {
+  const value = fields(body);
+  const linked = await pool.query(
+    `SELECT 1 FROM ordens_servico_funcionarios
+     WHERE ordem_servico_id = $1 AND funcionario_id = $2`,
+    [ordemId, value.funcionarioId],
+  );
+  if (!linked.rows[0]) {
+    throw new OrdemServicoServiceError(400, 'Selecione um funcionário vinculado à Ordem de Serviço.');
+  }
+  const inserted = await pool.query<{ id: string }>(
+    `INSERT INTO servicos_os_execucoes(ordem_servico_id, servico_os_id, funcionario_id, inicio, fim)
+     VALUES($1, NULL, $2, $3, $4) RETURNING id`,
+    [ordemId, value.funcionarioId, value.inicio, value.fim],
+  );
+  const result = await pool.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [inserted.rows[0]!.id]);
+  return map(result.rows[0]!);
 }
 
 async function validate(ordemId: string, servicoId: string, body: unknown) {
@@ -107,9 +130,9 @@ async function validate(ordemId: string, servicoId: string, body: unknown) {
 export async function createExecucao(ordemId: string, servicoId: string, body: unknown) {
   const value = await validate(ordemId, servicoId, body);
   const inserted = await pool.query<{ id: string }>(
-    `INSERT INTO servicos_os_execucoes(servico_os_id, funcionario_id, inicio, fim)
-     VALUES($1, $2, $3, $4) RETURNING id`,
-    [servicoId, value.funcionarioId, value.inicio, value.fim],
+    `INSERT INTO servicos_os_execucoes(ordem_servico_id, servico_os_id, funcionario_id, inicio, fim)
+     VALUES($1, $2, $3, $4, $5) RETURNING id`,
+    [ordemId, servicoId, value.funcionarioId, value.inicio, value.fim],
   );
   const result = await pool.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [inserted.rows[0]!.id]);
   return map(result.rows[0]!);

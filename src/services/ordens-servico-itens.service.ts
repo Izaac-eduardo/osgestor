@@ -71,6 +71,7 @@ export interface OrdemServicoDetalhes
   > {
   funcionarios: FuncionarioOs[];
   servicos: Array<Omit<ServicoOs, 'valor'> & { valor: number; execucoes: ExecucaoServico[] }>;
+  execucoes_gerais: ExecucaoServico[];
   produtos: Array<
     Omit<ProdutoOs, 'quantidade' | 'valor_unitario' | 'valor_total'> & {
       quantidade: number;
@@ -378,14 +379,19 @@ export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoD
     listExecucoesOrdem(id),
   ]);
   const execucoesPorServico = new Map<string, ExecucaoServico[]>();
+  const execucoesGerais: ExecucaoServico[] = [];
   for (const execucao of execucoes) {
-    const items = execucoesPorServico.get(execucao.servico_os_id) ?? [];
-    items.push(execucao);
-    execucoesPorServico.set(execucao.servico_os_id, items);
+    if (!execucao.servico_os_id) execucoesGerais.push(execucao);
+    else {
+      const items = execucoesPorServico.get(execucao.servico_os_id) ?? [];
+      items.push(execucao);
+      execucoesPorServico.set(execucao.servico_os_id, items);
+    }
   }
   return {
     ...resumo,
     funcionarios,
+    execucoes_gerais: execucoesGerais,
     servicos: servicos.map((servico) => ({
       ...servico,
       valor: numericToNumber(servico.valor, 'servicos.valor'),

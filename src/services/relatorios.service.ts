@@ -206,6 +206,7 @@ interface OrdemRelatorioRow {
   prestador_terceiro: string | null;
   data_abertura: string;
   status: string;
+  observacoes: string | null;
   total_mao_obra_interna: string;
   total_servicos_terceiros: string;
   total_produtos: string;
@@ -215,7 +216,8 @@ interface OrdemRelatorioRow {
 interface FuncionarioRelatorioRow { ordem_servico_id: string; nome: string }
 interface ServicoRelatorioRow { id: string; ordem_servico_id: string; descricao: string; valor: string }
 interface ExecucaoRelatorioRow {
-  servico_os_id: string;
+  ordem_servico_id: string;
+  servico_os_id: string | null;
   funcionario_nome: string;
   inicio: string;
   fim: string;
@@ -237,6 +239,12 @@ export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
   total_produtos: number;
   total_os: number;
   funcionarios: Array<{ nome: string }>;
+  execucoes_gerais: Array<{
+    funcionario_nome: string;
+    inicio: string;
+    fim: string;
+    duracao_minutos: number;
+  }>;
   servicos: Array<{
     id: string;
     descricao: string;
@@ -285,6 +293,7 @@ export async function getOrdensServicoRelatorio(
   const ordensResult = await pool.query<OrdemRelatorioRow>(
     `SELECT id, numero_os, obra_codigo, obra_nome, frota_codigo, natureza_os,
        categoria_servico, prestador_terceiro, data_abertura, status,
+       observacoes,
        total_mao_obra_interna, total_servicos_terceiros, total_produtos, total_os
      FROM vw_ordens_servico_resumo
      ${where}
@@ -316,14 +325,13 @@ export async function getOrdensServicoRelatorio(
       [ids],
     ),
     pool.query<ExecucaoRelatorioRow>(
-      `SELECT e.servico_os_id, f.nome funcionario_nome,
+      `SELECT e.ordem_servico_id, e.servico_os_id, f.nome funcionario_nome,
          to_char(e.inicio, 'YYYY-MM-DD"T"HH24:MI') inicio,
          to_char(e.fim, 'YYYY-MM-DD"T"HH24:MI') fim,
          floor(extract(epoch FROM (e.fim-e.inicio))/60)::text duracao_minutos
        FROM servicos_os_execucoes e
        JOIN funcionarios f ON f.id=e.funcionario_id
-       JOIN servicos_os s ON s.id=e.servico_os_id
-       WHERE s.ordem_servico_id = ANY($1::uuid[])
+       WHERE e.ordem_servico_id = ANY($1::uuid[])
        ORDER BY e.inicio, f.nome`,
       [ids],
     ),
@@ -343,9 +351,9 @@ export async function getOrdensServicoRelatorio(
   const produtos = byOrder(produtosResult.rows);
   const execucoes = new Map<string, ExecucaoRelatorioRow[]>();
   for (const execucao of execucoesResult.rows) {
-    const group = execucoes.get(execucao.servico_os_id) ?? [];
+    const group = execucoes.get(execucao.ordem_servico_id) ?? [];
     group.push(execucao);
-    execucoes.set(execucao.servico_os_id, group);
+    execucoes.set(execucao.ordem_servico_id, group);
   }
 
   return ordensResult.rows.map((ordem) => ({
@@ -355,11 +363,17 @@ export async function getOrdensServicoRelatorio(
     total_produtos: numeric(ordem.total_produtos, 'total_produtos'),
     total_os: numeric(ordem.total_os, 'total_os'),
     funcionarios: (funcionarios.get(ordem.id) ?? []).map(({ nome }) => ({ nome })),
+    execucoes_gerais: (execucoes.get(ordem.id) ?? []).filter((execucao) => !execucao.servico_os_id).map((execucao) => ({
+      funcionario_nome: execucao.funcionario_nome,
+      inicio: execucao.inicio,
+      fim: execucao.fim,
+      duracao_minutos: numeric(execucao.duracao_minutos, 'execucoes.duracao_minutos'),
+    })),
     servicos: (servicos.get(ordem.id) ?? []).map(({ id, descricao, valor }) => ({
       id,
       descricao,
       valor: numeric(valor, 'servicos.valor'),
-      execucoes: (execucoes.get(id) ?? []).map((execucao) => ({
+      execucoes: (execucoes.get(ordem.id) ?? []).filter((execucao) => execucao.servico_os_id === id).map((execucao) => ({
         funcionario_nome: execucao.funcionario_nome,
         inicio: execucao.inicio,
         fim: execucao.fim,

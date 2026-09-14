@@ -203,9 +203,6 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
   }
 
   let prestadorTerceiro = nullableText(body.prestador_terceiro, 'prestador_terceiro');
-  if (body.natureza_os === 'TERCEIRO' && prestadorTerceiro === null) {
-    throw new OrdemServicoServiceError(400, 'prestador_terceiro é obrigatório para natureza TERCEIRO.');
-  }
   if (body.natureza_os !== 'TERCEIRO') prestadorTerceiro = null;
   if (prestadorTerceiro !== null && prestadorTerceiro.length > 255) {
     throw new OrdemServicoServiceError(400, 'prestador_terceiro deve ter no máximo 255 caracteres.');

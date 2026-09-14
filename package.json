@@ -15,7 +15,8 @@
     "check:frotas": "tsc -p database/tsconfig.json",
     "test:frotas:cli": "tsx --test database/tests/frotas.cli.test.ts",
     "test:imports": "tsx --test test/poli-os.test.ts",
-    "diagnose:os": "tsx scripts/diagnostico-poli-os.ts"
+    "diagnose:os": "tsx scripts/diagnostico-poli-os.ts",
+    "reconcile:execucoes": "tsx scripts/reconcile-execucoes.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

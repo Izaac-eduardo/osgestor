@@ -23,6 +23,15 @@ test('migration e importação preservam O.S., unicidade, zeros e idempotência 
     const prefix = (await client.query("INSERT INTO prefixos_frota(codigo,status) VALUES ('CT','INATIVO') RETURNING id")).rows[0].id;
     const obra = (await client.query("INSERT INTO obras(codigo,nome) VALUES ('TESTE','Obra de teste') RETURNING id")).rows[0].id;
     const os = (await client.query("INSERT INTO ordens_servico(numero_os,obra_id,prefixo_frota_id,frota_numero,natureza_os,data_abertura) VALUES (1,$1,$2,4,'INTERNA',CURRENT_DATE) RETURNING *", [obra, prefix])).rows[0];
+    const employee = (await client.query("INSERT INTO funcionarios(nome,status) VALUES ('Técnico teste','ATIVO') RETURNING id")).rows[0].id;
+    const service = (await client.query("INSERT INTO servicos_os(ordem_servico_id,descricao,valor) VALUES ($1,'Serviço teste',10) RETURNING id", [os.id])).rows[0].id;
+    await client.query('INSERT INTO ordens_servico_funcionarios(ordem_servico_id,funcionario_id) VALUES ($1,$2)', [os.id, employee]);
+    const oldExecution = (await client.query("INSERT INTO servicos_os_execucoes(servico_os_id,funcionario_id,inicio,fim) VALUES ($1,$2,'2026-01-01 08:00','2026-01-01 09:00') RETURNING id", [service, employee])).rows[0].id;
+    await migration('007_execucoes_gerais_os.sql');
+    const backfilled = (await client.query('SELECT ordem_servico_id,servico_os_id FROM servicos_os_execucoes WHERE id=$1', [oldExecution])).rows[0];
+    assert.equal(backfilled.ordem_servico_id, os.id); assert.equal(backfilled.servico_os_id, service);
+    const general = (await client.query("INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim) VALUES ($1,NULL,$2,'2026-01-02 08:00','2026-01-02 09:00') RETURNING servico_os_id", [os.id, employee])).rows[0];
+    assert.equal(general.servico_os_id, null);
     await migration('003_create_frotas.sql');
     await migration('004_validate_frotas_prefixos.sql');
     assert.deepEqual((await client.query('SELECT * FROM ordens_servico WHERE id=$1', [os.id])).rows[0], os);
