@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyNatureza, classifyCategory, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
@@ -216,6 +216,23 @@ test('mapeia cancelamento apenas em variantes explÃ­citas', () => {
   assert.equal(mapStatus('ABERTA'), 'ABERTA');
   assert.equal(mapStatus('FINALIZADA'), 'FINALIZADA');
   assert.equal(mapStatus('STATUS DESCONHECIDO'), undefined);
+});
+
+test('classifica eletricista como ELETRICA somente em TERCEIRO', () => {
+  for (const description of ['MAO DE OBRA ELETRICISTA', 'MÃO DE OBRA ELETRICISTA', 'MAO DE OBRA - ELETRICISTA']) {
+    assert.equal(classifyCategoryWithNatureza([description], 'TERCEIRO'), 'ELETRICA');
+    assert.equal(classifyCategoryWithNatureza([description], 'INTERNA'), 'OUTROS');
+  }
+  assert.equal(classifyNatureza(null, null, 'TERCEIRO MAO DE OBRA ELETRICISTA', true, false), 'TERCEIRO');
+});
+
+test('sincroniza TERCEIRO OUTROS para ELETRICA com segurança', () => {
+  const parsed = syncParsed({ natureza: 'TERCEIRO', categoriaServico: 'ELETRICA', itens: [{ descricao: 'MAO DE OBRA ELETRICISTA', quantidade: 1, valorUnitario: 100, total: 100, unidade: 'UN', tipo: 'SERVICO' }] });
+  const safe = buildOsUpdateDiff(parsed, syncCurrent({ natureza: 'TERCEIRO', categoria: 'OUTROS' }));
+  assert.equal(safe.estado, 'ATUALIZACAO_DISPONIVEL');
+  assert.equal(safe.podeAtualizarAutomaticamente, true);
+  assert.deepEqual(safe.categoria, { atual: 'OUTROS', novo: 'ELETRICA' });
+  assert.equal(buildOsUpdateDiff(parsed, syncCurrent({ natureza: 'TERCEIRO', categoria: 'MECANICA' })).estado, 'REQUER_REVISAO');
 });
 
 const execution = (overrides: Partial<{ funcionario_original: string; inicio: string; fim: string }> = {}) => ({

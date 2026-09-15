@@ -6,6 +6,7 @@ export const ordemServicoCategorias = [
   'LAVAGEM',
   'MECANICA',
   'AUTO_ELETRICA',
+  'ELETRICA',
   'BORRACHARIA',
   'LUBRIFICACAO',
   'SOLDAGEM',
