@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { addPending, findFleetId, parsePoliOs, classifyNatureza, classifyCategory, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
+import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
 import { consolidateExecutions, decideExecution, type ReconcileOrderContext } from '../src/services/reconciliacao-execucoes.service.js';
 import { buildOsUpdateDiff, orderUpdateSql, SynchronizationConflictError, type ExistingOsSnapshot } from '../src/services/sincronizacao-os.service.js';
@@ -199,6 +200,13 @@ test('classifica categorias de serviÃ§o por descriÃ§Ã£o normalizada', () =
   assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICAR']), 'LUBRIFICACAO');
   assert.equal(classifyCategory(['SERVICO ESPECIAL']), 'OUTROS');
   assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO BORRACHARIA']), 'OUTROS');
+});
+
+test('normaliza filtro de frota sem fazer fuzzy matching', () => {
+  assert.equal(normalizeFleetCode(' ct32 '), 'CT32');
+  assert.equal(normalizeFleetCode('OFICINA'), 'OFICINA');
+  assert.notEqual(normalizeFleetCode('CT'), 'CT32');
+  assert.equal(normalizeFleetCode('frota inexistente'), 'FROTAINEXISTENTE');
 });
 
 test('mapeia cancelamento apenas em variantes explÃ­citas', () => {

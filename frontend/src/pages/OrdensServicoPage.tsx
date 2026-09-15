@@ -217,8 +217,7 @@ export function OrdensServicoPage() {
         filters={draft}
         setFilters={setDraft}
         projects={projects}
-        prefixes={prefixes}
-        loadingOptions={!projects.length || !prefixes.length}
+        loadingOptions={!projects.length}
         onSubmit={() => setFilters({ ...draft })}
         onClear={clear}
       />

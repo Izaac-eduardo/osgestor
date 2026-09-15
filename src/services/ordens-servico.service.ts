@@ -1,4 +1,5 @@
 import { pool } from '../config/database.js';
+import { normalizeFleetCode } from '../utils/frotas.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 export const ordemServicoCategorias = [
@@ -76,6 +77,7 @@ export interface OrdemServicoFilters {
   prefixo_frota_id?: string;
   numero_os?: string;
   frota_numero?: string;
+  frota_codigo?: string;
   data_inicio?: string;
   data_fim?: string;
 }
@@ -294,6 +296,11 @@ export async function listOrdensServico(filters: OrdemServicoFilters): Promise<O
   if (filters.numero_os !== undefined) addCondition('numero_os', filterPositiveInteger(filters.numero_os, 'numero_os'));
   if (filters.frota_numero !== undefined) {
     addCondition('frota_numero', filterPositiveInteger(filters.frota_numero, 'frota_numero', 2147483647));
+  }
+  if (filters.frota_codigo !== undefined) {
+    const code = normalizeFleetCode(filters.frota_codigo);
+    if (!code) throw new OrdemServicoServiceError(400, 'frota_codigo deve ser informado.');
+    addCondition('frota_codigo', code);
   }
   if (filters.data_inicio !== undefined) {
     conditions.push(`data_abertura >= $${values.length + 1}`);

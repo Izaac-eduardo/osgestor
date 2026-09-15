@@ -41,6 +41,7 @@ export async function listOrdensServicoController(request: Request, response: Re
       prefixo_frota_id: queryText(request.query.prefixo_frota_id),
       numero_os: queryText(request.query.numero_os),
       frota_numero: queryText(request.query.frota_numero),
+      frota_codigo: queryText(request.query.frota_codigo),
       data_inicio: queryText(request.query.data_inicio),
       data_fim: queryText(request.query.data_fim),
     });

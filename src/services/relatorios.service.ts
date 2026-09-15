@@ -1,4 +1,5 @@
 import { pool } from '../config/database.js';
+import { normalizeFleetCode } from '../utils/frotas.js';
 import {
   ordemServicoCategorias,
   ordemServicoNaturezas,
@@ -9,6 +10,7 @@ export interface RelatorioFilters {
   obra_id?: string;
   prefixo_frota_id?: string;
   frota_numero?: string;
+  frota_codigo?: string;
   data_inicio?: string;
   data_fim?: string;
   natureza_os?: string;
@@ -140,6 +142,9 @@ const validateFilters = (filters: RelatorioFilters, allowed: readonly FilterName
       throw new RelatorioServiceError(400, 'frota_numero deve ser um inteiro positivo válido.');
     }
   }
+  if (accepts('frota_codigo') && filters.frota_codigo !== undefined && !normalizeFleetCode(filters.frota_codigo)) {
+    throw new RelatorioServiceError(400, 'frota_codigo deve ser informado.');
+  }
 };
 
 const buildWhere = (
@@ -161,6 +166,7 @@ const buildWhere = (
   if (allowed.includes('frota_numero') && filters.frota_numero !== undefined) {
     add('frota_numero', Number(filters.frota_numero));
   }
+  if (allowed.includes('frota_codigo') && filters.frota_codigo !== undefined) add('frota_codigo', normalizeFleetCode(filters.frota_codigo));
   if (allowed.includes('natureza_os') && filters.natureza_os !== undefined) {
     add('natureza_os', filters.natureza_os);
   }
@@ -286,7 +292,7 @@ export async function getOrdensServicoRelatorio(
   filters: RelatorioFilters,
 ): Promise<OrdemServicoRelatorio[]> {
   const allowed: FilterName[] = [
-    'obra_id', 'prefixo_frota_id', 'frota_numero', 'data_inicio', 'data_fim',
+    'obra_id', 'prefixo_frota_id', 'frota_numero', 'frota_codigo', 'data_inicio', 'data_fim',
     'natureza_os', 'categoria_servico', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed);
@@ -391,7 +397,7 @@ export async function getOrdensServicoRelatorio(
 }
 export async function getGastosPorVeiculo(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'obra_id', 'prefixo_frota_id', 'frota_numero', 'data_inicio', 'data_fim',
+    'obra_id', 'prefixo_frota_id', 'frota_numero', 'frota_codigo', 'data_inicio', 'data_fim',
     'natureza_os', 'categoria_servico',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
@@ -423,7 +429,7 @@ export async function getGastosPorVeiculo(filters: RelatorioFilters) {
 
 export async function getGastosPorObra(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'obra_id', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico',
+    'obra_id', 'frota_codigo', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
   const result = await pool.query<GastosObraRow>(
@@ -452,7 +458,7 @@ export async function getGastosPorObra(filters: RelatorioFilters) {
 
 export async function getOsPorSemana(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'data_inicio', 'data_fim', 'obra_id', 'status', 'natureza_os', 'categoria_servico',
+    'data_inicio', 'data_fim', 'obra_id', 'frota_codigo', 'status', 'natureza_os', 'categoria_servico',
   ];
   const { where, values } = buildWhere(filters, allowed);
   const result = await pool.query<OsSemanaRow>(
