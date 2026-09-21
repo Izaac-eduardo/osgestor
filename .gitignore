@@ -8,5 +8,11 @@ build/
 
 *.log
 
+# Operational workbooks are supplied outside the repository and must not be versioned.
+/TERCEIROS.xlsx
+/ABAST0103.XLS
+/abast0104.xlsx
+/ABAST0312.xlsx
+
 .DS_Store
 Thumbs.db

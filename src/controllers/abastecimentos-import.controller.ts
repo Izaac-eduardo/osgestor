@@ -1,0 +1,11 @@
+import type { Request, Response } from 'express';
+import { analyzePoliFrota, AbastecimentoImportError, confirmImportSafe, getImportacao, resolveBatch, resolveItem } from '../services/abastecimentos-import.service.js';
+
+const sendError = (response: Response, error: unknown): void => { if (error instanceof AbastecimentoImportError) { response.status(error.statusCode).json({ message: error.message }); return; } console.error('Erro interno na importação PoliFrota.'); response.status(500).json({ message: 'Erro interno do servidor.' }); };
+const routeId = (value: string | string[] | undefined, field: string): string => { if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new AbastecimentoImportError(400, `${field} deve ser um UUID válido.`); return value; };
+
+export async function analyzePoliFrotaController(request: Request, response: Response): Promise<void> { try { const file = (request as Request & { file?: { buffer: Buffer; originalname: string } }).file; if (!file) { response.status(400).json({ message: 'Envie um arquivo XLS ou XLSX no campo arquivo.' }); return; } response.status(201).json(await analyzePoliFrota(file.buffer, file.originalname)); } catch (error) { sendError(response, error); } }
+export async function getImportacaoController(request: Request, response: Response): Promise<void> { try { response.json(await getImportacao(routeId(request.params.id, 'id'))); } catch (error) { sendError(response, error); } }
+export async function resolveItemController(request: Request, response: Response): Promise<void> { try { response.json(await resolveItem(routeId(request.params.id, 'importacao_id'), routeId(request.params.itemId, 'item_id'), request.body)); } catch (error) { sendError(response, error); } }
+export async function resolveBatchController(request: Request, response: Response): Promise<void> { try { response.json(await resolveBatch(routeId(request.params.id, 'importacao_id'), request.body)); } catch (error) { sendError(response, error); } }
+export async function confirmImportController(request: Request, response: Response): Promise<void> { try { response.json(await confirmImportSafe(routeId(request.params.id, 'importacao_id'), request.body)); } catch (error) { sendError(response, error); } }

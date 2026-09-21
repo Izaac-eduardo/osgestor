@@ -1,0 +1,15 @@
+import { useEffect, useState } from 'react'
+import axios from 'axios'
+import { createTerceiroIdentificacao, deleteTerceiroIdentificacao, getTerceiroIdentificacoes, getTerceiros } from '../../services/abastecimentos'
+import type { IdentificacaoTerceiro, IdentificacaoTerceiroTipo, Terceiro } from '../../types/abastecimentos'
+
+const message = (error: unknown) => axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message || 'Não foi possível concluir a operação.' : 'Não foi possível concluir a operação.'
+
+export function IdentificacoesAdministracao() {
+  const [thirds, setThirds] = useState<Terceiro[]>([]); const [selected, setSelected] = useState(''); const [items, setItems] = useState<IdentificacaoTerceiro[]>([]); const [value, setValue] = useState(''); const [tipo, setTipo] = useState<IdentificacaoTerceiroTipo>('PLACA'); const [error, setError] = useState('')
+  useEffect(() => { void getTerceiros({ status: 'ATIVO' }).then(list => { setThirds(list); if (list[0]) setSelected(list[0].id) }).catch(e => setError(message(e))) }, [])
+  useEffect(() => { if (!selected) { setItems([]); return } void getTerceiroIdentificacoes(selected).then(setItems).catch(e => setError(message(e))) }, [selected])
+  const add = async () => { if (!selected || !value.trim()) return; try { const item = await createTerceiroIdentificacao(selected, { identificacao: value.trim(), tipo, status: 'ATIVO' }); setItems([...items, item]); setValue('') } catch (e) { setError(message(e)) } }
+  const remove = async (id: string) => { try { await deleteTerceiroIdentificacao(selected, id); setItems(items.filter(item => item.id !== id)) } catch (e) { setError(message(e)) } }
+  return <section className="projects-results"><header><h2>Identificações de terceiros</h2><p>Placas, códigos e identificações gerais, sem criar frota interna.</p></header><div className="form-grid"><label className="form-field">Terceiro<select value={selected} onChange={event => setSelected(event.target.value)}>{thirds.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label><label className="form-field">Nova identificação<input value={value} onChange={event => setValue(event.target.value)} placeholder="Ex.: PLANURB, RT01 ou ABC1D23" /></label><label className="form-field">Tipo<select value={tipo} onChange={event => setTipo(event.target.value as IdentificacaoTerceiroTipo)}><option value="PLACA">Placa</option><option value="FROTA_EXTERNA">Frota externa</option><option value="GERAL">Geral</option><option value="CODIGO">Código</option><option value="OUTRO">Outro</option></select></label><button className="button button--secondary" type="button" onClick={() => void add()}>Adicionar</button></div>{items.length ? <ul>{items.map(item => <li key={item.id}><strong>{item.identificacao}</strong> — {item.tipo} — {item.status} <button className="button-link button-link--danger" type="button" onClick={() => void remove(item.id)}>Remover</button></li>)}</ul> : <p className="abastecimento-muted">Nenhuma identificação para o terceiro selecionado.</p>}{error && <p className="form-api-error" role="alert">{error}</p>}</section>
+}
