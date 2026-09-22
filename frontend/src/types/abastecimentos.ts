@@ -88,6 +88,11 @@ export interface EntradaFilters {
 export interface AbastecimentoHistoricoItem {
   id: string
   data_hora: string
+  produto_id: string
+  obra_id: string
+  frota_id: string | null
+  terceiro_id: string | null
+  destinacao_especial_id: string | null
   tipo_destinatario: DestinatarioTipo
   destinatario: string | null
   placa: string | null
@@ -120,6 +125,9 @@ export interface AbastecimentoHistoricoResponse {
   items: AbastecimentoHistoricoItem[]
   summary: { quantidade: number; total_litros: number; total_valor: number }
   pagination: { page: number; limit: number; total: number; total_pages: number }
+}
+export interface AbastecimentoHistoricoEditPayload {
+  data_hora: string; produto_id: string; obra_id: string; tipo_destinatario: DestinatarioTipo; frota_id: string | null; terceiro_id: string | null; destinacao_especial_id: string | null; identificacao_original: string | null; placa_original: string | null; frota_original: string | null; litros: number; valor_total: number; km_hr: number | null; horimetro: number | null; bico_codigo_original: string | null; bico_descricao_original: string | null; frentista_original: string | null
 }
 
 export interface AbastecimentosRelatorioResponse {

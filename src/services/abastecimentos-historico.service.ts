@@ -80,7 +80,7 @@ export async function listAbastecimentosHistorico(filters: HistoricoFilters = {}
   const summaryResult = await pool.query<{ quantidade: string; total_litros: string | null; total_valor: string | null }>(`SELECT COUNT(*)::text AS quantidade, COALESCE(SUM(a.litros), 0)::text AS total_litros, COALESCE(SUM(a.valor_total), 0)::text AS total_valor ${fromClause} ${where}`, values);
   const itemValues = [...values, String(limit), String(offset)];
   const items = await pool.query(`
-    SELECT a.id, a.data_hora, a.tipo_destinatario, a.identificador_externo, a.identificacao_original,
+    SELECT a.id, a.data_hora, a.produto_id, a.obra_id, a.frota_id, a.terceiro_id, a.destinacao_especial_id, a.tipo_destinatario, a.identificador_externo, a.identificacao_original,
       a.placa_original, a.frota_original, a.litros, a.valor_total, a.km_hr, a.horimetro,
       a.bico_codigo_original, a.bico_descricao_original, a.frentista_original, a.origem_sistema,
       p.codigo AS produto_codigo, o.nome AS obra_nome, f.codigo AS frota_codigo,

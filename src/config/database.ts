@@ -1,4 +1,7 @@
 import { Pool } from 'pg';
+import { assertSafeIntegrationDatabase } from './test-database-guard.js';
+
+assertSafeIntegrationDatabase();
 
 const databasePort = Number(process.env.DB_PORT ?? 5432);
 if (!Number.isInteger(databasePort) || databasePort <= 0) {
