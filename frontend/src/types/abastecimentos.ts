@@ -116,4 +116,6 @@ export interface PoliFrotaPreviewItem {
   destinacao_especial_id: string | null
   pendencias: { obra: boolean; destinatario: boolean; motivos: string[] }
 }
-export interface ImportacaoPreview { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; counts: Record<string, number>; items: PoliFrotaPreviewItem[] }
+export interface ImportacaoCounts { total: number; prontos: number; pendentes: number; pendentesObra: number; pendentesDestinatario: number; foraEscopo: number; erros: number; jaImportados: number; importados: number }
+export interface ImportacaoPreview { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; counts: ImportacaoCounts; items: PoliFrotaPreviewItem[] }
+export interface ImportacaoEmAndamento { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; created_at: string; counts: ImportacaoCounts }

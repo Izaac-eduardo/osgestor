@@ -9,6 +9,7 @@ export type DestinatarioTipo = 'FROTA' | 'TERCEIRO' | 'EXTERNA' | 'ESPECIAL';
 export interface ImportacaoContext { frotas: Array<{ id: string; codigo: string; placa: string | null; status: string }>; terceiroIdentificacoes?: Array<{ terceiro_id: string; identificacao_normalizada: string; status: string }>; produtoIds: Record<string, string>; especialId: string | null; importedIds: Set<string>; duplicateIds: Set<string> }
 export interface PreviewResolution { obra_id: string | null; tipo_destinatario: DestinatarioTipo | null; frota_id: string | null; terceiro_id: string | null; destinacao_especial_id: string | null }
 export interface PreviewItem extends PreviewResolution { id?: string; identificador_externo: string; data_hora: string | null; data_hora_original: string | null; placa_original: string | null; frota_original: string | null; litros: number | null; valor_total: number | null; km_hr: number | null; km_hr_status: string; horimetro: number | null; horimetro_status: string; bico_codigo_original: string | null; bico_descricao_original: string | null; frentista_original: string | null; linha_original: number; planilha_original: string; produto_detectado: PoliFrotaProduto; produto_id: string | null; identificacao_original: string; payload_original: Record<string, unknown>; status_preview: PreviewStatus; pendencias: { obra: boolean; destinatario: boolean; motivos: string[] } }
+export interface ImportacaoEmAndamento { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; created_at: string; counts: ReturnType<typeof counts> }
 
 export class AbastecimentoImportError extends Error { constructor(public readonly statusCode: 400 | 404 | 409, message: string) { super(message); this.name = 'AbastecimentoImportError'; } }
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,9 +79,11 @@ async function importContext(): Promise<ImportacaoContext> {
 
 const rowFromItem = (row: PreviewItem): Record<string, unknown> => ({ ...row, payload_normalizado: { ...row, resolucao: resolutionOf(row) } });
 const itemFromDb = (row: Record<string, any>): PreviewItem => ({ ...(row.payload_normalizado as PreviewItem), id: row.id, status_preview: row.status_preview, pendencias: row.pendencias });
-const counts = (items: PreviewItem[]) => ({ total: items.length, prontos: items.filter(item => item.status_preview === 'PRONTO').length, pendentesObra: items.filter(item => item.status_preview === 'PENDENTE_OBRA' && item.pendencias.destinatario === false).length, pendentesDestinatario: items.filter(item => item.status_preview === 'PENDENTE_DESTINATARIO' || item.pendencias.destinatario).length, foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length, erros: items.filter(item => item.status_preview === 'ERRO').length, jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length, importados: items.filter(item => item.status_preview === 'IMPORTADO').length });
+const counts = (items: PreviewItem[]) => ({ total: items.length, prontos: items.filter(item => item.status_preview === 'PRONTO').length, pendentesObra: items.filter(item => item.status_preview === 'PENDENTE_OBRA' && item.pendencias.destinatario === false).length, pendentesDestinatario: items.filter(item => item.status_preview === 'PENDENTE_DESTINATARIO' || item.pendencias.destinatario).length, foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length, erros: items.filter(item => item.status_preview === 'ERRO').length, jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length, importados: items.filter(item => item.status_preview === 'IMPORTADO').length, pendentes: items.filter(item => !['PRONTO', 'IMPORTADO', 'JA_IMPORTADO'].includes(item.status_preview)).length });
 
-export async function analyzePoliFrota(buffer: Buffer, filename: string) {
+export async function analyzePoliFrota(buffer: Buffer, filename: string, allowDuplicate = false) {
+  const arquivoSha256 = hash(buffer); const existing = await pool.query<{ id: string; arquivo_nome: string; status: string; created_at: string }>("SELECT id,arquivo_nome,status,created_at FROM abastecimento_importacoes WHERE arquivo_sha256=$1 AND status IN ('ANALISANDO','PREVIA','ERRO') ORDER BY created_at DESC LIMIT 1", [arquivoSha256]);
+  if (existing.rows[0] && !allowDuplicate) throw new AbastecimentoImportError(409, JSON.stringify({ code: 'IMPORTACAO_EM_ANDAMENTO', preview: existing.rows[0] }));
   const rows = parsePoliFrotaAbastecimentos(buffer, filename); const ids = new Map<string, number>(); for (const row of rows) ids.set(row.identificadorExterno, (ids.get(row.identificadorExterno) ?? 0) + 1);
   const context = await importContext(); context.duplicateIds = new Set([...ids.entries()].filter(([, count]) => count > 1).map(([id]) => id));
   const items = rows.map(row => buildPreviewItem(row, context)); const client = await pool.connect(); const importId = randomUUID();
@@ -91,6 +94,15 @@ export async function analyzePoliFrota(buffer: Buffer, filename: string) {
 }
 
 export async function getImportacao(id: string) { const importId = uuid(id, 'id'); const header = await pool.query('SELECT id,arquivo_nome,arquivo_sha256,origem_sistema,status,parser_versao,created_at,finalizada_at FROM abastecimento_importacoes WHERE id=$1', [importId]); if (!header.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.'); const rows = await pool.query('SELECT id,status_preview,pendencias,payload_normalizado FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original,id', [importId]); const items = rows.rows.map(itemFromDb); return { ...header.rows[0], counts: counts(items), items };
+}
+
+export async function listImportacoesEmAndamento(): Promise<ImportacaoEmAndamento[]> {
+  const headers = await pool.query<{ id: string; arquivo_nome: string; arquivo_sha256: string; status: string; created_at: string }>("SELECT id,arquivo_nome,arquivo_sha256,status,created_at FROM abastecimento_importacoes WHERE origem_sistema='POLIFROTA' AND status IN ('ANALISANDO','PREVIA','ERRO') ORDER BY created_at DESC");
+  if (!headers.rows.length) return [];
+  const items = await pool.query<{ importacao_id: string; status_preview: PreviewStatus; pendencias: PreviewItem['pendencias']; payload_normalizado: Record<string, unknown> }>('SELECT importacao_id,status_preview,pendencias,payload_normalizado FROM abastecimento_importacao_itens WHERE importacao_id=ANY($1::uuid[]) ORDER BY linha_original,id', [headers.rows.map(row => row.id)]);
+  const grouped = new Map<string, PreviewItem[]>();
+  for (const item of items.rows) { const list = grouped.get(item.importacao_id) ?? []; list.push(itemFromDb(item)); grouped.set(item.importacao_id, list); }
+  return headers.rows.map(header => ({ ...header, counts: counts(grouped.get(header.id) ?? []) }));
 }
 
 async function validateResolution(client: PoolClient, body: Record<string, unknown>, current: PreviewItem): Promise<PreviewResolution> {

@@ -1,7 +1,8 @@
 import { api } from './api'
-import type { DestinatarioTipo, ImportacaoPreview, PoliFrotaPreviewItem } from '../types/abastecimentos'
+import type { DestinatarioTipo, ImportacaoEmAndamento, ImportacaoPreview, PoliFrotaPreviewItem } from '../types/abastecimentos'
 
-export const analyzePoliFrota = async (file: File) => { const data = new FormData(); data.append('arquivo', file); return (await api.post<ImportacaoPreview>('/abastecimento/importacoes/polifrota/analisar', data)).data }
+export const analyzePoliFrota = async (file: File, novaAnalise = false) => { const data = new FormData(); data.append('arquivo', file); return (await api.post<ImportacaoPreview>(`/abastecimento/importacoes/polifrota/analisar${novaAnalise ? '?nova_analise=true' : ''}`, data)).data }
+export const getImportacoesEmAndamento = async () => (await api.get<ImportacaoEmAndamento[]>('/abastecimento/importacoes/polifrota/em-andamento')).data
 export const getImportacaoPreview = async (id: string) => (await api.get<ImportacaoPreview>(`/abastecimento/importacoes/${id}`)).data
 export const resolvePreviewItem = async (importId: string, itemId: string, resolution: Record<string, string | null>) => (await api.patch<PoliFrotaPreviewItem>(`/abastecimento/importacoes/${importId}/itens/${itemId}`, resolution)).data
 export const resolvePreviewBatch = async (importId: string, item_ids: string[], resolution: Record<string, string | null>) => (await api.post<PoliFrotaPreviewItem[]>(`/abastecimento/importacoes/${importId}/resolver-lote`, { item_ids, ...resolution })).data
