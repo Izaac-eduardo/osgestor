@@ -85,6 +85,43 @@ export interface EntradaFilters {
   ponto_id?: string
 }
 
+export interface AbastecimentoHistoricoItem {
+  id: string
+  data_hora: string
+  tipo_destinatario: DestinatarioTipo
+  destinatario: string | null
+  placa: string | null
+  produto_codigo: string
+  litros: number
+  valor_total: number
+  km_hr: number | null
+  horimetro: number | null
+  bico_codigo_original: string | null
+  bico_descricao_original: string | null
+  frentista_original: string | null
+  identificador_externo: string
+  identificacao_original: string
+  origem_sistema: string
+  obra_nome: string
+}
+
+export interface AbastecimentoHistoricoFilters {
+  data_inicio?: string
+  data_fim?: string
+  obra_id?: string
+  busca?: string
+  produto?: string
+  tipo_destinatario?: DestinatarioTipo
+  page?: number
+  limit?: 25 | 50 | 100
+}
+
+export interface AbastecimentoHistoricoResponse {
+  items: AbastecimentoHistoricoItem[]
+  summary: { quantidade: number; total_litros: number; total_valor: number }
+  pagination: { page: number; limit: number; total: number; total_pages: number }
+}
+
 export type PreviewStatus = 'PRONTO' | 'PENDENTE_OBRA' | 'PENDENTE_DESTINATARIO' | 'FORA_ESCOPO' | 'JA_IMPORTADO' | 'ERRO' | 'IMPORTADO'
 export type DestinatarioTipo = 'FROTA' | 'TERCEIRO' | 'EXTERNA' | 'ESPECIAL'
 export interface PoliFrotaPreviewItem {
