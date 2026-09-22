@@ -140,7 +140,7 @@ export interface AbastecimentosRelatorioResponse {
   evolucao: Array<{ data: string; quantidade: number; litros: number; valor: number }>
 }
 
-export type PreviewStatus = 'PRONTO' | 'PENDENTE_OBRA' | 'PENDENTE_DESTINATARIO' | 'FORA_ESCOPO' | 'JA_IMPORTADO' | 'ERRO' | 'IMPORTADO'
+export type PreviewStatus = 'PRONTO' | 'PENDENTE_OBRA' | 'PENDENTE_DESTINATARIO' | 'FORA_ESCOPO' | 'JA_IMPORTADO' | 'SUBSTITUICAO' | 'SUBSTITUICAO_JA_REGISTRADA' | 'ERRO' | 'IMPORTADO'
 export type DestinatarioTipo = 'FROTA' | 'TERCEIRO' | 'EXTERNA' | 'ESPECIAL'
 export interface PoliFrotaPreviewItem {
   id: string
@@ -169,8 +169,12 @@ export interface PoliFrotaPreviewItem {
   frota_id: string | null
   terceiro_id: string | null
   destinacao_especial_id: string | null
+  substituicao_abastecimento_id: string | null
+  substituicao_origem_sistema: string | null
+  substituicao_identificador_principal: string | null
   pendencias: { obra: boolean; destinatario: boolean; motivos: string[] }
 }
-export interface ImportacaoCounts { total: number; prontos: number; pendentes: number; pendentesObra: number; pendentesDestinatario: number; foraEscopo: number; erros: number; jaImportados: number; importados: number }
+export interface ImportacaoCounts { total: number; prontos: number; pendentes: number; pendentesObra: number; pendentesDestinatario: number; foraEscopo: number; erros: number; jaImportados: number; substituicoes: number; substituicoesJaRegistradas: number; importados: number }
 export interface ImportacaoPreview { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; counts: ImportacaoCounts; items: PoliFrotaPreviewItem[] }
 export interface ImportacaoEmAndamento { id: string; arquivo_nome: string; arquivo_sha256: string; status: string; created_at: string; counts: ImportacaoCounts }
+export interface SubstituicaoAlvo { id: string; identificador_externo: string; origem_sistema: string; data_hora: string; frota: string | null; placa: string | null; produto: string; litros: number; valor_total: number; km_hr: number | null; horimetro: number | null; bico: string | null; obra: string; destinatario: string }

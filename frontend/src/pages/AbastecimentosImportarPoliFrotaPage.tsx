@@ -1,54 +1,1096 @@
-import { useEffect, useMemo, useState } from 'react'
-import axios from 'axios'
-import { Check, ChevronDown, FileSpreadsheet, LoaderCircle, Search, Upload } from 'lucide-react'
-import { ConfirmDialog } from '../components/ConfirmDialog'
-import { OrdersLoading } from '../components/orders/OrdersLoading'
-import { PageHeader } from '../components/PageHeader'
-import { getDestinacoesEspeciais, getTerceiros } from '../services/abastecimentos'
-import { analyzePoliFrota, confirmPreview, getImportacaoPreview, getImportacoesEmAndamento, resolvePreviewBatch, resolvePreviewItem, type PreviewResolution } from '../services/abastecimentos-import'
-import { getFleets } from '../services/fleets'
-import { getProjects } from '../services/projects'
-import type { DestinacaoEspecial, DestinatarioTipo, ImportacaoEmAndamento, ImportacaoPreview, PoliFrotaPreviewItem, Terceiro } from '../types/abastecimentos'
-import type { Fleet } from '../types/fleets'
-import type { Project } from '../types/projects'
-import { formatDestinationLabel } from '../utils/abastecimentos-import-labels'
-import { formatCurrency, formatQuantity } from '../utils/formatters'
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import {
+  Check,
+  ChevronDown,
+  FileSpreadsheet,
+  LoaderCircle,
+  Search,
+  Upload,
+} from "lucide-react";
+import { SubstitutionModal } from "../components/abastecimentos/SubstitutionModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { OrdersLoading } from "../components/orders/OrdersLoading";
+import { PageHeader } from "../components/PageHeader";
+import {
+  getDestinacoesEspeciais,
+  getTerceiros,
+} from "../services/abastecimentos";
+import {
+  analyzePoliFrota,
+  confirmPreview,
+  getImportacaoPreview,
+  getImportacoesEmAndamento,
+  removeSubstitution,
+  resolvePreviewBatch,
+  resolvePreviewItem,
+  type PreviewResolution,
+} from "../services/abastecimentos-import";
+import { getFleets } from "../services/fleets";
+import { getProjects } from "../services/projects";
+import type {
+  DestinacaoEspecial,
+  DestinatarioTipo,
+  ImportacaoEmAndamento,
+  ImportacaoPreview,
+  PoliFrotaPreviewItem,
+  Terceiro,
+} from "../types/abastecimentos";
+import type { Fleet } from "../types/fleets";
+import type { Project } from "../types/projects";
+import { formatDestinationLabel } from "../utils/abastecimentos-import-labels";
+import { formatCurrency, formatQuantity } from "../utils/formatters";
 
-const errorMessage = (error: unknown, fallback: string) => axios.isAxiosError<{ message?: string }>(error) && [400, 404, 409].includes(error.response?.status ?? 0) ? error.response?.data?.message || fallback : fallback
-const statusLabel: Record<string, string> = { PRONTO: 'Pronto', PENDENTE_OBRA: 'Obra pendente', PENDENTE_DESTINATARIO: 'Destinatário pendente', FORA_ESCOPO: 'Fora do escopo', JA_IMPORTADO: 'Já importado', ERRO: 'Erro', IMPORTADO: 'Importado' }
-const productLabel: Record<string, string> = { DIESEL_S500: 'S500', DIESEL_S10: 'S10', ARLA_32: 'ARLA 32' }
-const humanStatus = (item: PoliFrotaPreviewItem) => item.pendencias.obra && item.pendencias.destinatario ? 'Obra e destinatário pendentes' : statusLabel[item.status_preview] || item.status_preview
-type BatchResolution = { obra_id: string; tipo_destinatario: DestinatarioTipo | ''; target_id: string }
+const errorMessage = (error: unknown, fallback: string) =>
+  axios.isAxiosError<{ message?: string }>(error) &&
+  [400, 404, 409].includes(error.response?.status ?? 0)
+    ? error.response?.data?.message || fallback
+    : fallback;
+const statusLabel: Record<string, string> = {
+  PRONTO: "Pronto",
+  PENDENTE_OBRA: "Obra pendente",
+  PENDENTE_DESTINATARIO: "Destinatário pendente",
+  FORA_ESCOPO: "Fora do escopo",
+  JA_IMPORTADO: "Já importado",
+  SUBSTITUICAO: "Substituição",
+  SUBSTITUICAO_JA_REGISTRADA: "Substituição já registrada",
+  ERRO: "Erro",
+  IMPORTADO: "Importado",
+};
+const productLabel: Record<string, string> = {
+  DIESEL_S500: "S500",
+  DIESEL_S10: "S10",
+  ARLA_32: "ARLA 32",
+};
+const humanStatus = (item: PoliFrotaPreviewItem) =>
+  item.pendencias.obra && item.pendencias.destinatario
+    ? "Obra e destinatário pendentes"
+    : statusLabel[item.status_preview] || item.status_preview;
+type BatchResolution = {
+  obra_id: string;
+  tipo_destinatario: DestinatarioTipo | "";
+  target_id: string;
+};
 
 function previewCounts(items: PoliFrotaPreviewItem[]) {
-  return { total: items.length, prontos: items.filter(item => item.status_preview === 'PRONTO').length, pendentes: items.filter(item => !['PRONTO', 'IMPORTADO', 'JA_IMPORTADO'].includes(item.status_preview)).length, pendentesObra: items.filter(item => item.status_preview === 'PENDENTE_OBRA' && !item.pendencias.destinatario).length, pendentesDestinatario: items.filter(item => item.status_preview === 'PENDENTE_DESTINATARIO' || item.pendencias.destinatario).length, foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length, erros: items.filter(item => item.status_preview === 'ERRO').length, jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length, importados: items.filter(item => item.status_preview === 'IMPORTADO').length }
+  return {
+    total: items.length,
+    prontos: items.filter((item) => item.status_preview === "PRONTO").length,
+    pendentes: items.filter(
+      (item) =>
+        ![
+          "PRONTO",
+          "IMPORTADO",
+          "JA_IMPORTADO",
+          "SUBSTITUICAO",
+          "SUBSTITUICAO_JA_REGISTRADA",
+        ].includes(item.status_preview),
+    ).length,
+    pendentesObra: items.filter(
+      (item) =>
+        item.status_preview === "PENDENTE_OBRA" &&
+        !item.pendencias.destinatario,
+    ).length,
+    pendentesDestinatario: items.filter(
+      (item) =>
+        item.status_preview === "PENDENTE_DESTINATARIO" ||
+        item.pendencias.destinatario,
+    ).length,
+    foraEscopo: items.filter((item) => item.status_preview === "FORA_ESCOPO")
+      .length,
+    erros: items.filter((item) => item.status_preview === "ERRO").length,
+    jaImportados: items.filter((item) => item.status_preview === "JA_IMPORTADO")
+      .length,
+    substituicoes: items.filter(
+      (item) => item.status_preview === "SUBSTITUICAO",
+    ).length,
+    substituicoesJaRegistradas: items.filter(
+      (item) => item.status_preview === "SUBSTITUICAO_JA_REGISTRADA",
+    ).length,
+    importados: items.filter((item) => item.status_preview === "IMPORTADO")
+      .length,
+  };
 }
 
 export function AbastecimentosImportarPoliFrotaPage() {
-  const [file, setFile] = useState<File | null>(null), [preview, setPreview] = useState<ImportacaoPreview | null>(null), [analyzing, setAnalyzing] = useState(false), [loading, setLoading] = useState(false), [savingBatch, setSavingBatch] = useState(false), [savingIds, setSavingIds] = useState<string[]>([]), [error, setError] = useState<string | null>(null), [success, setSuccess] = useState<string | null>(null)
-  const [inProgress, setInProgress] = useState<ImportacaoEmAndamento[]>([])
-  const [projects, setProjects] = useState<Project[]>([]), [fleets, setFleets] = useState<Fleet[]>([]), [thirds, setThirds] = useState<Terceiro[]>([]), [specials, setSpecials] = useState<DestinacaoEspecial[]>([])
-  const [selected, setSelected] = useState<string[]>([]), [filters, setFilters] = useState({ status: '', produto: '', busca: '', somentePendentes: false }), [batch, setBatch] = useState<BatchResolution>({ obra_id: '', tipo_destinatario: '', target_id: '' }), [confirm, setConfirm] = useState(false), [confirming, setConfirming] = useState(false)
-  const loadLookups = async () => { const [nextProjects, nextFleets, nextThirds, nextSpecials] = await Promise.all([getProjects(), getFleets(), getTerceiros(), getDestinacoesEspeciais()]); setProjects(nextProjects); setFleets(nextFleets); setThirds(nextThirds); setSpecials(nextSpecials) }
-  const loadInProgress = async () => { try { setInProgress(await getImportacoesEmAndamento()) } catch { setError('NÃƒÆ’Ã‚Â£o foi possÃƒÆ’Ã‚Â­vel carregar as importaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes em andamento.') } }
-  const continueImport = async (id: string) => { setLoading(true); setError(null); try { setPreview(await getImportacaoPreview(id)); setSelected([]) } catch (e) { setError(errorMessage(e, 'NÃ£o foi possÃƒÂ­Ã‚Â­vel reabrir a importaÃ§Ã£o.')) } finally { setLoading(false) } }
-  useEffect(() => { void loadInProgress() }, [])
-  useEffect(() => { void loadLookups().catch(() => setError('NÃ£o foi possÃƒÂ­Ã‚Â­vel carregar os cadastros para a resoluÃƒÂ§ÃƒÂ£o.')) }, [])
-  const analyze = async () => { if (!file || analyzing) return; setAnalyzing(true); setError(null); setSuccess(null); try { setPreview(await analyzePoliFrota(file)); setSelected([]); setSuccess('Arquivo analisado. Nenhum abastecimento foi gravado definitivamente.') } catch (e) { setError(errorMessage(e, 'NÃ£o foi possÃƒÂ­Ã‚Â­vel analisar o arquivo.')) } finally { setAnalyzing(false) } }
-  const reload = async () => { if (!preview) return; setLoading(true); try { setPreview(await getImportacaoPreview(preview.id)) } catch (e) { setError(errorMessage(e, 'NÃƒÆ’Ã‚Â£o foi possÃƒÂ­Ã‚Â­vel atualizar o preview.')) } finally { setLoading(false) } }
-  const mergeItems = (updated: PoliFrotaPreviewItem[]) => setPreview(current => current ? { ...current, items: current.items.map(item => updated.find(value => value.id === item.id) || item), counts: previewCounts(current.items.map(item => updated.find(value => value.id === item.id) || item)) } : current)
-  const resolve = async (item: PoliFrotaPreviewItem, resolution: PreviewResolution) => { if (!preview || item.status_preview === 'IMPORTADO' || item.status_preview === 'JA_IMPORTADO' || savingIds.includes(item.id)) return; setSavingIds(current => [...current, item.id]); setError(null); try { const updated = await resolvePreviewItem(preview.id, item.id, resolution); mergeItems([updated]) } catch (e) { setError(errorMessage(e, 'NÃ£o foi possÃƒÆ’Ã‚Â­vel salvar a resoluÃƒÂ§ÃƒÂ£o.')) } finally { setSavingIds(current => current.filter(id => id !== item.id)) } }
-  const resolveSelected = async () => { if (!preview || !selected.length || savingBatch || (!batch.obra_id && !batch.tipo_destinatario) || (batch.tipo_destinatario !== '' && batch.tipo_destinatario !== 'EXTERNA' && !batch.target_id)) return; const resolution: Record<string, string | null> = {}; if (batch.obra_id) resolution.obra_id = batch.obra_id; if (batch.tipo_destinatario) { resolution.tipo_destinatario = batch.tipo_destinatario; if (batch.target_id) Object.assign(resolution, target(batch.tipo_destinatario, batch.target_id)) } setSavingBatch(true); setError(null); try { const updated = await resolvePreviewBatch(preview.id, selected, resolution); mergeItems(updated); setSuccess(`ResoluÃƒÂ§ÃƒÂ£o aplicada somente ÃƒÆ’Ã‚Â s ${updated.length} linha(s) selecionada(s).`); setSelected([]); setBatch({ obra_id: '', tipo_destinatario: '', target_id: '' }) } catch (e) { setError(errorMessage(e, 'NÃƒÆ’Ã‚Â£o foi possÃƒÂ­Ã‚Â­vel aplicar a resoluÃƒÂ§ÃƒÂ£o em lote.')) } finally { setSavingBatch(false) } }
-  const executeConfirm = async () => { if (!preview || confirming) return; setConfirming(true); setError(null); try { const result = await confirmPreview(preview.id, selected.length ? selected : undefined); setConfirm(false); setSuccess(`${result.importadas} abastecimento(s) confirmado(s). Registros pendentes permaneceram no preview.`); setSelected([]); await reload() } catch (e) { setError(errorMessage(e, 'NÃ£o foi possÃƒÂ­Ã‚Â­vel confirmar os abastecimentos prontos.')) } finally { setConfirming(false) } }
-  const items = useMemo(() => (preview?.items || []).filter(item => { const third = item.terceiro_id ? thirds.find(value => value.id === item.terceiro_id) : null; const query = filters.busca.trim().toLocaleLowerCase('pt-BR'); const searchable = `${item.identificador_externo} ${item.identificacao_original || ''} ${item.placa_original || ''} ${item.frota_original || ''} ${third?.nome || ''}`.toLocaleLowerCase('pt-BR'); return (!filters.status || item.status_preview === filters.status) && (!filters.produto || item.produto_detectado === filters.produto) && (!query || searchable.includes(query)) && (!filters.somentePendentes || item.pendencias.obra || item.pendencias.destinatario) }), [filters, preview, thirds])
-  useEffect(() => { setSelected(current => current.filter(id => items.some(item => item.id === id))) }, [items])
-  const readyCount = preview?.counts.prontos || 0
-  return <><PageHeader title="Importar PoliFrota" subtitle="Analise arquivos, resolva pendÃƒÂªncias e confirme apenas os abastecimentos prontos." />{error && <p className="form-api-error" role="alert">{error}</p>}{success && <div className="success-banner" role="status">{success}</div>}{inProgress.length > 0 && <section className="import-list in-progress-imports"><header><div><h2>ImportaÃƒÂ§ÃƒÂµes em andamento</h2><p>Continue uma anÃ¡lise sem precisar informar o UUID.</p></div></header>{inProgress.map(item => <article className="import-order" key={item.id}><div className="import-order__head"><span><strong>{item.arquivo_nome}</strong><small>{new Date(item.created_at).toLocaleString("pt-BR")} Ã‚Â· {item.counts.total} registros Ã‚Â· {item.counts.prontos} prontos Ã‚Â· {item.counts.pendentes} pendentes</small></span><button className="button button--secondary" type="button" onClick={() => void continueImport(item.id)}>Continuar</button></div></article>)}</section>}
-{file && inProgress.some(item => item.arquivo_nome.toLocaleLowerCase() === file.name.toLocaleLowerCase()) && !preview && <div className="form-api-error"><strong>JÃ¡ existe uma importaÃ§Ã£o em andamento para este arquivo.</strong><div className="import-actions"><button className="button button--secondary" type="button" onClick={() => void continueImport(inProgress.find(item => item.arquivo_nome.toLocaleLowerCase() === file.name.toLocaleLowerCase())!.id)}>Continuar importaÃ§Ã£o existente</button><button className="button button--primary" type="button" disabled={analyzing} onClick={async () => { if (!file) return; setAnalyzing(true); try { setPreview(await analyzePoliFrota(file, true)); setSelected([]); await loadInProgress() } catch (e) { setError(errorMessage(e, "NÃ£o foi possÃ­vel criar nova anÃ¡lise.")) } finally { setAnalyzing(false) } }}>Criar nova anÃ¡lise</button></div></div>}<section className="import-upload-panel"><div className="import-upload-panel__copy"><FileSpreadsheet size={28} /><div><h2>1. Analisar arquivo</h2><p>O arquivo sera lido e transformado em preview. A gravaÃƒÂ§ÃƒÂ£o definitiva depende da confirmaÃƒÂ§ÃƒÂ£o.</p></div></div><label className="import-file-input"><Upload size={17} />{file ? file.name : 'Selecionar arquivo XLS/XLSX'}<input type="file" accept=".xls,.xlsx" onChange={event => setFile(event.target.files?.[0] || null)} /></label><button className="button button--primary" disabled={!file || analyzing} onClick={() => void analyze()}>{analyzing ? <><LoaderCircle className="spin" size={16} />Analisando...</> : 'Analisar arquivo'}</button></section>{preview && <><section className="import-summary"><Summary label="Encontrados" value={preview.counts.total} /><Summary label="Prontos" value={preview.counts.prontos} tone="success" /><Summary label="PendÃªncias" value={(preview.counts.pendentesObra || 0) + (preview.counts.pendentesDestinatario || 0)} tone="warning" /><Summary label="Ja importados" value={preview.counts.jaImportados} /><Summary label="Fora do escopo/erro" value={(preview.counts.foraEscopo || 0) + (preview.counts.erros || 0)} /></section><section className="preview-toolbar"><label>Status<select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}><option value="">Todos</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Produto<select value={filters.produto} onChange={e => setFilters({ ...filters, produto: e.target.value })}><option value="">Todos</option><option value="DIESEL_S500">S500</option><option value="DIESEL_S10">S10</option><option value="DESCONHECIDO">Desconhecido</option><option value="FORA_ESCOPO">Fora do escopo</option></select></label><label className="preview-search"><Search size={17} /><input placeholder="Nro. Abast., placa, frota ou terceiro" value={filters.busca} onChange={e => setFilters({ ...filters, busca: e.target.value })} /></label><label className="preview-checkbox"><input type="checkbox" checked={filters.somentePendentes} onChange={e => setFilters({ ...filters, somentePendentes: e.target.checked })} />Somente pendentes</label></section><section className="batch-resolution"><div><strong>2. Aplicar aos selecionados</strong><span>{selected.length} selecionado(s) na visÃ£o atual</span></div><select aria-label="Obra em lote" value={batch.obra_id} onChange={e => setBatch({ ...batch, obra_id: e.target.value })}><option value="">Obra: NÃ£o alterar</option>{projects.filter(project => project.status === 'ATIVA').map(project => <option key={project.id} value={project.id}>{project.nome}</option>)}</select><select aria-label="Tipo de destinatario em lote" value={batch.tipo_destinatario} onChange={e => setBatch({ obra_id: batch.obra_id, tipo_destinatario: e.target.value as DestinatarioTipo | '', target_id: '' })}><option value="">Destinatario: NÃ£o alterar</option><option value="FROTA">Frota</option><option value="TERCEIRO">Terceiro</option><option value="ESPECIAL">DestinaÃ§Ã£o especial</option><option value="EXTERNA">Externa</option></select>{batch.tipo_destinatario && batch.tipo_destinatario !== 'EXTERNA' && <select aria-label="Valor do destinatario em lote" value={batch.target_id} onChange={e => setBatch({ ...batch, target_id: e.target.value })}><option value="">Selecione...</option>{targets(batch.tipo_destinatario, fleets, thirds, specials).map(targetItem => <option key={targetItem.id} value={targetItem.id}>{targetItem.label}</option>)}</select>}<button className="button button--secondary" disabled={!selected.length || (!batch.obra_id && !batch.tipo_destinatario) || (batch.tipo_destinatario !== '' && batch.tipo_destinatario !== 'EXTERNA' && !batch.target_id) || savingBatch} onClick={() => void resolveSelected()}>Aplicar aos {selected.length} selecionados</button><button className="button button--primary" disabled={!readyCount || loading || savingBatch} onClick={() => setConfirm(true)}><Check size={16} />Confirmar abastecimentos prontos</button></section><section className="preview-results">{loading && <OrdersLoading />}{!loading && items.length ? <PreviewTable items={items} selected={selected} projects={projects} fleets={fleets} thirds={thirds} specials={specials} savingIds={savingIds} onToggle={id => setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])} onToggleAll={checked => setSelected(checked ? items.map(item => item.id) : [])} onResolve={resolve} /> : !loading && <div className="orders-message"><Search /><div><h3>Nenhum registro corresponde aos filtros.</h3><p>Revise os filtros ou analise outro arquivo.</p></div></div>}</section></>}{confirm && <ConfirmDialog title={`Confirmar ${readyCount} abastecimento(s) prontos?`} message="Os registros pendentes permanecerÃ£o no preview e poderÃ£o ser resolvidos depois." busy={confirming} error={null} confirmLabel="Confirmar prontos" busyLabel="Confirmando..." onCancel={() => !confirming && setConfirm(false)} onConfirm={() => void executeConfirm()} />}</>
+  const [file, setFile] = useState<File | null>(null),
+    [preview, setPreview] = useState<ImportacaoPreview | null>(null),
+    [analyzing, setAnalyzing] = useState(false),
+    [loading, setLoading] = useState(false),
+    [savingBatch, setSavingBatch] = useState(false),
+    [savingIds, setSavingIds] = useState<string[]>([]),
+    [error, setError] = useState<string | null>(null),
+    [success, setSuccess] = useState<string | null>(null);
+  const [inProgress, setInProgress] = useState<ImportacaoEmAndamento[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]),
+    [fleets, setFleets] = useState<Fleet[]>([]),
+    [thirds, setThirds] = useState<Terceiro[]>([]),
+    [specials, setSpecials] = useState<DestinacaoEspecial[]>([]);
+  const [selected, setSelected] = useState<string[]>([]),
+    [filters, setFilters] = useState({
+      status: "",
+      produto: "",
+      busca: "",
+      somentePendentes: false,
+    }),
+    [batch, setBatch] = useState<BatchResolution>({
+      obra_id: "",
+      tipo_destinatario: "",
+      target_id: "",
+    }),
+    [confirm, setConfirm] = useState(false),
+    [confirming, setConfirming] = useState(false);
+  const [substitutionItem, setSubstitutionItem] =
+    useState<PoliFrotaPreviewItem | null>(null);
+  const loadLookups = async () => {
+    const [nextProjects, nextFleets, nextThirds, nextSpecials] =
+      await Promise.all([
+        getProjects(),
+        getFleets(),
+        getTerceiros(),
+        getDestinacoesEspeciais(),
+      ]);
+    setProjects(nextProjects);
+    setFleets(nextFleets);
+    setThirds(nextThirds);
+    setSpecials(nextSpecials);
+  };
+  const loadInProgress = async () => {
+    try {
+      setInProgress(await getImportacoesEmAndamento());
+    } catch {
+      setError("Não foi possí­vel carregar as importações em andamento.");
+    }
+  };
+  const continueImport = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      setPreview(await getImportacaoPreview(id));
+      setSelected([]);
+    } catch (e) {
+      setError(errorMessage(e, "Não foi possí­vel reabrir a importação."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadInProgress();
+  }, []);
+  useEffect(() => {
+    void loadLookups().catch(() =>
+      setError("Não foi possível carregar os cadastros para a resolução."),
+    );
+  }, []);
+  const analyze = async () => {
+    if (!file || analyzing) return;
+    setAnalyzing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      setPreview(await analyzePoliFrota(file));
+      setSelected([]);
+      setSuccess(
+        "Arquivo analisado. Nenhum abastecimento foi gravado definitivamente.",
+      );
+    } catch (e) {
+      setError(errorMessage(e, "Não foi possível analisar o arquivo."));
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+  const reload = async () => {
+    if (!preview) return;
+    setLoading(true);
+    try {
+      setPreview(await getImportacaoPreview(preview.id));
+    } catch (e) {
+      setError(errorMessage(e, "Não foi possível atualizar o preview."));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const mergeItems = (updated: PoliFrotaPreviewItem[]) =>
+    setPreview((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map(
+              (item) => updated.find((value) => value.id === item.id) || item,
+            ),
+            counts: previewCounts(
+              current.items.map(
+                (item) => updated.find((value) => value.id === item.id) || item,
+              ),
+            ),
+          }
+        : current,
+    );
+  const resolve = async (
+    item: PoliFrotaPreviewItem,
+    resolution: PreviewResolution,
+  ) => {
+    if (
+      !preview ||
+      item.status_preview === "IMPORTADO" ||
+      item.status_preview === "JA_IMPORTADO" ||
+      savingIds.includes(item.id)
+    )
+      return;
+    setSavingIds((current) => [...current, item.id]);
+    setError(null);
+    try {
+      const updated = await resolvePreviewItem(preview.id, item.id, resolution);
+      mergeItems([updated]);
+    } catch (e) {
+      setError(errorMessage(e, "Não foi possí­vel salvar a resolução."));
+    } finally {
+      setSavingIds((current) => current.filter((id) => id !== item.id));
+    }
+  };
+  const saveSubstitution = (item: PoliFrotaPreviewItem) => {
+    mergeItems([item]);
+    setSuccess(
+      `Substituição marcada: ${item.identificador_externo} → ${item.substituicao_identificador_principal}.`,
+    );
+  };
+  const undoSubstitution = async (item: PoliFrotaPreviewItem) => {
+    if (!preview) return;
+    setSavingIds((current) => [...current, item.id]);
+    try {
+      mergeItems([await removeSubstitution(preview.id, item.id)]);
+    } catch (e) {
+      setError(errorMessage(e, "Não foi possível remover a substituição."));
+    } finally {
+      setSavingIds((current) => current.filter((id) => id !== item.id));
+    }
+  };
+  const resolveSelected = async () => {
+    if (
+      !preview ||
+      !selected.length ||
+      savingBatch ||
+      (!batch.obra_id && !batch.tipo_destinatario) ||
+      (batch.tipo_destinatario !== "" &&
+        batch.tipo_destinatario !== "EXTERNA" &&
+        !batch.target_id)
+    )
+      return;
+    const resolution: Record<string, string | null> = {};
+    if (batch.obra_id) resolution.obra_id = batch.obra_id;
+    if (batch.tipo_destinatario) {
+      resolution.tipo_destinatario = batch.tipo_destinatario;
+      if (batch.target_id)
+        Object.assign(
+          resolution,
+          target(batch.tipo_destinatario, batch.target_id),
+        );
+    }
+    setSavingBatch(true);
+    setError(null);
+    try {
+      const updated = await resolvePreviewBatch(
+        preview.id,
+        selected,
+        resolution,
+      );
+      mergeItems(updated);
+      setSuccess(
+        `Resolução aplicada somente as ${updated.length} linha(s) selecionada(s).`,
+      );
+      setSelected([]);
+      setBatch({ obra_id: "", tipo_destinatario: "", target_id: "" });
+    } catch (e) {
+      setError(
+        errorMessage(e, "Não foi possí­vel aplicar a resolução em lote."),
+      );
+    } finally {
+      setSavingBatch(false);
+    }
+  };
+  const executeConfirm = async () => {
+    if (!preview || confirming) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      const result = await confirmPreview(
+        preview.id,
+        selected.length ? selected : undefined,
+      );
+      setConfirm(false);
+      setSuccess(
+        `${result.importadas} abastecimento(s) confirmado(s). Registros pendentes permaneceram no preview.`,
+      );
+      setSelected([]);
+      await reload();
+    } catch (e) {
+      setError(
+        errorMessage(
+          e,
+          "Não foi possí­vel confirmar os abastecimentos prontos.",
+        ),
+      );
+    } finally {
+      setConfirming(false);
+    }
+  };
+  const items = useMemo(
+    () =>
+      (preview?.items || []).filter((item) => {
+        const third = item.terceiro_id
+          ? thirds.find((value) => value.id === item.terceiro_id)
+          : null;
+        const query = filters.busca.trim().toLocaleLowerCase("pt-BR");
+        const searchable =
+          `${item.identificador_externo} ${item.identificacao_original || ""} ${item.placa_original || ""} ${item.frota_original || ""} ${third?.nome || ""}`.toLocaleLowerCase(
+            "pt-BR",
+          );
+        return (
+          (!filters.status || item.status_preview === filters.status) &&
+          (!filters.produto || item.produto_detectado === filters.produto) &&
+          (!query || searchable.includes(query)) &&
+          (!filters.somentePendentes ||
+            item.pendencias.obra ||
+            item.pendencias.destinatario)
+        );
+      }),
+    [filters, preview, thirds],
+  );
+  useEffect(() => {
+    setSelected((current) =>
+      current.filter((id) => items.some((item) => item.id === id)),
+    );
+  }, [items]);
+  const readyCount = preview?.counts.prontos || 0;
+  return (
+    <>
+      <PageHeader
+        title="Importar PoliFrota"
+        subtitle="Analise arquivos, resolva pendências e confirme apenas os abastecimentos prontos."
+      />
+      {error && (
+        <p className="form-api-error" role="alert">
+          {error}
+        </p>
+      )}
+      {success && (
+        <div className="success-banner" role="status">
+          {success}
+        </div>
+      )}
+      {inProgress.length > 0 && (
+        <section className="import-list in-progress-imports">
+          <header>
+            <div>
+              <h2>Importações em andamento</h2>
+              <p>Continue uma análise sem precisar informar o UUID.</p>
+            </div>
+          </header>
+          {inProgress.map((item) => (
+            <article className="import-order" key={item.id}>
+              <div className="import-order__head">
+                <span>
+                  <strong>{item.arquivo_nome}</strong>
+                  <small>
+                    {new Date(item.created_at).toLocaleString("pt-BR")}{" "}
+                    {item.counts.total} registros {item.counts.prontos} prontos{" "}
+                    {item.counts.pendentes} pendentes
+                  </small>
+                </span>
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  onClick={() => void continueImport(item.id)}
+                >
+                  Continuar
+                </button>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
+      {file &&
+        inProgress.some(
+          (item) =>
+            item.arquivo_nome.toLocaleLowerCase() ===
+            file.name.toLocaleLowerCase(),
+        ) &&
+        !preview && (
+          <div className="form-api-error">
+            <strong>
+              Já existe uma importação em andamento para este arquivo.
+            </strong>
+            <div className="import-actions">
+              <button
+                className="button button--secondary"
+                type="button"
+                onClick={() =>
+                  void continueImport(
+                    inProgress.find(
+                      (item) =>
+                        item.arquivo_nome.toLocaleLowerCase() ===
+                        file.name.toLocaleLowerCase(),
+                    )!.id,
+                  )
+                }
+              >
+                Continuar importação existente
+              </button>
+              <button
+                className="button button--primary"
+                type="button"
+                disabled={analyzing}
+                onClick={async () => {
+                  if (!file) return;
+                  setAnalyzing(true);
+                  try {
+                    setPreview(await analyzePoliFrota(file, true));
+                    setSelected([]);
+                    await loadInProgress();
+                  } catch (e) {
+                    setError(
+                      errorMessage(
+                        e,
+                        "NÃ£o foi possÃ­vel criar nova anÃ¡lise.",
+                      ),
+                    );
+                  } finally {
+                    setAnalyzing(false);
+                  }
+                }}
+              >
+                Criar nova análise
+              </button>
+            </div>
+          </div>
+        )}
+      <section className="import-upload-panel">
+        <div className="import-upload-panel__copy">
+          <FileSpreadsheet size={28} />
+          <div>
+            <h2>1. Analisar arquivo</h2>
+            <p>
+              O arquivo sera lido e transformado em preview. A gravação
+              definitiva depende da confirmação.
+            </p>
+          </div>
+        </div>
+        <label className="import-file-input">
+          <Upload size={17} />
+          {file ? file.name : "Selecionar arquivo XLS/XLSX"}
+          <input
+            type="file"
+            accept=".xls,.xlsx"
+            onChange={(event) => setFile(event.target.files?.[0] || null)}
+          />
+        </label>
+        <button
+          className="button button--primary"
+          disabled={!file || analyzing}
+          onClick={() => void analyze()}
+        >
+          {analyzing ? (
+            <>
+              <LoaderCircle className="spin" size={16} />
+              Analisando...
+            </>
+          ) : (
+            "Analisar arquivo"
+          )}
+        </button>
+      </section>
+      {preview && (
+        <>
+          <section className="import-summary">
+            <Summary label="Encontrados" value={preview.counts.total} />
+            <Summary
+              label="Prontos"
+              value={preview.counts.prontos}
+              tone="success"
+            />
+            <Summary
+              label="Pendências"
+              value={
+                (preview.counts.pendentesObra || 0) +
+                (preview.counts.pendentesDestinatario || 0)
+              }
+              tone="warning"
+            />
+            <Summary
+              label="Ja importados"
+              value={preview.counts.jaImportados}
+            />
+            <Summary
+              label="Fora do escopo/erro"
+              value={
+                (preview.counts.foraEscopo || 0) + (preview.counts.erros || 0)
+              }
+            />
+          </section>
+          <section className="preview-toolbar">
+            <label>
+              Status
+              <select
+                value={filters.status}
+                onChange={(e) =>
+                  setFilters({ ...filters, status: e.target.value })
+                }
+              >
+                <option value="">Todos</option>
+                {Object.entries(statusLabel).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Produto
+              <select
+                value={filters.produto}
+                onChange={(e) =>
+                  setFilters({ ...filters, produto: e.target.value })
+                }
+              >
+                <option value="">Todos</option>
+                <option value="DIESEL_S500">S500</option>
+                <option value="DIESEL_S10">S10</option>
+                <option value="DESCONHECIDO">Desconhecido</option>
+                <option value="FORA_ESCOPO">Fora do escopo</option>
+              </select>
+            </label>
+            <label className="preview-search">
+              <Search size={17} />
+              <input
+                placeholder="Nro. Abast., placa, frota ou terceiro"
+                value={filters.busca}
+                onChange={(e) =>
+                  setFilters({ ...filters, busca: e.target.value })
+                }
+              />
+            </label>
+            <label className="preview-checkbox">
+              <input
+                type="checkbox"
+                checked={filters.somentePendentes}
+                onChange={(e) =>
+                  setFilters({ ...filters, somentePendentes: e.target.checked })
+                }
+              />
+              Somente pendentes
+            </label>
+          </section>
+          <section className="batch-resolution">
+            <div>
+              <strong>2. Aplicar aos selecionados</strong>
+              <span>{selected.length} selecionado(s) na visão atual</span>
+            </div>
+            <select
+              aria-label="Obra em lote"
+              value={batch.obra_id}
+              onChange={(e) => setBatch({ ...batch, obra_id: e.target.value })}
+            >
+              <option value="">Obra: Não alterar</option>
+              {projects
+                .filter((project) => project.status === "ATIVA")
+                .map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.nome}
+                  </option>
+                ))}
+            </select>
+            <select
+              aria-label="Tipo de destinatario em lote"
+              value={batch.tipo_destinatario}
+              onChange={(e) =>
+                setBatch({
+                  obra_id: batch.obra_id,
+                  tipo_destinatario: e.target.value as DestinatarioTipo | "",
+                  target_id: "",
+                })
+              }
+            >
+              <option value="">Destinatario: Não alterar</option>
+              <option value="FROTA">Frota</option>
+              <option value="TERCEIRO">Terceiro</option>
+              <option value="ESPECIAL">Destinação especial</option>
+              <option value="EXTERNA">Externa</option>
+            </select>
+            {batch.tipo_destinatario &&
+              batch.tipo_destinatario !== "EXTERNA" && (
+                <select
+                  aria-label="Valor do destinatario em lote"
+                  value={batch.target_id}
+                  onChange={(e) =>
+                    setBatch({ ...batch, target_id: e.target.value })
+                  }
+                >
+                  <option value="">Selecione...</option>
+                  {targets(
+                    batch.tipo_destinatario,
+                    fleets,
+                    thirds,
+                    specials,
+                  ).map((targetItem) => (
+                    <option key={targetItem.id} value={targetItem.id}>
+                      {targetItem.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            <button
+              className="button button--secondary"
+              disabled={
+                !selected.length ||
+                (!batch.obra_id && !batch.tipo_destinatario) ||
+                (batch.tipo_destinatario !== "" &&
+                  batch.tipo_destinatario !== "EXTERNA" &&
+                  !batch.target_id) ||
+                savingBatch
+              }
+              onClick={() => void resolveSelected()}
+            >
+              Aplicar aos {selected.length} selecionados
+            </button>
+            <button
+              className="button button--primary"
+              disabled={!readyCount || loading || savingBatch}
+              onClick={() => setConfirm(true)}
+            >
+              <Check size={16} />
+              Confirmar abastecimentos prontos
+            </button>
+          </section>
+          <section className="preview-results">
+            {loading && <OrdersLoading />}
+            {!loading && items.length ? (
+              <PreviewTable
+                items={items}
+                selected={selected}
+                projects={projects}
+                fleets={fleets}
+                thirds={thirds}
+                specials={specials}
+                savingIds={savingIds}
+                onToggle={(id) =>
+                  setSelected((current) =>
+                    current.includes(id)
+                      ? current.filter((value) => value !== id)
+                      : [...current, id],
+                  )
+                }
+                onToggleAll={(checked) =>
+                  setSelected(checked ? items.map((item) => item.id) : [])
+                }
+                onResolve={resolve}
+                onSubstitution={setSubstitutionItem}
+                onRemoveSubstitution={undoSubstitution}
+              />
+            ) : (
+              !loading && (
+                <div className="orders-message">
+                  <Search />
+                  <div>
+                    <h3>Nenhum registro corresponde aos filtros.</h3>
+                    <p>Revise os filtros ou analise outro arquivo.</p>
+                  </div>
+                </div>
+              )
+            )}
+          </section>
+        </>
+      )}
+      {substitutionItem && preview && (
+        <SubstitutionModal
+          importId={preview.id}
+          item={substitutionItem}
+          onClose={() => setSubstitutionItem(null)}
+          onSaved={saveSubstitution}
+        />
+      )}
+      {confirm && (
+        <ConfirmDialog
+          title={`Confirmar ${readyCount} abastecimento(s) prontos?`}
+          message="Os registros pendentes permanecerão no preview e poderão ser resolvidos depois."
+          busy={confirming}
+          error={null}
+          confirmLabel="Confirmar prontos"
+          busyLabel="Confirmando..."
+          onCancel={() => !confirming && setConfirm(false)}
+          onConfirm={() => void executeConfirm()}
+        />
+      )}
+    </>
+  );
 }
 
-function target(type: DestinatarioTipo | '' | null, id: string): Pick<PreviewResolution, 'frota_id' | 'terceiro_id' | 'destinacao_especial_id'> { return { frota_id: type === 'FROTA' ? id : null, terceiro_id: type === 'TERCEIRO' ? id : null, destinacao_especial_id: type === 'ESPECIAL' ? id : null } }
-function targets(type: DestinatarioTipo, fleets: Fleet[], thirds: Terceiro[], specials: DestinacaoEspecial[]) { if (type === 'FROTA') return fleets.filter(item => item.status === 'ATIVO').map(item => ({ id: item.id, label: item.placa ? formatDestinationLabel(item.codigo, item.placa) : item.codigo })); if (type === 'TERCEIRO') return thirds.filter(item => item.status === 'ATIVO').map(item => ({ id: item.id, label: item.nome })); return specials.filter(item => item.status === 'ATIVO').map(item => ({ id: item.id, label: formatDestinationLabel(item.codigo, item.nome) })) }
-function Summary({ label, value, tone }: { label: string; value: number; tone?: 'success' | 'warning' }) { return <div className={`import-summary__item${tone ? ` import-summary__item--${tone}` : ''}`}><span>{label}</span><strong>{value}</strong></div> }
-function PreviewTable({ items, selected, projects, fleets, thirds, specials, savingIds, onToggle, onToggleAll, onResolve }: { items: PoliFrotaPreviewItem[]; selected: string[]; projects: Project[]; fleets: Fleet[]; thirds: Terceiro[]; specials: DestinacaoEspecial[]; savingIds: string[]; onToggle: (id: string) => void; onToggleAll: (checked: boolean) => void; onResolve: (item: PoliFrotaPreviewItem, resolution: PreviewResolution) => void }) { const allSelected = items.length > 0 && items.every(item => selected.includes(item.id)); return <div className="preview-table-wrap"><table className="preview-table"><thead><tr><th className="sticky-col sticky-check"><input aria-label="Selecionar registros visí­veis" type="checkbox" checked={allSelected} onChange={event => onToggleAll(event.target.checked)} /></th><th className="sticky-col sticky-status">Status</th><th className="sticky-col sticky-number">Nro. Abast.</th><th>Data/Hora</th><th>Frota</th><th>Placa</th><th>Produto</th><th>Km/Hr.</th><th>Valor</th><th>Litros</th><th>Bico</th><th>Obra</th><th>Destinatario</th></tr></thead><tbody>{items.map(item => <PreviewRow key={item.id} item={item} selected={selected.includes(item.id)} projects={projects} fleets={fleets} thirds={thirds} specials={specials} saving={savingIds.includes(item.id)} onToggle={onToggle} onResolve={onResolve} />)}</tbody></table></div> }
-function PreviewRow({ item, selected, projects, fleets, thirds, specials, saving, onToggle, onResolve }: { item: PoliFrotaPreviewItem; selected: boolean; projects: Project[]; fleets: Fleet[]; thirds: Terceiro[]; specials: DestinacaoEspecial[]; saving: boolean; onToggle: (id: string) => void; onResolve: (item: PoliFrotaPreviewItem, resolution: PreviewResolution) => void }) { const [expanded, setExpanded] = useState(false); const [draftType, setDraftType] = useState<DestinatarioTipo | ''>(item.tipo_destinatario || ''); const locked = saving || item.status_preview === 'IMPORTADO' || item.status_preview === 'JA_IMPORTADO'; useEffect(() => setDraftType(item.tipo_destinatario || ''), [item.tipo_destinatario]); const changeType = (value: DestinatarioTipo | '') => { setDraftType(value); if (!value) onResolve(item, { obra_id: item.obra_id, tipo_destinatario: null, frota_id: null, terceiro_id: null, destinacao_especial_id: null }) }; const changeTarget = (id: string) => onResolve(item, { obra_id: item.obra_id, tipo_destinatario: draftType as DestinatarioTipo, ...target(draftType, id) }); const projectName = (id: string | null) => projects.find(project => project.id === id)?.nome || ''; return <><tr className={item.status_preview === 'PRONTO' ? '' : 'preview-row--pending'}><td className="sticky-col sticky-check"><input type="checkbox" checked={selected} disabled={locked} onChange={() => onToggle(item.id)} /></td><td className="sticky-col sticky-status"><span className={`preview-status preview-status--${item.status_preview.toLowerCase()}`}>{humanStatus(item)}</span>{saving && <small className="preview-saving">Salvando...</small>}</td><td className="sticky-col sticky-number"><button className="preview-expand" type="button" title="Mostrar detalhes do abastecimento" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}><ChevronDown size={14} />{item.identificador_externo}</button></td><td>{item.data_hora ? item.data_hora.replace('T', ' ') : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td><td title={item.frota_original || undefined}>{item.frota_original || 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td><td title={item.placa_original || undefined}>{item.placa_original || 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td><td>{productLabel[item.produto_detectado] || item.produto_detectado}</td><td>{item.km_hr === null ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatQuantity(item.km_hr)}</td><td>{item.valor_total === null ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatCurrency(item.valor_total)}</td><td>{item.litros === null ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : `${formatQuantity(item.litros)} L`}</td><td title={item.bico_descricao_original || undefined}>{item.bico_codigo_original || 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td><td><select className="preview-obra" title={projectName(item.obra_id)} disabled={locked} value={item.obra_id || ''} onChange={event => onResolve(item, { obra_id: event.target.value || null, tipo_destinatario: item.tipo_destinatario, frota_id: item.frota_id, terceiro_id: item.terceiro_id, destinacao_especial_id: item.destinacao_especial_id })}><option value="">NÃ£o definido</option>{projects.filter(project => project.status === 'ATIVA').map(project => <option key={project.id} value={project.id}>{project.nome}</option>)}</select></td><td><div className="preview-destination"><select disabled={locked} value={draftType} title={draftType || undefined} onChange={event => changeType(event.target.value as DestinatarioTipo | '')}><option value="">NÃ£o definido</option><option value="FROTA">Frota</option><option value="TERCEIRO">Terceiro</option><option value="ESPECIAL">DestinaÃ§Ã£o especial</option><option value="EXTERNA">Externa</option></select>{draftType && draftType !== 'EXTERNA' && <select disabled={locked} value={item.frota_id || item.terceiro_id || item.destinacao_especial_id || ''} title={targets(draftType, fleets, thirds, specials).find(value => value.id === (item.frota_id || item.terceiro_id || item.destinacao_especial_id))?.label} onChange={event => changeTarget(event.target.value)}><option value="">Selecionar...</option>{targets(draftType, fleets, thirds, specials).map(value => <option key={value.id} value={value.id}>{value.label}</option>)}</select>}</div></td></tr>{expanded && <tr className="preview-detail-row"><td colSpan={13}><strong>Detalhes do abastecimento</strong><span>Frentista: {item.frentista_original || 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</span><span>Valor original: {item.valor_total === null ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatCurrency(item.valor_total)}</span><span>HorÃ­metro: {item.horimetro === null ? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â' : formatQuantity(item.horimetro)}</span></td></tr>}</> }
+function target(
+  type: DestinatarioTipo | "" | null,
+  id: string,
+): Pick<
+  PreviewResolution,
+  "frota_id" | "terceiro_id" | "destinacao_especial_id"
+> {
+  return {
+    frota_id: type === "FROTA" ? id : null,
+    terceiro_id: type === "TERCEIRO" ? id : null,
+    destinacao_especial_id: type === "ESPECIAL" ? id : null,
+  };
+}
+function targets(
+  type: DestinatarioTipo,
+  fleets: Fleet[],
+  thirds: Terceiro[],
+  specials: DestinacaoEspecial[],
+) {
+  if (type === "FROTA")
+    return fleets
+      .filter((item) => item.status === "ATIVO")
+      .map((item) => ({
+        id: item.id,
+        label: item.placa
+          ? formatDestinationLabel(item.codigo, item.placa)
+          : item.codigo,
+      }));
+  if (type === "TERCEIRO")
+    return thirds
+      .filter((item) => item.status === "ATIVO")
+      .map((item) => ({ id: item.id, label: item.nome }));
+  return specials
+    .filter((item) => item.status === "ATIVO")
+    .map((item) => ({
+      id: item.id,
+      label: formatDestinationLabel(item.codigo, item.nome),
+    }));
+}
+function Summary({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "success" | "warning";
+}) {
+  return (
+    <div
+      className={`import-summary__item${tone ? ` import-summary__item--${tone}` : ""}`}
+    >
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+function PreviewTable({
+  items,
+  selected,
+  projects,
+  fleets,
+  thirds,
+  specials,
+  savingIds,
+  onToggle,
+  onToggleAll,
+  onResolve,
+  onSubstitution,
+  onRemoveSubstitution,
+}: {
+  items: PoliFrotaPreviewItem[];
+  selected: string[];
+  projects: Project[];
+  fleets: Fleet[];
+  thirds: Terceiro[];
+  specials: DestinacaoEspecial[];
+  savingIds: string[];
+  onToggle: (id: string) => void;
+  onToggleAll: (checked: boolean) => void;
+  onResolve: (
+    item: PoliFrotaPreviewItem,
+    resolution: PreviewResolution,
+  ) => void;
+  onSubstitution: (item: PoliFrotaPreviewItem) => void;
+  onRemoveSubstitution: (item: PoliFrotaPreviewItem) => void;
+}) {
+  const allSelected =
+    items.length > 0 && items.every((item) => selected.includes(item.id));
+  return (
+    <div className="preview-table-wrap">
+      <table className="preview-table">
+        <thead>
+          <tr>
+            <th className="sticky-col sticky-check">
+              <input
+                aria-label="Selecionar registros visí­veis"
+                type="checkbox"
+                checked={allSelected}
+                onChange={(event) => onToggleAll(event.target.checked)}
+              />
+            </th>
+            <th className="sticky-col sticky-status">Status</th>
+            <th className="sticky-col sticky-number">Nro. Abast.</th>
+            <th>Data/Hora</th>
+            <th>Frota</th>
+            <th>Placa</th>
+            <th>Produto</th>
+            <th>Km/Hr.</th>
+            <th>Valor</th>
+            <th>Litros</th>
+            <th>Bico</th>
+            <th>Obra</th>
+            <th>Destinatario</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <PreviewRow
+              key={item.id}
+              item={item}
+              selected={selected.includes(item.id)}
+              projects={projects}
+              fleets={fleets}
+              thirds={thirds}
+              specials={specials}
+              saving={savingIds.includes(item.id)}
+              onToggle={onToggle}
+              onResolve={onResolve}
+              onSubstitution={onSubstitution}
+              onRemoveSubstitution={onRemoveSubstitution}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function PreviewRow({
+  item,
+  selected,
+  projects,
+  fleets,
+  thirds,
+  specials,
+  saving,
+  onToggle,
+  onResolve,
+  onSubstitution,
+  onRemoveSubstitution,
+}: {
+  item: PoliFrotaPreviewItem;
+  selected: boolean;
+  projects: Project[];
+  fleets: Fleet[];
+  thirds: Terceiro[];
+  specials: DestinacaoEspecial[];
+  saving: boolean;
+  onToggle: (id: string) => void;
+  onResolve: (
+    item: PoliFrotaPreviewItem,
+    resolution: PreviewResolution,
+  ) => void;
+  onSubstitution: (item: PoliFrotaPreviewItem) => void;
+  onRemoveSubstitution: (item: PoliFrotaPreviewItem) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [draftType, setDraftType] = useState<DestinatarioTipo | "">(
+    item.tipo_destinatario || "",
+  );
+  const locked =
+    saving ||
+    item.status_preview === "IMPORTADO" ||
+    item.status_preview === "JA_IMPORTADO" ||
+    item.status_preview === "SUBSTITUICAO" ||
+    item.status_preview === "SUBSTITUICAO_JA_REGISTRADA";
+  useEffect(
+    () => setDraftType(item.tipo_destinatario || ""),
+    [item.tipo_destinatario],
+  );
+  const changeType = (value: DestinatarioTipo | "") => {
+    setDraftType(value);
+    if (!value)
+      onResolve(item, {
+        obra_id: item.obra_id,
+        tipo_destinatario: null,
+        frota_id: null,
+        terceiro_id: null,
+        destinacao_especial_id: null,
+      });
+  };
+  const changeTarget = (id: string) =>
+    onResolve(item, {
+      obra_id: item.obra_id,
+      tipo_destinatario: draftType as DestinatarioTipo,
+      ...target(draftType, id),
+    });
+  const projectName = (id: string | null) =>
+    projects.find((project) => project.id === id)?.nome || "";
+  return (
+    <>
+      <tr
+        className={
+          item.status_preview === "PRONTO" ? "" : "preview-row--pending"
+        }
+      >
+        <td className="sticky-col sticky-check">
+          <input
+            type="checkbox"
+            checked={selected}
+            disabled={locked}
+            onChange={() => onToggle(item.id)}
+          />
+        </td>
+        <td className="sticky-col sticky-status">
+          <span
+            className={`preview-status preview-status--${item.status_preview.toLowerCase()}`}
+          >
+            {humanStatus(item)}
+          </span>
+          {saving && <small className="preview-saving">Salvando...</small>}
+          {item.status_preview === "SUBSTITUICAO" && (
+            <button className="button button--secondary" type="button" onClick={() => void onRemoveSubstitution(item)}>Remover substituição</button>
+          )}
+          {!locked && item.status_preview !== "SUBSTITUICAO" && (
+            <button className="button button--secondary" type="button" onClick={() => onSubstitution(item)}>Marcar substituição</button>
+          )}
+        </td>
+        <td className="sticky-col sticky-number">
+          <button
+            className="preview-expand"
+            type="button"
+            title="Mostrar detalhes do abastecimento"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            <ChevronDown size={14} />
+            {item.identificador_externo}
+          </button>
+        </td>
+        <td>
+          {item.data_hora
+            ? item.data_hora.replace("T", " ")
+            : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+        </td>
+        <td title={item.frota_original || undefined}>
+          {item.frota_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+        </td>
+        <td title={item.placa_original || undefined}>
+          {item.placa_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+        </td>
+        <td>
+          {productLabel[item.produto_detectado] || item.produto_detectado}
+        </td>
+        <td>
+          {item.km_hr === null
+            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            : formatQuantity(item.km_hr)}
+        </td>
+        <td>
+          {item.valor_total === null
+            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            : formatCurrency(item.valor_total)}
+        </td>
+        <td>
+          {item.litros === null
+            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            : `${formatQuantity(item.litros)} L`}
+        </td>
+        <td title={item.bico_descricao_original || undefined}>
+          {item.bico_codigo_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+        </td>
+        <td>
+          <select
+            className="preview-obra"
+            title={projectName(item.obra_id)}
+            disabled={locked}
+            value={item.obra_id || ""}
+            onChange={(event) =>
+              onResolve(item, {
+                obra_id: event.target.value || null,
+                tipo_destinatario: item.tipo_destinatario,
+                frota_id: item.frota_id,
+                terceiro_id: item.terceiro_id,
+                destinacao_especial_id: item.destinacao_especial_id,
+              })
+            }
+          >
+            <option value="">Não definido</option>
+            {projects
+              .filter((project) => project.status === "ATIVA")
+              .map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.nome}
+                </option>
+              ))}
+          </select>
+        </td>
+        <td>
+          <div className="preview-destination">
+            <select
+              disabled={locked}
+              value={draftType}
+              title={draftType || undefined}
+              onChange={(event) =>
+                changeType(event.target.value as DestinatarioTipo | "")
+              }
+            >
+              <option value="">Não definido</option>
+              <option value="FROTA">Frota</option>
+              <option value="TERCEIRO">Terceiro</option>
+              <option value="ESPECIAL">Destinação especial</option>
+              <option value="EXTERNA">Externa</option>
+            </select>
+            {draftType && draftType !== "EXTERNA" && (
+              <select
+                disabled={locked}
+                value={
+                  item.frota_id ||
+                  item.terceiro_id ||
+                  item.destinacao_especial_id ||
+                  ""
+                }
+                title={
+                  targets(draftType, fleets, thirds, specials).find(
+                    (value) =>
+                      value.id ===
+                      (item.frota_id ||
+                        item.terceiro_id ||
+                        item.destinacao_especial_id),
+                  )?.label
+                }
+                onChange={(event) => changeTarget(event.target.value)}
+              >
+                <option value="">Selecionar...</option>
+                {targets(draftType, fleets, thirds, specials).map((value) => (
+                  <option key={value.id} value={value.id}>
+                    {value.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="preview-detail-row">
+          <td colSpan={13}>
+            <strong>Detalhes do abastecimento</strong>
+            <span>
+              Frentista: {item.frentista_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+            </span>
+            <span>
+              Valor original:{" "}
+              {item.valor_total === null
+                ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+                : formatCurrency(item.valor_total)}
+            </span>
+            <span>
+              HorÃ­metro:{" "}
+              {item.horimetro === null
+                ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+                : formatQuantity(item.horimetro)}
+            </span>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
