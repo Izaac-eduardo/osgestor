@@ -122,6 +122,16 @@ export interface AbastecimentoHistoricoResponse {
   pagination: { page: number; limit: number; total: number; total_pages: number }
 }
 
+export interface AbastecimentosRelatorioResponse {
+  summary: { quantidade: number; litros: number; valor: number; destinatarios: number }
+  por_produto: Array<{ produto: string; quantidade: number; litros: number; valor: number }>
+  por_obra: Array<{ obra: string; quantidade: number; litros: number; valor: number; percentual_litros: number }>
+  por_frota: Array<{ frota: string; placa: string; quantidade: number; litros: number; valor: number }>
+  por_terceiro: Array<{ terceiro: string; quantidade: number; litros: number; valor: number }>
+  especiais: Array<{ destinacao: string; quantidade: number; litros: number; valor: number }>
+  evolucao: Array<{ data: string; quantidade: number; litros: number; valor: number }>
+}
+
 export type PreviewStatus = 'PRONTO' | 'PENDENTE_OBRA' | 'PENDENTE_DESTINATARIO' | 'FORA_ESCOPO' | 'JA_IMPORTADO' | 'ERRO' | 'IMPORTADO'
 export type DestinatarioTipo = 'FROTA' | 'TERCEIRO' | 'EXTERNA' | 'ESPECIAL'
 export interface PoliFrotaPreviewItem {

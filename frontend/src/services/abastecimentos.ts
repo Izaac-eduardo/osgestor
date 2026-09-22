@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { AbastecimentoHistoricoFilters, AbastecimentoHistoricoResponse, AbastecimentoProduto, DestinacaoEspecial, Entrada, EntradaFilters, EntradaPayload, IdentificacaoTerceiro, PontoOperacional, Terceiro } from '../types/abastecimentos'
+import type { AbastecimentoHistoricoFilters, AbastecimentoHistoricoResponse, AbastecimentosRelatorioResponse, AbastecimentoProduto, DestinacaoEspecial, Entrada, EntradaFilters, EntradaPayload, IdentificacaoTerceiro, PontoOperacional, Terceiro } from '../types/abastecimentos'
 
 export const getAbastecimentoProdutos = async () => (await api.get<AbastecimentoProduto[]>('/abastecimento/produtos')).data
 export const getPontos = async () => (await api.get<PontoOperacional[]>('/abastecimento/pontos')).data
@@ -29,3 +29,4 @@ export const createEntrada = async (payload: EntradaPayload) => (await api.post<
 export const updateEntrada = async (id: string, payload: EntradaPayload) => (await api.put<Entrada>(`/abastecimento/entradas/${id}`, payload)).data
 export const deleteEntrada = async (id: string) => api.delete(`/abastecimento/entradas/${id}`)
 export const getAbastecimentosHistorico = async (params: AbastecimentoHistoricoFilters) => (await api.get<AbastecimentoHistoricoResponse>('/abastecimento/historico', { params })).data
+export const getRelatorioAbastecimentos = async (params: AbastecimentoHistoricoFilters) => (await api.get<AbastecimentosRelatorioResponse>('/abastecimento/relatorios', { params })).data
