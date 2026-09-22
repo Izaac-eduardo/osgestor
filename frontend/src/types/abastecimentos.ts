@@ -119,6 +119,7 @@ export interface AbastecimentoHistoricoFilters {
   tipo_destinatario?: DestinatarioTipo
   page?: number
   limit?: 25 | 50 | 100
+  periodo?: 'dia' | 'mes'
 }
 
 export interface AbastecimentoHistoricoResponse {

@@ -1,5 +1,23 @@
 import type { Request, Response } from 'express';
 import { AbastecimentoServiceError } from '../services/abastecimentos-base.service.js';
 import { getRelatorioAbastecimentos } from '../services/abastecimentos-relatorios.service.js';
+
 const queryText = (value: unknown): string | undefined => value === undefined ? undefined : typeof value === 'string' ? value : (() => { throw new AbastecimentoServiceError(400, 'Filtro deve ser texto.'); })();
-export async function getRelatorioAbastecimentosController(request: Request, response: Response): Promise<void> { try { response.json(await getRelatorioAbastecimentos({ data_inicio: queryText(request.query.data_inicio), data_fim: queryText(request.query.data_fim), obra_id: queryText(request.query.obra_id), busca: queryText(request.query.busca), produto: queryText(request.query.produto), tipo_destinatario: queryText(request.query.tipo_destinatario) })); } catch (error) { if (error instanceof AbastecimentoServiceError) { response.status(error.statusCode).json({ message: error.message }); return; } console.error('Erro ao consultar relatórios de abastecimentos.'); response.status(500).json({ message: 'Erro interno do servidor.' }); } }
+
+export async function getRelatorioAbastecimentosController(request: Request, response: Response): Promise<void> {
+  try {
+    response.json(await getRelatorioAbastecimentos({
+      data_inicio: queryText(request.query.data_inicio),
+      data_fim: queryText(request.query.data_fim),
+      obra_id: queryText(request.query.obra_id),
+      busca: queryText(request.query.busca),
+      produto: queryText(request.query.produto),
+      tipo_destinatario: queryText(request.query.tipo_destinatario),
+      periodo: queryText(request.query.periodo),
+    }));
+  } catch (error) {
+    if (error instanceof AbastecimentoServiceError) { response.status(error.statusCode).json({ message: error.message }); return; }
+    console.error('Erro ao consultar relatórios de abastecimentos.');
+    response.status(500).json({ message: 'Erro interno do servidor.' });
+  }
+}
