@@ -9,6 +9,10 @@ import {
   getRelatorioEntradas,
   type EntradasRelatorioFilters,
 } from "./abastecimentos-entradas-relatorio.service.js";
+import {
+  getConsumoFrota,
+  type ConsumoFrotaFilters,
+} from "./abastecimentos-consumo-frota.service.js";
 
 type FilterLine = { label: string; value: string };
 const money = new Intl.NumberFormat("pt-BR", {
@@ -739,9 +743,158 @@ export async function exportEntradasPdf(
   );
 }
 
+type ConsumoExportFilters = Pick<ConsumoFrotaFilters, "data_inicio" | "data_fim" | "obra_id" | "frota_id" | "produto" | "tipo_calculo" | "situacao">;
+type ConsumoReport = Awaited<ReturnType<typeof getConsumoFrota>>;
+
+const consumoStatus = (value: string): string => ({
+  CALCULAVEL_KM: "Calculável",
+  CALCULAVEL_HORIMETRO: "Calculável",
+  AMBIGUA: "Ambígua",
+  PROBLEMATICA: "Problemática",
+  INSUFICIENTE: "Dados insuficientes",
+  VALIDO: "Válido",
+  LEITURA_IGUAL: "Leitura igual",
+  LEITURA_REGRESSIVA: "Leitura regressiva",
+  DADOS_INSUFICIENTES: "Dados insuficientes",
+}[value] ?? value);
+const consumoType = (value: string | null): string => value === "KM/L" ? "km/L" : value === "L/H" ? "L/h" : value === "AMBOS" ? "km/L e L/h" : "—";
+const consumoUnit = (value: string | null): string => value === "L/H" ? "L/h" : value === "KM/L" ? "km/L" : "—";
+const consumoNumber = (value: number | null): string => value === null ? "—" : quantity.format(value);
+const consumoDate = (value: string | null): string => value ? new Date(value).toLocaleDateString("pt-BR") : "—";
+
+const consumoFilters = async (filters: ConsumoExportFilters): Promise<FilterLine[]> => {
+  const [obra, frota] = await Promise.all([
+    filters.obra_id ? pool.query<{ nome: string }>("SELECT nome FROM obras WHERE id=$1", [filters.obra_id]) : Promise.resolve({ rows: [] as Array<{ nome: string }> }),
+    filters.frota_id ? pool.query<{ codigo: string }>("SELECT codigo FROM frotas WHERE id=$1", [filters.frota_id]) : Promise.resolve({ rows: [] as Array<{ codigo: string }> }),
+  ]);
+  return [
+    { label: "Período", value: periodLabel(filters.data_inicio, filters.data_fim) },
+    { label: "Obra", value: obra.rows[0]?.nome ?? "Todas" },
+    { label: "Frota", value: frota.rows[0]?.codigo ?? "Todas" },
+    { label: "Produto", value: filters.produto ?? "Todos" },
+    { label: "Tipo", value: filters.tipo_calculo === "KM_L" ? "km/L" : filters.tipo_calculo === "L_H" ? "L/h" : "Todos" },
+    { label: "Situação", value: filters.situacao === "CALCULAVEL" ? "Calculável" : filters.situacao === "PROBLEMATICA" ? "Problemática" : filters.situacao === "INSUFICIENTE" ? "Dados insuficientes" : "Todas" },
+  ];
+};
+
+const consumoReport = (filters: ConsumoExportFilters): Promise<ConsumoReport> => getConsumoFrota({ ...filters, all: true });
+
+const consumoRows = (report: ConsumoReport): Array<Array<string | number | null>> => report.frotas.map((item) => [
+  item.frota,
+  item.produto.codigo,
+  consumoType(item.tipo_calculo),
+  consumoStatus(item.situacao),
+  item.km_total,
+  item.horas_total,
+  item.litros_considerados,
+  item.media,
+  consumoUnit(item.tipo_calculo),
+  item.intervalos_validos,
+  item.leituras_ignoradas,
+]);
+
+const intervaloRows = (report: ConsumoReport): Array<Array<string | number | null>> => report.frotas.flatMap((item) => item.intervalos.map((interval) => [
+  item.frota,
+  item.produto.codigo,
+  interval.numero_intervalo === null ? "Referência inicial" : interval.numero_intervalo,
+  consumoStatus(interval.status),
+  consumoDate(interval.leitura_base?.data_hora ?? null),
+  interval.leitura_base?.valor ?? null,
+  consumoDate(interval.leitura_final.data_hora),
+  interval.leitura_final.valor,
+  interval.distancia_km ?? interval.horas,
+  interval.tipo_calculo === "KM/L" ? "km" : "h",
+  interval.litros_intervalo,
+  interval.media_intervalo,
+  interval.tipo_calculo === "KM/L" ? "km/L" : "L/h",
+]));
+
+const abastecimentoIntervalRows = (report: ConsumoReport): Array<Array<string | number | Date | null>> => report.frotas.flatMap((item) => item.intervalos.flatMap((interval) => interval.abastecimentos.map((fuel) => [
+  item.frota,
+  item.produto.codigo,
+  interval.numero_intervalo,
+  new Date(fuel.data_hora),
+  fuel.litros,
+  fuel.km_hr,
+  fuel.horimetro,
+])));
+
+export async function exportConsumoFrotaExcel(filters: ConsumoExportFilters): Promise<Buffer> {
+  const [report, filterLines] = await Promise.all([consumoReport(filters), consumoFilters(filters)]);
+  const workbook = new ExcelJS.Workbook();
+  const summary = workbook.addWorksheet("Resumo");
+  addMeta(summary, "Relatório de Média de Consumo por Frota", filterLines);
+  addTable(summary, ["Indicador", "Valor"], [
+    ["Frotas analisadas", report.resumo.frotas_analisadas],
+    ["Calculáveis", report.resumo.frotas_calculaveis],
+    ["L/h calculáveis", report.resumo.frotas_l_h_calculaveis],
+    ["Problemáticas", report.resumo.frotas_problematicas],
+    ["Dados insuficientes", report.resumo.frotas_insuficientes],
+    ["Litros considerados", report.resumo.litros_considerados],
+  ], [32, 20]);
+  summary.getColumn(2).numFmt = "#,##0.000";
+
+  const consumption = workbook.addWorksheet("Consumo por Frota");
+  addMeta(consumption, "Consumo por Frota", filterLines);
+  addTable(consumption, ["Frota", "Produto", "Tipo de cálculo", "Situação", "Distância (km)", "Horas", "Litros considerados", "Média", "Unidade", "Intervalos válidos", "Leituras ignoradas"], consumoRows(report), [16, 18, 18, 22, 16, 14, 20, 16, 12, 18, 20]);
+  consumption.getColumn(5).numFmt = "#,##0.000";
+  consumption.getColumn(6).numFmt = "#,##0.000";
+  consumption.getColumn(7).numFmt = "#,##0.000";
+  consumption.getColumn(8).numFmt = "0.000000000";
+
+  const intervals = workbook.addWorksheet("Intervalos");
+  addMeta(intervals, "Intervalos", filterLines);
+  addTable(intervals, ["Frota", "Produto", "Intervalo", "Status", "Data leitura-base", "Leitura-base", "Data leitura final", "Leitura final", "Diferença", "Unidade da diferença", "Litros considerados", "Média do intervalo", "Unidade da média"], intervaloRows(report), [16, 18, 12, 22, 18, 16, 18, 16, 14, 20, 20, 20, 18]);
+  intervals.getColumn(6).numFmt = "#,##0.000";
+  intervals.getColumn(8).numFmt = "#,##0.000";
+  intervals.getColumn(9).numFmt = "#,##0.000";
+  intervals.getColumn(11).numFmt = "#,##0.000";
+  intervals.getColumn(12).numFmt = "0.000000000";
+
+  const fuels = workbook.addWorksheet("Abastecimentos dos Intervalos");
+  addMeta(fuels, "Abastecimentos dos Intervalos", filterLines);
+  addTable(fuels, ["Frota", "Produto", "Intervalo", "Data/Hora", "Litros", "Km/Hr.", "Horímetro"], abastecimentoIntervalRows(report), [16, 18, 12, 20, 14, 14, 14]);
+  fuels.getColumn(4).numFmt = "dd/mm/yyyy hh:mm";
+  fuels.getColumn(5).numFmt = "#,##0.000";
+  fuels.getColumn(6).numFmt = "#,##0.000";
+  fuels.getColumn(7).numFmt = "#,##0.000";
+  return finishWorkbook(workbook);
+}
+
+export async function exportConsumoFrotaPdf(filters: ConsumoExportFilters): Promise<Buffer> {
+  const [report, filterLines] = await Promise.all([consumoReport(filters), consumoFilters(filters)]);
+  const problematic = report.frotas.filter((item) => item.situacao === "PROBLEMATICA");
+  const sections: PdfSection[] = [
+    {
+      title: "Consumo por Frota",
+      headers: ["Frota", "Produto", "Tipo", "Distância/Horas", "Litros", "Média", "Intervalos", "Situação"],
+      rows: report.frotas.map((item) => [item.frota, item.produto.codigo, consumoType(item.tipo_calculo), item.tipo_calculo === "L/H" ? `${consumoNumber(item.horas_total)} h` : item.tipo_calculo === "KM/L" ? `${consumoNumber(item.km_total)} km` : "—", quantity.format(item.litros_considerados), item.media === null ? "—" : `${consumoNumber(item.media)} ${consumoUnit(item.tipo_calculo)}`, String(item.intervalos_validos), consumoStatus(item.situacao)]),
+    },
+    {
+      title: "Frotas com Leituras Problemáticas",
+      headers: ["Frota", "Produto", "Regressões", "Leituras ignoradas", "Detalhe"],
+      rows: problematic.map((item) => {
+        const regression = item.intervalos.find((interval) => interval.status === "LEITURA_REGRESSIVA");
+        const detail = regression?.leitura_base ? `${regression.leitura_base.valor} → ${regression.leitura_final.valor}` : "Leitura regressiva";
+        return [item.frota, item.produto.codigo, String(item.regressoes), String(item.leituras_ignoradas), detail];
+      }),
+    },
+  ];
+  return pdf("Relatório de Média de Consumo por Frota", filterLines, [
+    `Frotas analisadas: ${report.resumo.frotas_analisadas}`,
+    `Calculáveis: ${report.resumo.frotas_calculaveis}`,
+    `L/h calculáveis: ${report.resumo.frotas_l_h_calculaveis}`,
+    `Problemáticas: ${report.resumo.frotas_problematicas}`,
+    `Dados insuficientes: ${report.resumo.frotas_insuficientes}`,
+    `Litros considerados: ${quantity.format(report.resumo.litros_considerados)} L`,
+  ], sections);
+}
+
 export const exportFilenames = {
   abastecimentos: (filters: RelatorioAbastecimentosFilters, ext: string) =>
     filenameDate(filters, "abastecimentos", ext),
   entradas: (filters: EntradasRelatorioFilters, ext: string) =>
     filenameDate(filters, "entradas", ext),
+  consumoFrota: (filters: ConsumoExportFilters, ext: string) =>
+    filenameDate(filters, "relatorio-consumo-frota", ext),
 };

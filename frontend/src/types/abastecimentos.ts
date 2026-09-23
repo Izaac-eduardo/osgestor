@@ -99,6 +99,7 @@ export type ConsumoFrotaTipo = 'TODOS' | 'KM_L' | 'L_H'
 export type ConsumoFrotaSituacaoFiltro = 'TODAS' | 'CALCULAVEL' | 'PROBLEMATICA' | 'INSUFICIENTE'
 export interface ConsumoFrotaFilters { data_inicio?: string; data_fim?: string; obra_id?: string; frota_id?: string; produto?: string; tipo_calculo?: ConsumoFrotaTipo; situacao?: ConsumoFrotaSituacaoFiltro; page?: number; limit?: 25 | 50 | 100 }
 export interface ConsumoFrotaIntervalo {
+  numero_intervalo: number | null
   tipo_calculo: 'KM/L' | 'L/H'
   status: 'VALIDO' | 'LEITURA_IGUAL' | 'LEITURA_REGRESSIVA' | 'DADOS_INSUFICIENTES'
   leitura_base: { id: string; data_hora: string; valor: number } | null
@@ -121,7 +122,7 @@ export interface ConsumoFrotaItem {
   intervalos: ConsumoFrotaIntervalo[]
 }
 export interface ConsumoFrotaResponse {
-  resumo: { frotas_analisadas: number; frotas_calculaveis: number; frotas_problematicas: number; frotas_insuficientes: number; litros_considerados: number }
+  resumo: { frotas_analisadas: number; frotas_calculaveis: number; frotas_l_h_calculaveis: number; frotas_problematicas: number; frotas_insuficientes: number; litros_considerados: number }
   frotas: ConsumoFrotaItem[]
   pagination: { page: number; limit: number; total: number; total_pages: number }
 }

@@ -6,6 +6,7 @@ import { getRelatorioEntradasController } from '../controllers/abastecimentos-en
 import { updateAbastecimentoHistoricoController } from '../controllers/abastecimentos-historico-edit.controller.js';
 import { exportAbastecimentosExcelController, exportAbastecimentosPdfController, exportEntradasExcelController, exportEntradasPdfController } from '../controllers/abastecimentos-export.controller.js';
 import { getConsumoFrotaController } from '../controllers/abastecimentos-consumo-frota.controller.js';
+import { exportConsumoFrotaExcelController, exportConsumoFrotaPdfController } from '../controllers/abastecimentos-export.controller.js';
 
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
@@ -14,6 +15,10 @@ abastecimentoRoutes.patch('/historico/:id', updateAbastecimentoHistoricoControll
 abastecimentoRoutes.get('/relatorios', getRelatorioAbastecimentosController);
 abastecimentoRoutes.get('/relatorios/entradas', getRelatorioEntradasController);
 abastecimentoRoutes.get('/relatorios/consumo-frota', getConsumoFrotaController);
+abastecimentoRoutes.get('/relatorios/consumo-frota/pdf', exportConsumoFrotaPdfController);
+abastecimentoRoutes.get('/relatorios/consumo-frota/excel', exportConsumoFrotaExcelController);
+abastecimentoRoutes.get('/relatorios/consumo-frota/exportar/pdf', exportConsumoFrotaPdfController);
+abastecimentoRoutes.get('/relatorios/consumo-frota/exportar/excel', exportConsumoFrotaExcelController);
 abastecimentoRoutes.get('/relatorios/exportar/pdf', exportAbastecimentosPdfController);
 abastecimentoRoutes.get('/relatorios/exportar/excel', exportAbastecimentosExcelController);
 abastecimentoRoutes.get('/relatorios/entradas/exportar/pdf', exportEntradasPdfController);

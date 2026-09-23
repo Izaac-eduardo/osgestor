@@ -16,6 +16,7 @@ export interface ConsumoFrotaFilters {
   situacao?: ConsumoSituacaoFiltro;
   page?: string;
   limit?: string;
+  all?: boolean;
 }
 
 interface SourceRow {
@@ -28,6 +29,7 @@ interface SourceRow {
 interface DetailReading { id: string; data_hora: string; valor: number | null; }
 interface IntervalFuel { id: string; data_hora: string; litros: number; km_hr: number | null; horimetro: number | null; }
 interface ConsumptionInterval {
+  numero_intervalo: number | null;
   tipo_calculo: Metric;
   status: 'VALIDO' | 'LEITURA_IGUAL' | 'LEITURA_REGRESSIVA' | 'DADOS_INSUFICIENTES';
   leitura_base: DetailReading | null;
@@ -98,6 +100,7 @@ function fuelRows(rows: SourceRow[], baseIndex: number, finalIndex: number, star
 function metricIntervals(rows: SourceRow[], metric: Metric, start: string | undefined, end: string | undefined, obraId: string | undefined): ConsumptionInterval[] {
   const result: ConsumptionInterval[] = [];
   let previousIndex: number | null = null;
+  let numeroIntervalo = 0;
   const valueOf = (row: SourceRow): number | null => number(metric === 'KM/L' ? row.km_hr : row.horimetro);
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index]!;
@@ -105,7 +108,7 @@ function metricIntervals(rows: SourceRow[], metric: Metric, start: string | unde
     if (current === null || current <= 0) continue;
     if (!inRange(row, start, end)) { previousIndex = index; continue; }
     if (previousIndex === null) {
-      result.push({ tipo_calculo: metric, status: 'DADOS_INSUFICIENTES', leitura_base: null, leitura_final: { id: row.id, data_hora: row.data_hora, valor: current }, distancia_km: null, horas: null, litros_intervalo: 0, media_intervalo: null, produto: { id: row.produto_id, codigo: row.produto_codigo, nome: row.produto_nome }, abastecimentos: [] });
+      result.push({ numero_intervalo: null, tipo_calculo: metric, status: 'DADOS_INSUFICIENTES', leitura_base: null, leitura_final: { id: row.id, data_hora: row.data_hora, valor: current }, distancia_km: null, horas: null, litros_intervalo: 0, media_intervalo: null, produto: { id: row.produto_id, codigo: row.produto_codigo, nome: row.produto_nome }, abastecimentos: [] });
       previousIndex = index;
       continue;
     }
@@ -118,7 +121,8 @@ function metricIntervals(rows: SourceRow[], metric: Metric, start: string | unde
     const distance = metric === 'KM/L' ? difference : null;
     const hours = metric === 'L/H' ? difference : null;
     const media = status === 'VALIDO' && liters > 0 ? metric === 'KM/L' ? distance! / liters : liters / hours! : null;
-    result.push({ tipo_calculo: metric, status, leitura_base: { id: previous.id, data_hora: previous.data_hora, valor: previousValue }, leitura_final: { id: row.id, data_hora: row.data_hora, valor: current }, distancia_km: distance, horas: hours, litros_intervalo: liters, media_intervalo: media === null ? null : round(media), produto: { id: row.produto_id, codigo: row.produto_codigo, nome: row.produto_nome }, abastecimentos: fuel });
+    numeroIntervalo += 1;
+    result.push({ numero_intervalo: numeroIntervalo, tipo_calculo: metric, status, leitura_base: { id: previous.id, data_hora: previous.data_hora, valor: previousValue }, leitura_final: { id: row.id, data_hora: row.data_hora, valor: current }, distancia_km: distance, horas: hours, litros_intervalo: liters, media_intervalo: media === null ? null : round(media), produto: { id: row.produto_id, codigo: row.produto_codigo, nome: row.produto_nome }, abastecimentos: fuel });
     previousIndex = index;
   }
   return result;
@@ -167,8 +171,10 @@ export async function getConsumoFrota(filters: ConsumoFrotaFilters = {}) {
     reports.push({ frota_id: group[0]!.frota_id, frota: group[0]!.frota_codigo, placa: group[0]!.placa, produto: { id: group[0]!.produto_id, codigo: group[0]!.produto_codigo, nome: group[0]!.produto_nome }, tipo_calculo: null, situacao: 'INSUFICIENTE', km_total: round(kmTotal), horas_total: round(hoursTotal), litros_considerados: round(kmValid.length ? kmLiters : hrLiters), media_km_l: kmLiters > 0 ? round(kmTotal / kmLiters) : null, media_l_h: hoursTotal > 0 ? round(hrLiters / hoursTotal) : null, media: null, intervalos_validos: valid.length, leituras_ignoradas: periodRows.filter(row => !validFinalIds.has(row.id)).length, regressoes: intervals.filter(item => item.status === 'LEITURA_REGRESSIVA').length, intervalos: intervals });
   }
   const filtered = classify(reports).filter(report => matches(report, type, situation)).sort((a, b) => a.frota.localeCompare(b.frota) || a.produto.codigo.localeCompare(b.produto.codigo));
-  const page = pageValue(filters.page); const limit = limitValue(filters.limit); const total = filtered.length;
-  const frotas = filtered.slice((page - 1) * limit, page * limit);
-  const fleetIds = new Set(filtered.map(item => item.frota_id)); const calculableIds = new Set(filtered.filter(item => ['CALCULAVEL_KM', 'CALCULAVEL_HORIMETRO', 'AMBIGUA'].includes(item.situacao)).map(item => item.frota_id)); const problematicIds = new Set(filtered.filter(item => item.situacao === 'PROBLEMATICA').map(item => item.frota_id)); const insufficientIds = new Set(filtered.filter(item => item.situacao === 'INSUFICIENTE').map(item => item.frota_id));
-  return { resumo: { frotas_analisadas: fleetIds.size, frotas_calculaveis: calculableIds.size, frotas_problematicas: problematicIds.size, frotas_insuficientes: insufficientIds.size, litros_considerados: round(filtered.reduce((sum, item) => sum + item.litros_considerados, 0)) }, frotas, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } };
+  const total = filtered.length;
+  const page = filters.all ? 1 : pageValue(filters.page);
+  const limit = filters.all ? total : limitValue(filters.limit);
+  const frotas = filters.all ? filtered : filtered.slice((page - 1) * limit, page * limit);
+  const fleetIds = new Set(filtered.map(item => item.frota_id)); const calculableIds = new Set(filtered.filter(item => ['CALCULAVEL_KM', 'CALCULAVEL_HORIMETRO', 'AMBIGUA'].includes(item.situacao)).map(item => item.frota_id)); const lHCalculableIds = new Set(filtered.filter(item => ['CALCULAVEL_HORIMETRO', 'AMBIGUA'].includes(item.situacao)).map(item => item.frota_id)); const problematicIds = new Set(filtered.filter(item => item.situacao === 'PROBLEMATICA').map(item => item.frota_id)); const insufficientIds = new Set(filtered.filter(item => item.situacao === 'INSUFICIENTE').map(item => item.frota_id));
+  return { resumo: { frotas_analisadas: fleetIds.size, frotas_calculaveis: calculableIds.size, frotas_l_h_calculaveis: lHCalculableIds.size, frotas_problematicas: problematicIds.size, frotas_insuficientes: insufficientIds.size, litros_considerados: round(filtered.reduce((sum, item) => sum + item.litros_considerados, 0)) }, frotas, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } };
 }

@@ -29,12 +29,13 @@ export const getPontoProdutos = async (id: string) =>
     )
   ).data;
 
-export type AbastecimentosExportKind = 'abastecimentos' | 'entradas'
+export type AbastecimentosExportKind = 'abastecimentos' | 'entradas' | 'consumo-frota'
 export type AbastecimentosExportFormat = 'pdf' | 'excel'
 export type AbastecimentosExportParams = object
 
 export async function downloadAbastecimentosExport(kind: AbastecimentosExportKind, format: AbastecimentosExportFormat, params: AbastecimentosExportParams) {
-  const response = await api.get(`/abastecimento/relatorios${kind === 'entradas' ? '/entradas' : ''}/exportar/${format}`, { params, responseType: 'blob' })
+  const prefix = kind === 'entradas' ? '/entradas' : kind === 'consumo-frota' ? '/consumo-frota' : ''
+  const response = await api.get(`/abastecimento/relatorios${prefix}/exportar/${format}`, { params, responseType: 'blob' })
   const disposition = String(response.headers['content-disposition'] || '')
   const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
   const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1]
