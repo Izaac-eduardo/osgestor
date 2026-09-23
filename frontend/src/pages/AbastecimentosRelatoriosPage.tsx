@@ -131,6 +131,9 @@ export function AbastecimentosRelatoriosPage() {
       action={<AbastecimentosExportMenu kind="abastecimentos" filters={toQuery(appliedFilters)} />}
       />
       <div className="entrada-report-navigation">
+        <Link to="/abastecimentos/relatorios/consumo-frota">
+          Média de Consumo por Frota
+        </Link>
         <Link to="/abastecimentos/relatorios/entradas">
           Relatório de Entradas
         </Link>

@@ -95,6 +95,37 @@ export interface EntradasRelatorioResponse {
   pagination: { page: number; limit: number; total: number; total_pages: number }
 }
 
+export type ConsumoFrotaTipo = 'TODOS' | 'KM_L' | 'L_H'
+export type ConsumoFrotaSituacaoFiltro = 'TODAS' | 'CALCULAVEL' | 'PROBLEMATICA' | 'INSUFICIENTE'
+export interface ConsumoFrotaFilters { data_inicio?: string; data_fim?: string; obra_id?: string; frota_id?: string; produto?: string; tipo_calculo?: ConsumoFrotaTipo; situacao?: ConsumoFrotaSituacaoFiltro; page?: number; limit?: 25 | 50 | 100 }
+export interface ConsumoFrotaIntervalo {
+  tipo_calculo: 'KM/L' | 'L/H'
+  status: 'VALIDO' | 'LEITURA_IGUAL' | 'LEITURA_REGRESSIVA' | 'DADOS_INSUFICIENTES'
+  leitura_base: { id: string; data_hora: string; valor: number } | null
+  leitura_final: { id: string; data_hora: string; valor: number }
+  distancia_km: number | null
+  horas: number | null
+  litros_intervalo: number
+  media_intervalo: number | null
+  produto: Pick<AbastecimentoProduto, 'id' | 'codigo' | 'nome'>
+  abastecimentos: Array<{ id: string; data_hora: string; litros: number; km_hr: number | null; horimetro: number | null }>
+}
+export interface ConsumoFrotaItem {
+  frota_id: string; frota: string; placa: string | null
+  produto: Pick<AbastecimentoProduto, 'id' | 'codigo' | 'nome'>
+  tipo_calculo: 'KM/L' | 'L/H' | 'AMBOS' | null
+  situacao: 'CALCULAVEL_KM' | 'CALCULAVEL_HORIMETRO' | 'AMBIGUA' | 'INSUFICIENTE' | 'PROBLEMATICA'
+  km_total: number; horas_total: number; litros_considerados: number
+  media_km_l: number | null; media_l_h: number | null; media: number | null
+  intervalos_validos: number; leituras_ignoradas: number; regressoes: number
+  intervalos: ConsumoFrotaIntervalo[]
+}
+export interface ConsumoFrotaResponse {
+  resumo: { frotas_analisadas: number; frotas_calculaveis: number; frotas_problematicas: number; frotas_insuficientes: number; litros_considerados: number }
+  frotas: ConsumoFrotaItem[]
+  pagination: { page: number; limit: number; total: number; total_pages: number }
+}
+
 export interface AbastecimentoHistoricoItem {
   id: string
   data_hora: string

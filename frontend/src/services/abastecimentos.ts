@@ -4,6 +4,8 @@ import type {
   AbastecimentoHistoricoFilters,
   AbastecimentoHistoricoResponse,
   AbastecimentosRelatorioResponse,
+  ConsumoFrotaFilters,
+  ConsumoFrotaResponse,
   AbastecimentoProduto,
   DestinacaoEspecial,
   Entrada,
@@ -166,3 +168,5 @@ export const getRelatorioEntradas = async (params: EntradasRelatorioFilters) =>
       { params },
     )
   ).data;
+export const getConsumoFrota = async (params: ConsumoFrotaFilters) =>
+  (await api.get<ConsumoFrotaResponse>('/abastecimento/relatorios/consumo-frota', { params })).data;
