@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import axios from 'axios'
+import { Link } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ErrorState } from '../components/ErrorState'
 import { OrdersLoading } from '../components/orders/OrdersLoading'
@@ -30,7 +31,7 @@ export function AbastecimentosRelatoriosPage() {
     setDrilldown({ ...next, filters: { ...detailFilters(filters), ...entityFilter } })
   }
 
-  return <><PageHeader title="Relatórios de Abastecimentos" subtitle="Analise consumo e gasto dos abastecimentos efetivamente confirmados." />
+  return <><PageHeader title="Relatórios de Abastecimentos" subtitle="Analise consumo e gasto dos abastecimentos efetivamente confirmados." /><div className="entrada-report-navigation"><Link to="/abastecimentos/relatorios/entradas">Relatório de Entradas</Link></div>
     <form className="orders-filters abastecimento-filters relatorios-abastecimento-filters" onSubmit={apply}><header><h2>Filtros</h2><p>Todos os indicadores e rankings respeitam os filtros aplicados.</p></header><div className="orders-filters__grid"><label>Data inicial<input type="date" value={filters.data_inicio} onChange={e => update('data_inicio', e.target.value)} /></label><label>Data final<input type="date" value={filters.data_fim} onChange={e => update('data_fim', e.target.value)} /></label><label>Obra<select value={filters.obra_id} onChange={e => update('obra_id', e.target.value)}><option value="">Todas</option>{projects.filter(item => item.status === 'ATIVA').map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label><label>Frota / destinatário<input value={filters.busca} placeholder="CE02C, CATARINA, PIRULITO..." onChange={e => update('busca', e.target.value)} /></label><label>Produto<select value={filters.produto} onChange={e => update('produto', e.target.value)}>{products.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>Tipo de destinatário<select value={filters.tipo_destinatario} onChange={e => update('tipo_destinatario', e.target.value)}>{types.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label></div><footer><button className="button button--secondary" type="button" onClick={clear}>Limpar filtros</button><button className="button button--primary" type="submit">Aplicar filtros</button></footer></form>
     {loading && !report ? <OrdersLoading /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : report && <ReportContent report={report} periodo={filters.periodo} onPeriodoChange={periodo => { const next = { ...filters, periodo }; setFilters(next); void load(next) }} onDrilldown={openDrilldown} />}
     {drilldown && <AbastecimentosDrilldownModal kind={drilldown.kind} name={drilldown.name} meta={drilldown.meta} filters={drilldown.filters} onClose={() => setDrilldown(null)} />}

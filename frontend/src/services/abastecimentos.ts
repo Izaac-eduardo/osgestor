@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { AbastecimentoHistoricoEditPayload, AbastecimentoHistoricoFilters, AbastecimentoHistoricoResponse, AbastecimentosRelatorioResponse, AbastecimentoProduto, DestinacaoEspecial, Entrada, EntradaFilters, EntradaPayload, IdentificacaoTerceiro, PontoOperacional, Terceiro } from '../types/abastecimentos'
+import type { AbastecimentoHistoricoEditPayload, AbastecimentoHistoricoFilters, AbastecimentoHistoricoResponse, AbastecimentosRelatorioResponse, AbastecimentoProduto, DestinacaoEspecial, Entrada, EntradaFilters, EntradaPayload, EntradasRelatorioFilters, EntradasRelatorioResponse, IdentificacaoTerceiro, PontoOperacional, Terceiro } from '../types/abastecimentos'
 
 export const getAbastecimentoProdutos = async () => (await api.get<AbastecimentoProduto[]>('/abastecimento/produtos')).data
 export const getPontos = async () => (await api.get<PontoOperacional[]>('/abastecimento/pontos')).data
@@ -31,3 +31,4 @@ export const deleteEntrada = async (id: string) => api.delete(`/abastecimento/en
 export const getAbastecimentosHistorico = async (params: AbastecimentoHistoricoFilters) => (await api.get<AbastecimentoHistoricoResponse>('/abastecimento/historico', { params })).data
 export const updateAbastecimentoHistorico = async (id: string, payload: AbastecimentoHistoricoEditPayload) => (await api.patch(`/abastecimento/historico/${id}`, payload)).data
 export const getRelatorioAbastecimentos = async (params: AbastecimentoHistoricoFilters) => (await api.get<AbastecimentosRelatorioResponse>('/abastecimento/relatorios', { params })).data
+export const getRelatorioEntradas = async (params: EntradasRelatorioFilters) => (await api.get<EntradasRelatorioResponse>('/abastecimento/relatorios/entradas', { params })).data
