@@ -1,10 +1,12 @@
 import { pool } from '../config/database.js';
-import { AbastecimentoServiceError } from './abastecimentos-base.service.js';
+import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.service.js';
 
 export interface HistoricoFilters {
   data_inicio?: string;
   data_fim?: string;
   obra_id?: string;
+  frota_id?: string;
+  terceiro_id?: string;
   busca?: string;
   produto?: string;
   tipo_destinatario?: string;
@@ -42,7 +44,9 @@ function buildWhere(filters: HistoricoFilters, values: string[]): string {
   const end = date(filters.data_fim, 'data_fim');
   if (start) conditions.push(`a.data_hora >= ${bindValue(values, `${start}T00:00:00`)}`);
   if (end) conditions.push(`a.data_hora < (${bindValue(values, `${end}T00:00:00`)}::timestamp + interval '1 day')`);
-  if (filters.obra_id) conditions.push(`a.obra_id = ${bindValue(values, filters.obra_id)}`);
+  if (filters.obra_id) conditions.push(`a.obra_id = ${bindValue(values, assertUuid(filters.obra_id, 'obra_id'))}`);
+  if (filters.frota_id) conditions.push(`a.frota_id = ${bindValue(values, assertUuid(filters.frota_id, 'frota_id'))}`);
+  if (filters.terceiro_id) conditions.push(`a.terceiro_id = ${bindValue(values, assertUuid(filters.terceiro_id, 'terceiro_id'))}`);
   if (filters.produto) conditions.push(`p.codigo = ${bindValue(values, filters.produto.trim().toUpperCase())}`);
   if (filters.tipo_destinatario) {
     if (!['FROTA', 'TERCEIRO', 'ESPECIAL', 'EXTERNA'].includes(filters.tipo_destinatario)) throw new AbastecimentoServiceError(400, 'tipo_destinatario inválido.');

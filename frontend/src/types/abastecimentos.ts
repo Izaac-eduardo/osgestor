@@ -114,6 +114,8 @@ export interface AbastecimentoHistoricoFilters {
   data_inicio?: string
   data_fim?: string
   obra_id?: string
+  frota_id?: string
+  terceiro_id?: string
   busca?: string
   produto?: string
   tipo_destinatario?: DestinatarioTipo
@@ -134,9 +136,9 @@ export interface AbastecimentoHistoricoEditPayload {
 export interface AbastecimentosRelatorioResponse {
   summary: { quantidade: number; litros: number; valor: number; destinatarios: number }
   por_produto: Array<{ produto: string; quantidade: number; litros: number; valor: number }>
-  por_obra: Array<{ obra: string; quantidade: number; litros: number; valor: number; percentual_litros: number }>
-  por_frota: Array<{ frota: string; placa: string; quantidade: number; litros: number; valor: number }>
-  por_terceiro: Array<{ terceiro: string; quantidade: number; litros: number; valor: number }>
+  por_obra: Array<{ obra_id: string; obra: string; quantidade: number; litros: number; valor: number; percentual_litros: number }>
+  por_frota: Array<{ frota_id: string; frota: string; placa: string; quantidade: number; litros: number; valor: number }>
+  por_terceiro: Array<{ terceiro_id: string; terceiro: string; quantidade: number; litros: number; valor: number }>
   especiais: Array<{ destinacao: string; quantidade: number; litros: number; valor: number }>
   evolucao: Array<{ data: string; quantidade: number; litros: number; valor: number }>
 }

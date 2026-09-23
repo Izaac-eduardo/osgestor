@@ -8,6 +8,7 @@ export async function listAbastecimentosHistoricoController(request: Request, re
   try {
     response.json(await listAbastecimentosHistorico({
       data_inicio: queryText(request.query.data_inicio), data_fim: queryText(request.query.data_fim), obra_id: queryText(request.query.obra_id),
+      frota_id: queryText(request.query.frota_id), terceiro_id: queryText(request.query.terceiro_id),
       busca: queryText(request.query.busca), produto: queryText(request.query.produto), tipo_destinatario: queryText(request.query.tipo_destinatario),
       page: queryText(request.query.page), limit: queryText(request.query.limit),
     }));
