@@ -21,7 +21,7 @@ export async function updateAbastecimentoHistorico(id: string, body: unknown) {
     const produtoId = assertUuid(body.produto_id, 'produto_id'); const obraId = assertUuid(body.obra_id, 'obra_id');
     if (!await get(client, 'SELECT id FROM abastecimento_produtos WHERE id=$1', [produtoId])) throw new AbastecimentoServiceError(404, 'Produto não encontrado.');
     if (!await get(client, 'SELECT id FROM obras WHERE id=$1', [obraId])) throw new AbastecimentoServiceError(404, 'Obra não encontrada.');
-    const litros = decimal(body.litros, 'litros', 3, true); const valor = decimal(body.valor_total, 'valor_total', 2, false);
+    const litros = decimal(body.litros, 'litros', 3, true); const valor = decimal(body.valor_total, 'valor_total', 4, false);
     let frotaId: string | null = null; let terceiroId: string | null = null; let especialId: string | null = null;
     let identificacao = text(body.identificacao_original, 'identificacao_original', false, 255) ?? current.identificacao_original;
     let placa: string | null = text(body.placa_original, 'placa_original', false, 255); let frotaOriginal: string | null = text(body.frota_original, 'frota_original', false, 255);
