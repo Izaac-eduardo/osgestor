@@ -4,6 +4,7 @@ import { listAbastecimentosHistoricoController } from '../controllers/abastecime
 import { getRelatorioAbastecimentosController } from '../controllers/abastecimentos-relatorios.controller.js';
 import { getRelatorioEntradasController } from '../controllers/abastecimentos-entradas-relatorio.controller.js';
 import { updateAbastecimentoHistoricoController } from '../controllers/abastecimentos-historico-edit.controller.js';
+import { exportAbastecimentosExcelController, exportAbastecimentosPdfController, exportEntradasExcelController, exportEntradasPdfController } from '../controllers/abastecimentos-export.controller.js';
 
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
@@ -11,6 +12,10 @@ abastecimentoRoutes.get('/historico', listAbastecimentosHistoricoController);
 abastecimentoRoutes.patch('/historico/:id', updateAbastecimentoHistoricoController);
 abastecimentoRoutes.get('/relatorios', getRelatorioAbastecimentosController);
 abastecimentoRoutes.get('/relatorios/entradas', getRelatorioEntradasController);
+abastecimentoRoutes.get('/relatorios/exportar/pdf', exportAbastecimentosPdfController);
+abastecimentoRoutes.get('/relatorios/exportar/excel', exportAbastecimentosExcelController);
+abastecimentoRoutes.get('/relatorios/entradas/exportar/pdf', exportEntradasPdfController);
+abastecimentoRoutes.get('/relatorios/entradas/exportar/excel', exportEntradasExcelController);
 abastecimentoRoutes.get('/pontos', controller.listPontos);
 abastecimentoRoutes.get('/pontos/:id/produtos', controller.listCompatibilidade);
 abastecimentoRoutes.put('/pontos/:id/produtos', controller.replaceCompatibilidade);
