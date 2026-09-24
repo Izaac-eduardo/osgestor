@@ -7,6 +7,7 @@ import { updateAbastecimentoHistoricoController } from '../controllers/abastecim
 import { exportAbastecimentosExcelController, exportAbastecimentosPdfController, exportEntradasExcelController, exportEntradasPdfController } from '../controllers/abastecimentos-export.controller.js';
 import { getConsumoFrotaController } from '../controllers/abastecimentos-consumo-frota.controller.js';
 import { exportConsumoFrotaExcelController, exportConsumoFrotaPdfController } from '../controllers/abastecimentos-export.controller.js';
+import * as frotasTerceiras from '../controllers/abastecimentos-frotas-terceiras.controller.js';
 
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
@@ -40,6 +41,11 @@ abastecimentoRoutes.get('/terceiros/:id/identificacoes', controller.listTerceiro
 abastecimentoRoutes.post('/terceiros/:id/identificacoes', controller.createTerceiroIdentificacaoController);
 abastecimentoRoutes.put('/terceiros/:id/identificacoes/:identificacaoId', controller.updateTerceiroIdentificacaoController);
 abastecimentoRoutes.delete('/terceiros/:id/identificacoes/:identificacaoId', controller.deleteTerceiroIdentificacaoController);
+abastecimentoRoutes.get('/frotas-terceiras', frotasTerceiras.list);
+abastecimentoRoutes.get('/frotas-terceiras/:id', frotasTerceiras.get);
+abastecimentoRoutes.post('/frotas-terceiras', frotasTerceiras.create);
+abastecimentoRoutes.put('/frotas-terceiras/:id', frotasTerceiras.update);
+abastecimentoRoutes.patch('/frotas-terceiras/:id/status', frotasTerceiras.status);
 abastecimentoRoutes.get('/destinacoes-especiais', controller.listEspeciais);
 abastecimentoRoutes.get('/destinacoes-especiais/:id', controller.getEspecial);
 abastecimentoRoutes.post('/destinacoes-especiais', controller.createEspecial);
