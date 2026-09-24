@@ -96,7 +96,7 @@ export async function analyzePoliFrota(buffer: Buffer, filename: string, allowDu
   return { id: importId, arquivo_nome: filename, arquivo_sha256: hash(buffer), status: 'PREVIA', counts: counts(items), items: items.map(item => ({ ...item, id: itemIds.get(item.identificador_externo) })) };
 }
 
-export async function getImportacao(id: string) { const importId = uuid(id, 'id'); const header = await pool.query('SELECT id,arquivo_nome,arquivo_sha256,origem_sistema,status,parser_versao,created_at,finalizada_at FROM abastecimento_importacoes WHERE id=$1', [importId]); if (!header.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.'); const rows = await pool.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original,id', [importId]); const items = rows.rows.map(itemFromDb); return { ...header.rows[0], counts: counts(items), items };
+export async function getImportacao(id: string) { const importId = uuid(id, 'id'); const header = await pool.query('SELECT id,arquivo_nome,arquivo_sha256,origem_sistema,status,parser_versao,created_at,finalizada_at FROM abastecimento_importacoes WHERE id=$1', [importId]); if (!header.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.'); if (header.rows[0].status === 'CANCELADA') throw new AbastecimentoImportError(409, 'Esta importação foi cancelada e não pode ser continuada.'); const rows = await pool.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original,id', [importId]); const items = rows.rows.map(itemFromDb); return { ...header.rows[0], counts: counts(items), items };
 }
 
 export async function listImportacoesEmAndamento(): Promise<ImportacaoEmAndamento[]> {
@@ -106,6 +106,15 @@ export async function listImportacoesEmAndamento(): Promise<ImportacaoEmAndament
   const grouped = new Map<string, PreviewItem[]>();
   for (const item of items.rows) { const list = grouped.get(item.importacao_id) ?? []; list.push(itemFromDb(item)); grouped.set(item.importacao_id, list); }
   return headers.rows.map(header => ({ ...header, counts: counts(grouped.get(header.id) ?? []) }));
+}
+
+export async function cancelImportacao(id: string) {
+  const importId = uuid(id, 'importacao_id');
+  const canceled = await pool.query<{ id: string; arquivo_nome: string; status: string; finalizada_at: string }>("UPDATE abastecimento_importacoes SET status='CANCELADA',finalizada_at=now(),updated_at=now() WHERE id=$1 AND origem_sistema='POLIFROTA' AND status IN ('ANALISANDO','PREVIA','ERRO') RETURNING id,arquivo_nome,status,finalizada_at", [importId]);
+  if (canceled.rows[0]) return canceled.rows[0];
+  const current = await pool.query<{ status: string }>("SELECT status FROM abastecimento_importacoes WHERE id=$1 AND origem_sistema='POLIFROTA'", [importId]);
+  if (!current.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
+  throw new AbastecimentoImportError(409, current.rows[0].status === 'CANCELADA' ? 'Esta importação já foi cancelada.' : 'Somente importações não concluídas podem ser canceladas.');
 }
 
 async function validateResolution(client: PoolClient, body: Record<string, unknown>, current: PreviewItem): Promise<PreviewResolution> {
@@ -213,3 +222,10 @@ export async function removeSubstitution(importId: string, itemId: string) {
 }
 
 export { hash as sha256Arquivo };
+
+export async function assertImportacaoPodeContinuar(id: string) {
+  const importId = uuid(id, 'importacao_id');
+  const result = await pool.query<{ status: string }>('SELECT status FROM abastecimento_importacoes WHERE id=$1', [importId]);
+  if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
+  if (result.rows[0].status === 'CANCELADA') throw new AbastecimentoImportError(409, 'Esta importação foi cancelada e não pode ser continuada.');
+}

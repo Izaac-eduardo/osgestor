@@ -18,6 +18,7 @@ import {
 } from "../services/abastecimentos";
 import {
   analyzePoliFrota,
+  cancelImportacao,
   confirmPreview,
   getImportacaoPreview,
   getImportacoesEmAndamento,
@@ -40,6 +41,7 @@ import type { Fleet } from "../types/fleets";
 import type { Project } from "../types/projects";
 import { formatDestinationLabel } from "../utils/abastecimentos-import-labels";
 import { formatCurrency, formatQuantity } from "../utils/formatters";
+import { polifrotaIdentificacao } from "../utils/polifrota-labels";
 
 const errorMessage = (error: unknown, fallback: string) =>
   axios.isAxiosError<{ message?: string }>(error) &&
@@ -140,6 +142,9 @@ export function AbastecimentosImportarPoliFrotaPage() {
     }),
     [confirm, setConfirm] = useState(false),
     [confirming, setConfirming] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<ImportacaoEmAndamento | null>(null),
+    [canceling, setCanceling] = useState(false),
+    [cancelError, setCancelError] = useState<string | null>(null);
   const [substitutionItem, setSubstitutionItem] =
     useState<PoliFrotaPreviewItem | null>(null);
   const loadLookups = async () => {
@@ -172,6 +177,21 @@ export function AbastecimentosImportarPoliFrotaPage() {
       setError(errorMessage(e, "Não foi possí­vel reabrir a importação."));
     } finally {
       setLoading(false);
+    }
+  };
+  const executeCancel = async () => {
+    if (!cancelTarget || canceling) return;
+    setCanceling(true);
+    setCancelError(null);
+    try {
+      await cancelImportacao(cancelTarget.id);
+      setInProgress((current) => current.filter((item) => item.id !== cancelTarget.id));
+      setCancelTarget(null);
+      setSuccess("Importação cancelada. Nenhum abastecimento confirmado foi alterado.");
+    } catch (e) {
+      setCancelError(errorMessage(e, "Não foi possível cancelar a importação."));
+    } finally {
+      setCanceling(false);
     }
   };
   useEffect(() => {
@@ -400,9 +420,21 @@ export function AbastecimentosImportarPoliFrotaPage() {
                 <button
                   className="button button--secondary"
                   type="button"
+                  disabled={loading || canceling}
                   onClick={() => void continueImport(item.id)}
                 >
                   Continuar
+                </button>
+                <button
+                  className="button button--danger"
+                  type="button"
+                  disabled={loading || canceling}
+                  onClick={() => {
+                    setCancelError(null);
+                    setCancelTarget(item);
+                  }}
+                >
+                  Cancelar
                 </button>
               </div>
             </article>
@@ -720,6 +752,18 @@ export function AbastecimentosImportarPoliFrotaPage() {
           onConfirm={() => void executeConfirm()}
         />
       )}
+      {cancelTarget && (
+        <ConfirmDialog
+          title="Cancelar importação?"
+          message={`A importação "${cancelTarget.arquivo_nome}" será marcada como cancelada e ficará preservada para auditoria. Nenhum abastecimento já confirmado será excluído.`}
+          busy={canceling}
+          error={cancelError}
+          confirmLabel="Cancelar importação"
+          busyLabel="Cancelando..."
+          onCancel={() => !canceling && setCancelTarget(null)}
+          onConfirm={() => void executeCancel()}
+        />
+      )}
     </>
   );
 }
@@ -890,6 +934,7 @@ function PreviewRow({
   onSubstitution: (item: PoliFrotaPreviewItem) => void;
   onRemoveSubstitution: (item: PoliFrotaPreviewItem) => void;
 }) {
+  const identificationLabel = polifrotaIdentificacao(item.placa_original, item.frota_original);
   const [expanded, setExpanded] = useState(false);
   const [draftType, setDraftType] = useState<DestinatarioTipo | "">(
     item.tipo_destinatario || "",
@@ -970,10 +1015,10 @@ function PreviewRow({
             : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
         </td>
         <td title={item.frota_original || undefined}>
-          {item.frota_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+          {item.frota_original || (!item.placa_original ? identificationLabel : "—")}
         </td>
         <td title={item.placa_original || undefined}>
-          {item.placa_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+          {item.placa_original || "—"}
         </td>
         <td>
           {productLabel[item.produto_detectado] || item.produto_detectado}

@@ -31,6 +31,33 @@ export interface Terceiro {
   status: AbastecimentoStatus
   observacoes: string | null
 }
+export type FrotaTerceiraTipo = 'PLACA' | 'EQUIPAMENTO' | 'OUTRO'
+export interface FrotaTerceira {
+  id: string
+  identificacao: string
+  identificacao_normalizada: string
+  tipo: FrotaTerceiraTipo
+  terceiro_id: string | null
+  terceiro_nome: string | null
+  status: AbastecimentoStatus
+  observacoes: string | null
+  created_at: string
+  updated_at: string
+}
+export interface FrotaTerceiraFilters {
+  busca?: string
+  tipo?: FrotaTerceiraTipo
+  status?: AbastecimentoStatus
+  terceiro_id?: string
+  sem_terceiro?: boolean
+}
+export interface FrotaTerceiraPayload {
+  identificacao: string
+  tipo: FrotaTerceiraTipo
+  terceiro_id: string | null
+  status?: AbastecimentoStatus
+  observacoes: string | null
+}
 export type IdentificacaoTerceiroTipo = 'PLACA' | 'FROTA_EXTERNA' | 'GERAL' | 'CODIGO' | 'OUTRO'
 export interface IdentificacaoTerceiro { id: string; terceiro_id: string; identificacao: string; identificacao_normalizada: string; tipo: IdentificacaoTerceiroTipo; status: AbastecimentoStatus; observacoes: string | null }
 

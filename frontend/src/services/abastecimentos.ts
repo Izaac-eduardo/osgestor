@@ -3,6 +3,7 @@ import type {
   AbastecimentoHistoricoEditPayload,
   AbastecimentoHistoricoFilters,
   AbastecimentoHistoricoResponse,
+  AbastecimentoStatus,
   AbastecimentosRelatorioResponse,
   ConsumoFrotaFilters,
   ConsumoFrotaResponse,
@@ -14,6 +15,9 @@ import type {
   EntradasRelatorioFilters,
   EntradasRelatorioResponse,
   IdentificacaoTerceiro,
+  FrotaTerceira,
+  FrotaTerceiraFilters,
+  FrotaTerceiraPayload,
   PontoOperacional,
   Terceiro,
 } from "../types/abastecimentos";
@@ -71,6 +75,16 @@ export const updateTerceiro = async (id: string, payload: Partial<Terceiro>) =>
   (await api.put<Terceiro>(`/abastecimento/terceiros/${id}`, payload)).data;
 export const deleteTerceiro = async (id: string) =>
   api.delete(`/abastecimento/terceiros/${id}`);
+export const listarFrotasTerceiras = async (params?: FrotaTerceiraFilters) =>
+  (await api.get<FrotaTerceira[]>('/abastecimento/frotas-terceiras', { params })).data;
+export const obterFrotaTerceira = async (id: string) =>
+  (await api.get<FrotaTerceira>(`/abastecimento/frotas-terceiras/${id}`)).data;
+export const criarFrotaTerceira = async (payload: FrotaTerceiraPayload) =>
+  (await api.post<FrotaTerceira>('/abastecimento/frotas-terceiras', payload)).data;
+export const atualizarFrotaTerceira = async (id: string, payload: FrotaTerceiraPayload) =>
+  (await api.put<FrotaTerceira>(`/abastecimento/frotas-terceiras/${id}`, payload)).data;
+export const alterarStatusFrotaTerceira = async (id: string, status: AbastecimentoStatus) =>
+  (await api.patch<FrotaTerceira>(`/abastecimento/frotas-terceiras/${id}/status`, { status })).data;
 export const getTerceiroIdentificacoes = async (id: string) =>
   (
     await api.get<IdentificacaoTerceiro[]>(

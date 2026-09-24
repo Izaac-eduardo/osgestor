@@ -485,14 +485,13 @@ const pdf = (
       layout: "landscape",
       margins: { top: 42, right: 36, bottom: 42, left: 36 },
       bufferPages: true,
+      autoFirstPage: false,
       info: { Title: `OSGestor - ${title}`, Author: "OSGestor" },
     });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
-    const pageWidth =
-      doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const addTitle = (): void => {
       doc
         .fillColor("#285877")
@@ -512,6 +511,8 @@ const pdf = (
     };
     const table = (section: PdfSection): void => {
       doc.addPage();
+      const pageWidth =
+        doc.page.width - doc.page.margins.left - doc.page.margins.right;
       doc
         .fillColor("#285877")
         .font("Helvetica-Bold")
@@ -580,7 +581,7 @@ const pdf = (
       index += 1
     ) {
       doc.switchToPage(index);
-      const y = doc.page.height - 24;
+      const y = doc.page.height - doc.page.margins.bottom - 12;
       doc
         .moveTo(doc.page.margins.left, y - 8)
         .lineTo(doc.page.width - doc.page.margins.right, y - 8)
@@ -590,14 +591,17 @@ const pdf = (
         .fillColor("#607D8B")
         .font("Helvetica")
         .fontSize(8)
-        .text("OSGestor", doc.page.margins.left, y);
+        .text("OSGestor", doc.page.margins.left, y, { lineBreak: false });
       doc.text(`Página ${index + 1}`, 0, y, {
         width: doc.page.width - doc.page.margins.right,
         align: "right",
+        lineBreak: false,
       });
     }
     doc.end();
   });
+
+export const renderAbastecimentosPdfForTest = pdf;
 
 export async function exportAbastecimentosPdf(
   filters: RelatorioAbastecimentosFilters,
