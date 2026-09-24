@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
@@ -200,6 +200,16 @@ test('classifica categorias de serviÃ§o por descriÃ§Ã£o normalizada', () =
   assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICAR']), 'LUBRIFICACAO');
   assert.equal(classifyCategory(['SERVICO ESPECIAL']), 'OUTROS');
   assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO BORRACHARIA']), 'OUTROS');
+});
+
+test('classifica serviços terceiros explícitos sem transformar produtos reais', () => {
+  for (const description of ['FRETE', 'ALINHAR/BALANCEAR', 'ALINHAMENTO DIANTEIRO', 'BALANCEAMENTO', 'SOCORRO PARTE ELETRICA', 'MAO DE OBRA ELETRICISTA', 'MANUTENCAO PREVENTIVA 6000 HOR', 'SERVICO SOLDA TERCEIROS', 'SERVICO DE GUINCHO', 'BORRACHARIA', 'CHAVEIRO', 'AFERICAO TACOGRAFO', 'DESLOCAMENTO', 'INSTALACAO ELETRICA', 'REPARO DE ALTERNADOR']) {
+    assert.equal(classifyItemType(description), 'SERVICO', description);
+  }
+  assert.equal(classifyItemType('MENSALIDADE / LICENCA DE USO'), 'PRODUTO');
+  assert.equal(classifyItemType('KIT DE JUNTAS'), 'PRODUTO');
+  assert.equal(classifyItemType('TROCA DA BUCHA LE'), 'PRODUTO');
+  assert.equal(classifyItemType('ITEM SEM DESCRICAO DE SERVICO', true), 'SERVICO');
 });
 
 test('normaliza filtro de frota sem fazer fuzzy matching', () => {
