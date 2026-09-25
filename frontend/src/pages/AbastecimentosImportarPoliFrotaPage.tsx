@@ -164,7 +164,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
     try {
       setInProgress(await getImportacoesEmAndamento());
     } catch {
-      setError("Não foi possí­vel carregar as importações em andamento.");
+      setError("Não foi possível carregar as importações em andamento.");
     }
   };
   const continueImport = async (id: string) => {
@@ -174,7 +174,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
       setPreview(await getImportacaoPreview(id));
       setSelected([]);
     } catch (e) {
-      setError(errorMessage(e, "Não foi possí­vel reabrir a importação."));
+      setError(errorMessage(e, "Não foi possível reabrir a importação."));
     } finally {
       setLoading(false);
     }
@@ -263,7 +263,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
       const updated = await resolvePreviewItem(preview.id, item.id, resolution);
       mergeItems([updated]);
     } catch (e) {
-      setError(errorMessage(e, "Não foi possí­vel salvar a resolução."));
+      setError(errorMessage(e, "Não foi possível salvar a resolução."));
     } finally {
       setSavingIds((current) => current.filter((id) => id !== item.id));
     }
@@ -322,7 +322,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
       setBatch({ obra_id: "", tipo_destinatario: "", target_id: "" });
     } catch (e) {
       setError(
-        errorMessage(e, "Não foi possí­vel aplicar a resolução em lote."),
+        errorMessage(e, "Não foi possível aplicar a resolução em lote."),
       );
     } finally {
       setSavingBatch(false);
@@ -347,7 +347,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
       setError(
         errorMessage(
           e,
-          "Não foi possí­vel confirmar os abastecimentos prontos.",
+          "Não foi possível confirmar os abastecimentos prontos.",
         ),
       );
     } finally {
@@ -483,7 +483,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
                     setError(
                       errorMessage(
                         e,
-                        "NÃ£o foi possÃ­vel criar nova anÃ¡lise.",
+                        "Não foi possível criar nova análise.",
                       ),
                     );
                   } finally {
@@ -864,7 +864,7 @@ function PreviewTable({
           <tr>
             <th className="sticky-col sticky-check">
               <input
-                aria-label="Selecionar registros visí­veis"
+                aria-label="Selecionar registros visíveis"
                 type="checkbox"
                 checked={allSelected}
                 onChange={(event) => onToggleAll(event.target.checked)}
@@ -1012,7 +1012,7 @@ function PreviewRow({
         <td>
           {item.data_hora
             ? item.data_hora.replace("T", " ")
-            : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+            : "—"}
         </td>
         <td title={item.frota_original || undefined}>
           {item.frota_original || (!item.placa_original ? identificationLabel : "—")}
@@ -1025,21 +1025,21 @@ function PreviewRow({
         </td>
         <td>
           {item.km_hr === null
-            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            ? "—"
             : formatQuantity(item.km_hr)}
         </td>
         <td>
           {item.valor_total === null
-            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            ? "—"
             : formatCurrency(item.valor_total)}
         </td>
         <td>
           {item.litros === null
-            ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+            ? "—"
             : `${formatQuantity(item.litros)} L`}
         </td>
         <td title={item.bico_descricao_original || undefined}>
-          {item.bico_codigo_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+          {item.bico_codigo_original || "—"}
         </td>
         <td>
           <select
@@ -1119,18 +1119,18 @@ function PreviewRow({
           <td colSpan={13}>
             <strong>Detalhes do abastecimento</strong>
             <span>
-              Frentista: {item.frentista_original || "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+              Frentista: {item.frentista_original || "—"}
             </span>
             <span>
               Valor original:{" "}
               {item.valor_total === null
-                ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+                ? "—"
                 : formatCurrency(item.valor_total)}
             </span>
             <span>
-              HorÃ­metro:{" "}
+              Horímetro:{" "}
               {item.horimetro === null
-                ? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"
+                ? "—"
                 : formatQuantity(item.horimetro)}
             </span>
           </td>
