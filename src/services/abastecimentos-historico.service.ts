@@ -54,9 +54,11 @@ function buildWhere(filters: HistoricoFilters, values: string[]): string {
   }
   const search = filters.busca?.trim();
   if (search) {
+    const identifierParameter = bindValue(values, search);
     const parameter = bindValue(values, `%${search}%`);
     conditions.push(`(
-      a.identificacao_original ILIKE ${parameter} OR a.placa_original ILIKE ${parameter} OR a.frota_original ILIKE ${parameter}
+      a.identificador_externo = ${identifierParameter}
+      OR a.identificacao_original ILIKE ${parameter} OR a.placa_original ILIKE ${parameter} OR a.frota_original ILIKE ${parameter}
       OR f.codigo ILIKE ${parameter} OR f.placa ILIKE ${parameter} OR t.nome ILIKE ${parameter}
       OR d.codigo ILIKE ${parameter} OR d.nome ILIKE ${parameter}
       OR EXISTS (SELECT 1 FROM abastecimento_terceiro_identificacoes ti_search WHERE ti_search.terceiro_id = a.terceiro_id AND ti_search.status = 'ATIVO' AND ti_search.identificacao ILIKE ${parameter})
