@@ -163,6 +163,8 @@ export const getAbastecimentosHistorico = async (
       params,
     })
   ).data;
+export const getAbastecimentosHistoricoBicos = async () =>
+  (await api.get<string[]>('/abastecimento/historico/bicos')).data;
 export const updateAbastecimentoHistorico = async (
   id: string,
   payload: AbastecimentoHistoricoEditPayload,

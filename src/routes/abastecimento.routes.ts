@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as controller from '../controllers/abastecimentos-base.controller.js';
-import { listAbastecimentosHistoricoController } from '../controllers/abastecimentos-historico.controller.js';
+import { listAbastecimentosHistoricoBicosController, listAbastecimentosHistoricoController } from '../controllers/abastecimentos-historico.controller.js';
 import { getRelatorioAbastecimentosController } from '../controllers/abastecimentos-relatorios.controller.js';
 import { getRelatorioEntradasController } from '../controllers/abastecimentos-entradas-relatorio.controller.js';
 import { updateAbastecimentoHistoricoController } from '../controllers/abastecimentos-historico-edit.controller.js';
@@ -12,6 +12,7 @@ import * as frotasTerceiras from '../controllers/abastecimentos-frotas-terceiras
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
 abastecimentoRoutes.get('/historico', listAbastecimentosHistoricoController);
+abastecimentoRoutes.get('/historico/bicos', listAbastecimentosHistoricoBicosController);
 abastecimentoRoutes.patch('/historico/:id', updateAbastecimentoHistoricoController);
 abastecimentoRoutes.get('/relatorios', getRelatorioAbastecimentosController);
 abastecimentoRoutes.get('/relatorios/entradas', getRelatorioEntradasController);

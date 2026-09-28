@@ -8,6 +8,7 @@ export interface HistoricoFilters {
   frota_id?: string;
   terceiro_id?: string;
   busca?: string;
+  bico?: string;
   produto?: string;
   tipo_destinatario?: string;
   page?: string;
@@ -52,6 +53,8 @@ function buildWhere(filters: HistoricoFilters, values: string[]): string {
     if (!['FROTA', 'TERCEIRO', 'ESPECIAL', 'EXTERNA'].includes(filters.tipo_destinatario)) throw new AbastecimentoServiceError(400, 'tipo_destinatario inválido.');
     conditions.push(`a.tipo_destinatario = ${bindValue(values, filters.tipo_destinatario)}`);
   }
+  const bico = filters.bico?.trim();
+  if (bico) conditions.push(`a.bico_codigo_original = ${bindValue(values, bico)}`);
   const search = filters.busca?.trim();
   if (search) {
     const identifierParameter = bindValue(values, search);
@@ -65,6 +68,21 @@ function buildWhere(filters: HistoricoFilters, values: string[]): string {
     )`);
   }
   return conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+}
+
+export async function listAbastecimentosHistoricoBicos(): Promise<string[]> {
+  const result = await pool.query<{ codigo: string }>(`
+    SELECT codigo
+    FROM (
+      SELECT DISTINCT btrim(bico_codigo_original) AS codigo
+      FROM abastecimentos
+      WHERE bico_codigo_original IS NOT NULL AND btrim(bico_codigo_original) <> ''
+    ) values_distintos
+    ORDER BY CASE WHEN codigo ~ '^\\d+$' THEN 0 ELSE 1 END,
+      CASE WHEN codigo ~ '^\\d+$' THEN codigo::integer END NULLS LAST,
+      codigo
+  `);
+  return result.rows.map(row => row.codigo);
 }
 
 const fromClause = `

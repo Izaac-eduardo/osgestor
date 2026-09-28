@@ -191,6 +191,7 @@ export interface AbastecimentoHistoricoFilters {
   frota_id?: string
   terceiro_id?: string
   busca?: string
+  bico?: string
   produto?: string
   tipo_destinatario?: DestinatarioTipo
   page?: number
