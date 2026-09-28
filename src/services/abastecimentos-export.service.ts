@@ -204,10 +204,10 @@ const entryFilters = (
   filters: EntradasRelatorioFilters,
 ): EntradasRelatorioFilters => ({ ...filters, page: 1, limit: 0 });
 const destinationsText = (
-  destinations: Array<{ ponto_codigo: string; litros: number }>,
+  destinations: Array<{ tipo_destino: 'PONTO' | 'FROTA_DIRETA'; ponto_codigo?: string | null; frota_codigo?: string | null; litros: number }>,
 ): string =>
   destinations
-    .map((item: any) => `${item.ponto_codigo}: ${quantity.format(item.litros)} L`)
+    .map((item: any) => `${item.tipo_destino === 'FROTA_DIRETA' ? `Frota direta ${item.frota_codigo}` : `Ponto ${item.ponto_codigo}`}: ${quantity.format(item.litros)} L`)
     .join(" | ");
 
 export async function exportAbastecimentosExcel(
@@ -402,6 +402,9 @@ export async function exportEntradasExcel(
     [24, 22, 18],
   );
   summary.addRow([]);
+  summary.addRow(["Abastecimentos diretos em frota"]);
+  addTable(summary, ["Frota", "Litros"], report.por_frota_direta.map((item: any) => [item.codigo, item.litros]), [24, 18]);
+  summary.addRow([]);
   summary.addRow(["Evolução"]);
   addTable(
     summary,
@@ -452,14 +455,14 @@ export async function exportEntradasExcel(
           item.numero_nf,
           new Date(item.data_entrada),
           item.produto_nome,
-          destination.ponto_codigo,
+          destination.tipo_destino === "FROTA_DIRETA" ? `Frota direta: ${destination.frota_codigo}` : `Ponto: ${destination.ponto_codigo}`,
           destination.litros,
         ] as Array<string | number | Date | null>,
     ),
   );
   addTable(
     destinations,
-    ["Entrada", "NF", "Data", "Produto", "Ponto", "Litros"],
+    ["Entrada", "NF", "Data", "Produto", "Destino", "Litros"],
     destinationRows,
     [38, 18, 16, 24, 18, 16],
   );
@@ -712,6 +715,11 @@ export async function exportEntradasPdf(
         String(item.entradas),
         quantity.format(item.litros),
       ]),
+    },
+    {
+      title: "Abastecimentos diretos em frota",
+      headers: ["Frota", "Litros"],
+      rows: report.por_frota_direta.map((item: any) => [item.codigo, quantity.format(item.litros)]),
     },
     {
       title: "Evolução temporal",

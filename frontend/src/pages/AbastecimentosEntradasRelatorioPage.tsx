@@ -332,6 +332,10 @@ function ReportContent({
           )}
         </section>
       </section>
+      <section className="relatorio-table-section">
+        <header><h2>Abastecimentos diretos em frota</h2><p>Destinações documentais da NF, sem gerar abastecimento no histórico.</p></header>
+        {report.por_frota_direta.length ? <div className="orders-table-wrap"><table className="orders-table"><thead><tr><th>Frota</th><th>Litros</th></tr></thead><tbody>{report.por_frota_direta.map(item => <tr key={item.frota_id}><td>{item.codigo}</td><td>{formatQuantity(item.litros)} L</td></tr>)}</tbody></table></div> : <EmptyReport message="Nenhuma frota recebeu litros diretamente no período filtrado." />}
+      </section>
       <section className="relatorio-chart">
         <header className="relatorio-chart__header">
           <div>
@@ -485,8 +489,8 @@ function Destinations({
     <details className="entrada-report-destinations">
       <summary>{destinations.length} destino(s)</summary>
       {destinations.map((item) => (
-        <span key={item.ponto_id}>
-          {item.ponto_codigo} — {formatQuantity(item.litros)} L
+        <span key={item.id || item.ponto_id || item.frota_id}>
+          {item.tipo_destino === 'FROTA_DIRETA' ? `Frota direta: ${item.frota_codigo}` : `Ponto: ${item.ponto_codigo}`} — {formatQuantity(item.litros)} L
         </span>
       ))}
     </details>

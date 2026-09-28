@@ -72,9 +72,12 @@ export interface DestinacaoEspecial {
 
 export interface EntradaDestino {
   id?: string
-  ponto_id: string
+  tipo_destino: 'PONTO' | 'FROTA_DIRETA'
+  ponto_id: string | null
   ponto_codigo?: string
   ponto_nome?: string
+  frota_id: string | null
+  frota_codigo?: string
   litros: number
   observacoes?: string | null
 }
@@ -101,7 +104,7 @@ export interface EntradaPayload {
   litros_nf: number
   valor_total_nf: number
   observacoes: string | null
-  destinos: Array<{ ponto_id: string; litros: number }>
+  destinos: Array<{ tipo_destino: 'PONTO' | 'FROTA_DIRETA'; ponto_id: string | null; frota_id: string | null; litros: number }>
 }
 
 export interface EntradaFilters {
@@ -117,8 +120,10 @@ export interface EntradasRelatorioResponse {
   summary: { entradas: number; litros_nf: number; valor_nf: number }
   por_produto: Array<{ produto_id: string; produto: string; nome: string; quantidade: number; litros_nf: number; valor_nf: number; percentual_litros: number; percentual_valor: number }>
   por_ponto: Array<{ ponto_id: string; codigo: string; nome: string; entradas: number; litros: number }>
+  por_frota_direta: Array<{ frota_id: string; codigo: string; litros: number }>
+  total_frota_direta: number
   evolucao: Array<{ periodo: string; entradas: number; litros_nf: number; valor_nf: number }>
-  items: Array<{ id: string; data_entrada: string; numero_nf: string; produto_id: string; produto_codigo: string; produto_nome: string; litros_nf: number; valor_total_nf: number; total_distribuido: number; destinos: Array<{ ponto_id: string; ponto_codigo: string; ponto_nome: string; litros: number }> }>
+  items: Array<{ id: string; data_entrada: string; numero_nf: string; produto_id: string; produto_codigo: string; produto_nome: string; litros_nf: number; valor_total_nf: number; total_distribuido: number; destinos: EntradaDestino[] }>
   pagination: { page: number; limit: number; total: number; total_pages: number }
 }
 
