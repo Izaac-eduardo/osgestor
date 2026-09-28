@@ -1,7 +1,9 @@
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.service.js';
+import { getConsumoFrota } from './abastecimentos-consumo-frota.service.js';
 
 export interface RelatorioAbastecimentosFilters { data_inicio?: string; data_fim?: string; obra_id?: string; busca?: string; produto?: string; tipo_destinatario?: string; periodo?: string }
+type MediaUnidade = 'km/L' | 'L/h';
 const types = ['FROTA', 'TERCEIRO', 'ESPECIAL', 'EXTERNA'] as const;
 const periods = ['dia', 'mes'] as const;
 const date = (value: string | undefined, field: string): string | undefined => {
@@ -33,11 +35,25 @@ function where(filters: RelatorioAbastecimentosFilters, values: string[]): strin
 }
 const numbers = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).map(([key, value]) => ['quantidade', 'litros', 'valor', 'percentual_litros', 'destinatarios'].includes(key) && value !== null ? [key, Number(value)] : [key, value]));
 
+async function mediasPorFrota(filters: RelatorioAbastecimentosFilters) {
+  const report = await getConsumoFrota({ data_inicio: filters.data_inicio, data_fim: filters.data_fim, obra_id: filters.obra_id, produto: filters.produto, all: true });
+  const grouped = new Map<string, typeof report.frotas>();
+  for (const item of report.frotas) grouped.set(item.frota_id, [...(grouped.get(item.frota_id) ?? []), item]);
+  const result = new Map<string, { media: number | null; media_unidade: MediaUnidade | null }>();
+  for (const [frotaId, items] of grouped) {
+    const candidates = filters.produto ? items : items.length === 1 ? items : [];
+    const item = candidates[0];
+    const calculavel = item && (item.situacao === 'CALCULAVEL_KM' || item.situacao === 'CALCULAVEL_HORIMETRO') && item.media !== null;
+    result.set(frotaId, { media: calculavel ? item.media : null, media_unidade: calculavel ? item.tipo_calculo === 'L/H' ? 'L/h' : 'km/L' : null });
+  }
+  return result;
+}
+
 export async function getRelatorioAbastecimentos(filters: RelatorioAbastecimentosFilters = {}) {
   if (filters.periodo && !periods.includes(filters.periodo as typeof periods[number])) throw new AbastecimentoServiceError(400, 'periodo deve ser dia ou mes.');
   const values: string[] = []; const clause = where(filters, values); const query = (sql: string) => pool.query(sql, values); const withCondition = (condition: string) => clause ? `${clause} AND ${condition}` : `WHERE ${condition}`;
   const evolutionPeriod = filters.periodo === 'mes' ? "to_char(date_trunc('month',a.data_hora),'YYYY-MM')" : "to_char(date_trunc('day',a.data_hora),'YYYY-MM-DD')";
-  const [summary, products, works, fleets, thirds, specials, evolution] = await Promise.all([
+  const [summary, products, works, fleets, thirds, specials, evolution, medias] = await Promise.all([
     query(`SELECT COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor,COUNT(DISTINCT CASE WHEN a.tipo_destinatario='FROTA' THEN a.frota_id::text WHEN a.tipo_destinatario='TERCEIRO' THEN a.terceiro_id::text WHEN a.tipo_destinatario='ESPECIAL' THEN a.destinacao_especial_id::text ELSE COALESCE(a.identificacao_original,a.id::text) END)::text destinatarios ${from} ${clause}`),
     query(`SELECT p.codigo produto,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${clause} GROUP BY p.codigo ORDER BY SUM(a.litros) DESC,p.codigo`),
     query(`SELECT o.id obra_id,o.nome obra,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor,CASE WHEN SUM(SUM(a.litros)) OVER()=0 THEN 0 ELSE SUM(a.litros)/SUM(SUM(a.litros)) OVER()*100 END::numeric percentual_litros ${from} ${clause} GROUP BY o.id,o.nome ORDER BY SUM(a.litros) DESC,o.nome`),
@@ -45,6 +61,7 @@ export async function getRelatorioAbastecimentos(filters: RelatorioAbastecimento
     query(`SELECT t.id terceiro_id,t.nome terceiro,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='TERCEIRO'")} GROUP BY t.id,t.nome ORDER BY SUM(a.litros) DESC,t.nome`),
     query(`SELECT COALESCE(d.codigo,d.nome) destinacao,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='ESPECIAL'")} GROUP BY d.id,d.codigo,d.nome ORDER BY SUM(a.litros) DESC,d.codigo`),
     query(`SELECT ${evolutionPeriod} periodo,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${clause} GROUP BY date_trunc('${filters.periodo === 'mes' ? 'month' : 'day'}',a.data_hora) ORDER BY date_trunc('${filters.periodo === 'mes' ? 'month' : 'day'}',a.data_hora)`),
+    mediasPorFrota(filters),
   ]);
-  return { summary: numbers(summary.rows[0] || { quantidade: '0', litros: '0', valor: '0', destinatarios: '0' }), por_produto: products.rows.map(numbers), por_obra: works.rows.map(numbers), por_frota: fleets.rows.map(numbers), por_terceiro: thirds.rows.map(numbers), especiais: specials.rows.map(numbers), evolucao: evolution.rows.map(row => { const { periodo, ...rest } = numbers(row); return { ...rest, data: periodo }; }) };
+  return { summary: numbers(summary.rows[0] || { quantidade: '0', litros: '0', valor: '0', destinatarios: '0' }), por_produto: products.rows.map(numbers), por_obra: works.rows.map(numbers), por_frota: fleets.rows.map(row => ({ ...numbers(row), media: medias.get(row.frota_id)?.media ?? null, media_unidade: medias.get(row.frota_id)?.media_unidade ?? null })), por_terceiro: thirds.rows.map(numbers), especiais: specials.rows.map(numbers), evolucao: evolution.rows.map(row => { const { periodo, ...rest } = numbers(row); return { ...rest, data: periodo }; }) };
 }

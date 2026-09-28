@@ -27,6 +27,10 @@ const quantity = new Intl.NumberFormat("pt-BR", {
 });
 const numberValue = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
+const average = (value: { media?: number | null; media_unidade?: string | null }): string =>
+  value.media === null || value.media === undefined || !value.media_unidade
+    ? "—"
+    : `${value.media.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${value.media_unidade}`;
 const dateLabel = (value: string | undefined): string =>
   value ? value.split("-").reverse().join("/") : "Todos";
 const periodLabel = (start?: string, end?: string): string =>
@@ -265,15 +269,16 @@ export async function exportAbastecimentosExcel(
   summary.addRow(["Por Frota"]);
   addTable(
     summary,
-    ["Frota", "Placa/Identificação", "Abastecimentos", "Litros", "Valor"],
+    ["Frota", "Placa/Identificação", "Abastecimentos", "Média", "Litros", "Valor"],
     report.por_frota.map((item: any) => [
       item.frota,
       item.placa,
       item.quantidade,
+      average(item),
       item.litros,
       item.valor,
     ]),
-    [24, 22, 18, 16, 18],
+    [22, 22, 18, 20, 16, 18],
   );
   summary.addRow([]);
   summary.addRow(["Por Terceiro"]);
@@ -637,6 +642,7 @@ export async function exportAbastecimentosPdf(
         "Frota",
         "Placa/Identificação",
         "Abastecimentos",
+        "Média",
         "Litros",
         "Valor",
       ],
@@ -644,6 +650,7 @@ export async function exportAbastecimentosPdf(
         item.frota,
         item.placa,
         String(item.quantidade),
+        average(item),
         quantity.format(item.litros),
         money.format(item.valor),
       ]),

@@ -232,7 +232,7 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     const destinations = workbook.getWorksheet("Destinos")!;
     const destinationRow = destinations
       .getRows(1, destinations.rowCount)
-      .find((row) => row.getCell(5).value === "CC01")!;
+      .find((row) => row.getCell(5).value === "Ponto: CC01")!;
     assert.equal(typeof destinationRow.getCell(6).value, "number");
     assert.equal(destinationRow.getCell(6).value, 60);
     assert.ok(
@@ -240,7 +240,7 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     );
     const destinationRows = destinations
       .getRows(1, destinations.rowCount)
-      .filter((row) => row.getCell(5).value === "CC01" || row.getCell(5).value === "CC02");
+      .filter((row) => row.getCell(5).value === "Ponto: CC01" || row.getCell(5).value === "Ponto: CC02");
     assert.equal(destinationRows.length, 2);
     const pdfResponse = await fetch(
       `${url}/abastecimento/relatorios/entradas/exportar/pdf`,
