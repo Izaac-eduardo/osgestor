@@ -1,12 +1,12 @@
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { addPending, parsePoliOs, matchPreview, type ParsedOs } from '../imports/poli-os.js';
+import { addPending, importedServiceOrigin, matchPreview, parsePoliOs, refreshServiceClassificationPending, validateServiceClassificationsForConfirmation, type ParsedOs } from '../imports/poli-os.js';
 import { pool } from '../config/database.js';
 import { resolveLancadorFuncionarioId } from '../services/lancadores-os.service.js';
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
 import { SynchronizationConflictError, synchronizeOrder } from '../services/sincronizacao-os.service.js';
-import { createImportedServicoOs } from '../services/ordens-servico-itens.service.js';
+import { isClassificacaoServico } from '../types/servicos-os.js';
 
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
@@ -72,6 +72,27 @@ export async function resolve(request: Request, response: Response): Promise<voi
   const item = items.find(x => x.numeroOs === Number(request.params.numeroOs));
   if (!item) { response.status(404).json({ message: 'O.S. não encontrada na prévia.' }); return; }
   const body = request.body && typeof request.body === 'object' ? request.body : {};
+  if ('servicoIndex' in body || 'classificacao_servico' in body) {
+    const serviceIndex = (body as Record<string, unknown>).servicoIndex;
+    const classification = (body as Record<string, unknown>).classificacao_servico;
+    if (!Number.isInteger(serviceIndex) || Number(serviceIndex) < 0 || !isClassificacaoServico(classification)) {
+      response.status(400).json({ message: 'Serviço e classificação inválidos.' });
+      return;
+    }
+    const service = item.itens[Number(serviceIndex)];
+    if (!service || service.tipo !== 'SERVICO') {
+      response.status(400).json({ message: 'Serviço não encontrado na prévia.' });
+      return;
+    }
+    service.classificacao_servico = classification;
+    service.classificacao_origem = importedServiceOrigin(service);
+    item.pendencias = item.pendencias.filter(value => !value.startsWith('CLASSIFICACAO_SERVICO_PENDENTE'));
+    refreshServiceClassificationPending(item.pendencias, item.itens);
+    item.statusPreview = item.pendencias.length ? 'REQUER_REVISAO' : 'PRONTA';
+    if (!await saveItem(tokenOf(request), item)) { response.status(404).json({ message: notFoundMessage }); return; }
+    response.json(item);
+    return;
+  }
   if (body.status !== undefined && !ordemServicoStatuses.includes(body.status as typeof ordemServicoStatuses[number])) { response.status(400).json({ message: 'status inválido.' }); return; }
   for (const field of ['obraId', 'frotaId', 'natureza', 'status', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
   item.pendencias = [];
@@ -116,6 +137,8 @@ export async function confirm(request: Request, response: Response): Promise<voi
   const token = tokenOf(request), items = await loadPreview(token);
   if (!items) { response.status(404).json({ message: notFoundMessage }); return; }
   const selected = items.filter(x=>x.statusPreview==='PRONTA' || x.statusPreview==='NOVA');
+  const invalid = selected.find(item => { try { validateServiceClassificationsForConfirmation(item.itens); return false; } catch { return true; } });
+  if (invalid) { response.status(400).json({ message: `A O.S. ${invalid.numeroOs} possui serviço sem classificação resolvida.` }); return; }
   const result = { importadas: 0, jaCadastradas: items.filter(x=>x.statusPreview==='JA_CADASTRADA').length, pendentes: items.length-selected.length-items.filter(x=>x.statusPreview==='JA_CADASTRADA').length, falhas: [] as Array<{numeroOs:number;motivo:string}> };
   const client=await pool.connect();
   try {
@@ -132,9 +155,9 @@ export async function confirm(request: Request, response: Response): Promise<voi
         const insertedService = await client.query<{ id: string }>(
           `INSERT INTO servicos_os (
              ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
-           ) SELECT id, $2, $3, $4, 'IMPORTACAO'
+           ) SELECT id, $2, $3, $4, $5
              FROM ordens_servico WHERE numero_os = $1 RETURNING id`,
-          [item.numeroOs, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO'],
+          [item.numeroOs, service.descricao, service.total, service.classificacao_servico, importedServiceOrigin(service)],
         );
         serviceIds.push(insertedService.rows[0]!.id);
       }

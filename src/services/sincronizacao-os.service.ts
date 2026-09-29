@@ -220,8 +220,8 @@ export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> 
     await client.query(orderUpdateSql, [nextStatus, nextCategory, nextProblem, current.id]);
     for (const service of diff.novosServicos) await client.query(
       `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem)
-       VALUES($1,$2,$3,$4,'IMPORTACAO')`,
-      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO'],
+       VALUES($1,$2,$3,$4,$5)`,
+      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO'],
     );
     for (const product of diff.novosProdutos) await client.query(
       'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario) VALUES($1,$2,$3,$4,$5)',
