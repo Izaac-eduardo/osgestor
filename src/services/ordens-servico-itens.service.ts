@@ -7,6 +7,8 @@ import {
 import { ExecucaoServico, listExecucoesOrdem } from './servicos-os-execucoes.service.js';
 
 type NaturezaOs = 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
+export type ClassificacaoServico = 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO';
+export type ClassificacaoOrigem = 'LEGADO' | 'IMPORTACAO' | 'MANUAL' | 'REVISAO';
 
 export interface FuncionarioOs {
   id: string;
@@ -21,6 +23,8 @@ export interface ServicoOs {
   ordem_servico_id: string;
   descricao: string;
   valor: string;
+  classificacao_servico: ClassificacaoServico;
+  classificacao_origem: ClassificacaoOrigem;
   created_at: Date;
   updated_at: Date;
 }
