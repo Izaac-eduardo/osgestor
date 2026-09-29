@@ -89,7 +89,9 @@ export interface EntradaDestino {
   frota_codigo?: string
   litros: number
   observacoes?: string | null
+  abastecimento?: { id: string; identificador_externo: string } | null
 }
+export interface FrotaDiretaCandidate { id: string; data_hora: string; produto_id: string; produto_codigo: string; litros: number; valor_total: number; obra_id: string; obra_nome: string; identificador_externo: string }
 
 export interface Entrada {
   id: string

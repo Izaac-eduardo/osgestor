@@ -21,6 +21,7 @@ import type {
   FrotaTerceiraPayload,
   PontoOperacional,
   Terceiro,
+  FrotaDiretaCandidate,
 } from "../types/abastecimentos";
 
 export const getAbastecimentoProdutos = async () =>
@@ -164,6 +165,12 @@ export const updateEntrada = async (id: string, payload: EntradaPayload) =>
   (await api.put<Entrada>(`/abastecimento/entradas/${id}`, payload)).data;
 export const deleteEntrada = async (id: string) =>
   api.delete(`/abastecimento/entradas/${id}`);
+export const registerFrotaDiretaAbastecimento = async (destinoId: string, payload: Record<string, unknown>) =>
+  (await api.post(`/abastecimento/entradas/destinos/${destinoId}/abastecimento`, payload)).data;
+export const getFrotaDiretaCandidates = async (destinoId: string) =>
+  (await api.get<FrotaDiretaCandidate[]>(`/abastecimento/entradas/destinos/${destinoId}/abastecimentos-candidatos`)).data;
+export const linkFrotaDiretaAbastecimento = async (destinoId: string, abastecimento_id: string) =>
+  (await api.post(`/abastecimento/entradas/destinos/${destinoId}/vincular-abastecimento`, { abastecimento_id })).data;
 export const getAbastecimentosHistorico = async (
   params: AbastecimentoHistoricoFilters,
 ) =>

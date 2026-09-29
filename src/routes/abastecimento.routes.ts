@@ -9,11 +9,15 @@ import { getConsumoFrotaController } from '../controllers/abastecimentos-consumo
 import { exportConsumoFrotaExcelController, exportConsumoFrotaPdfController } from '../controllers/abastecimentos-export.controller.js';
 import * as frotasTerceiras from '../controllers/abastecimentos-frotas-terceiras.controller.js';
 import { createAbastecimentoManualController } from '../controllers/abastecimentos-manual.controller.js';
+import * as frotaDireta from '../controllers/abastecimentos-entrada-frota-direta.controller.js';
 
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
 abastecimentoRoutes.get('/historico', listAbastecimentosHistoricoController);
 abastecimentoRoutes.post('/abastecimentos/manual', createAbastecimentoManualController);
+abastecimentoRoutes.post('/entradas/destinos/:destinoId/abastecimento', frotaDireta.register);
+abastecimentoRoutes.get('/entradas/destinos/:destinoId/abastecimentos-candidatos', frotaDireta.candidates);
+abastecimentoRoutes.post('/entradas/destinos/:destinoId/vincular-abastecimento', frotaDireta.link);
 abastecimentoRoutes.get('/historico/bicos', listAbastecimentosHistoricoBicosController);
 abastecimentoRoutes.patch('/historico/:id', updateAbastecimentoHistoricoController);
 abastecimentoRoutes.get('/relatorios', getRelatorioAbastecimentosController);
