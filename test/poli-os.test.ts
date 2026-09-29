@@ -212,6 +212,30 @@ test('classifica serviços terceiros explícitos sem transformar produtos reais'
   assert.equal(classifyItemType('ITEM SEM DESCRICAO DE SERVICO', true), 'SERVICO');
 });
 
+test('classifica MENSALIDADE PEDAGIO como servico terceiro sem generalizar termos parecidos', () => {
+  for (const description of ['MENSALIDADE PEDAGIO', 'MENSALIDADE PEDÁGIO', 'mensalidade pedagio', 'MENSALIDADE   PEDAGIO']) {
+    assert.equal(classifyItemType(description), 'SERVICO', description);
+    assert.equal(classifyNatureza(null, null, description, true, false, 'FINALIZADA', false), 'TERCEIRO', description);
+    for (const technician of ['IZAAC', 'LUIS', 'MARCELO']) assert.equal(classifyNatureza(null, technician, description, true, false, 'FINALIZADA', false), 'TERCEIRO', technician);
+  }
+  for (const description of ['MENSALIDADE / LICENCA DE USO', 'MENSALIDADE SISTEMA', 'PEDAGIO', 'TAXA DE PEDAGIO']) {
+    assert.equal(classifyItemType(description), 'PRODUTO', description);
+    assert.notEqual(classifyNatureza(null, null, description, true, false, 'FINALIZADA', false), 'TERCEIRO', description);
+  }
+});
+
+test('parser classifica MENSALIDADE PEDAGIO finalizada sem execucao como TERCEIRO', () => {
+  const rows: unknown[][] = Array.from({ length: 8 }, () => Array(40).fill(null));
+  rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S'; rows[0]![12] = 'Cliente'; rows[0]![30] = 'Placa';
+  rows[1]![0] = 2309; rows[1]![6] = '23/09/2026'; rows[1]![8] = 'Finalizada'; rows[1]![16] = 'OBRA'; rows[1]![30] = 'BER7C25';
+  rows[3]![3] = 1; rows[3]![5] = 'MENSALIDADE PEDAGIO'; rows[3]![24] = 1; rows[3]![32] = 900; rows[3]![38] = 900;
+  const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+  const parsed = parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'mensalidade-pedagio.xlsx');
+  assert.equal(parsed[0]?.itens[0]?.tipo, 'SERVICO');
+  assert.equal(parsed[0]?.natureza, 'TERCEIRO');
+  assert.equal(parsed[0]?.execucoes.length, 0);
+});
+
 test('normaliza filtro de frota sem fazer fuzzy matching', () => {
   assert.equal(normalizeFleetCode(' ct32 '), 'CT32');
   assert.equal(normalizeFleetCode('OFICINA'), 'OFICINA');
