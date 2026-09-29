@@ -50,6 +50,26 @@ interface ServicoFields {
   classificacaoServico?: ClassificacaoServico;
 }
 
+export interface ImportedServicoFields {
+  descricao: string;
+  valor: number;
+  classificacao_servico: ClassificacaoServico;
+}
+
+export async function createImportedServicoOs(
+  db: { query: typeof pool.query },
+  ordemServicoId: string,
+  fields: ImportedServicoFields,
+): Promise<ServicoOs> {
+  const result = await db.query<ServicoOs>(
+    `INSERT INTO servicos_os (
+       ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
+     ) VALUES ($1, $2, $3, $4, 'IMPORTACAO') RETURNING *`,
+    [ordemServicoId, fields.descricao, fields.valor, fields.classificacao_servico],
+  );
+  return result.rows[0]!;
+}
+
 interface ProdutoFields {
   descricao: string;
   quantidade: number;

@@ -6,6 +6,7 @@ import { pool } from '../config/database.js';
 import { resolveLancadorFuncionarioId } from '../services/lancadores-os.service.js';
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
 import { SynchronizationConflictError, synchronizeOrder } from '../services/sincronizacao-os.service.js';
+import { createImportedServicoOs } from '../services/ordens-servico-itens.service.js';
 
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
@@ -129,8 +130,11 @@ export async function confirm(request: Request, response: Response): Promise<voi
       const serviceIds: string[] = [];
       for(const service of item.itens.filter(x=>x.tipo==='SERVICO')) {
         const insertedService = await client.query<{ id: string }>(
-          'INSERT INTO servicos_os (ordem_servico_id,descricao,valor) SELECT id,$2,$3 FROM ordens_servico WHERE numero_os=$1 RETURNING id',
-          [item.numeroOs, service.descricao, service.total],
+          `INSERT INTO servicos_os (
+             ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
+           ) SELECT id, $2, $3, $4, 'IMPORTACAO'
+             FROM ordens_servico WHERE numero_os = $1 RETURNING id`,
+          [item.numeroOs, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO'],
         );
         serviceIds.push(insertedService.rows[0]!.id);
       }
