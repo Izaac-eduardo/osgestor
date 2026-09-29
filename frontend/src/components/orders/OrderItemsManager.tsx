@@ -44,6 +44,7 @@ export function OrderItemsManager({order,onRefresh}:Props){
   }
   const remove=()=>{if(!removing)return;const item=removing;void run(()=>item.kind==='employee'?removeOrderEmployee(order.id,item.id):item.kind==='service'?removeOrderService(order.id,item.id):removeOrderProduct(order.id,item.id),item.kind!=='employee',`${item.label} removido com sucesso.`,`Não foi possível remover ${item.label.toLowerCase()}.`)}
   return <>
+    <section className="details-section"><header><h3>Lançador da O.S.</h3></header><p className="details-empty">{[order.lancador_codigo_original,order.lancador_nome_original].filter(Boolean).join(' - ')||'Não informado'}</p></section>
     <ManagedSection title="Funcionários" hidden={order.natureza_os==='MATERIAL'} onAdd={()=>void begin('employee')} add="Adicionar funcionário">
       {order.funcionarios.length?order.funcionarios.map(item=><Row key={item.id} title={item.nome} sub={[item.matricula,item.cargo].filter(Boolean).join(' · ')} onReplace={()=>void beginReplace(item)} onRemove={()=>setRemoving({kind:'employee',id:item.id,label:'Funcionário'})}/>):<Empty text="Nenhum funcionário vinculado."/>}
     </ManagedSection>

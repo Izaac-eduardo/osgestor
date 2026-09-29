@@ -68,7 +68,10 @@ export interface OrdemServicoDetalhes
     | 'total_servicos_terceiros'
     | 'total_produtos'
     | 'total_os'
-  > {
+> {
+  lancador_codigo_original: string | null;
+  lancador_nome_original: string | null;
+  lancador_funcionario_id: string | null;
   funcionarios: FuncionarioOs[];
   servicos: Array<Omit<ServicoOs, 'valor'> & { valor: number; execucoes: ExecucaoServico[] }>;
   execucoes_gerais: ExecucaoServico[];
@@ -372,7 +375,11 @@ export async function deleteProdutoOs(ordemServicoId: string, produtoId: string)
 
 export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoDetalhes> {
   const resumo = await getOrdemServico(id);
-  const [funcionarios, servicos, produtos, execucoes] = await Promise.all([
+  const [launcher, funcionarios, servicos, produtos, execucoes] = await Promise.all([
+    pool.query<{ lancador_codigo_original: string | null; lancador_nome_original: string | null; lancador_funcionario_id: string | null }>(
+      'SELECT lancador_codigo_original,lancador_nome_original,lancador_funcionario_id FROM ordens_servico WHERE id = $1',
+      [id],
+    ),
     rawFuncionarios(id),
     rawServicos(id),
     rawProdutos(id),
@@ -390,6 +397,9 @@ export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoD
   }
   return {
     ...resumo,
+    lancador_codigo_original: launcher.rows[0]?.lancador_codigo_original ?? null,
+    lancador_nome_original: launcher.rows[0]?.lancador_nome_original ?? null,
+    lancador_funcionario_id: launcher.rows[0]?.lancador_funcionario_id ?? null,
     funcionarios,
     execucoes_gerais: execucoesGerais,
     servicos: servicos.map((servico) => ({
