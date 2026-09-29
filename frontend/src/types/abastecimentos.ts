@@ -23,6 +23,15 @@ export interface PontoOperacional {
   compatibilidades?: AbastecimentoProduto[]
 }
 
+export interface AbastecimentoBico {
+  id: string
+  ponto_id: string
+  codigo: string
+  descricao: string | null
+  produto_id: string
+  status: AbastecimentoStatus
+}
+
 export interface Terceiro {
   id: string
   codigo: string | null

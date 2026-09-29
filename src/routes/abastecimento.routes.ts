@@ -28,6 +28,10 @@ abastecimentoRoutes.get('/relatorios/entradas/exportar/excel', exportEntradasExc
 abastecimentoRoutes.get('/pontos', controller.listPontos);
 abastecimentoRoutes.get('/pontos/:id/produtos', controller.listCompatibilidade);
 abastecimentoRoutes.put('/pontos/:id/produtos', controller.replaceCompatibilidade);
+abastecimentoRoutes.get('/pontos/:id/bicos', controller.listBicos);
+abastecimentoRoutes.post('/pontos/:id/bicos', controller.createBico);
+abastecimentoRoutes.put('/pontos/:id/bicos/:bicoId', controller.updateBico);
+abastecimentoRoutes.patch('/pontos/:id/bicos/:bicoId/status', controller.statusBico);
 abastecimentoRoutes.get('/pontos/:id', controller.getPonto);
 abastecimentoRoutes.post('/pontos', controller.createPonto);
 abastecimentoRoutes.put('/pontos/:id', controller.updatePonto);

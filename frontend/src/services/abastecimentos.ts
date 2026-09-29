@@ -1,6 +1,7 @@
 import { api } from "./api";
 import type {
   AbastecimentoHistoricoEditPayload,
+  AbastecimentoBico,
   AbastecimentoHistoricoFilters,
   AbastecimentoHistoricoResponse,
   AbastecimentoStatus,
@@ -61,6 +62,14 @@ export const updatePonto = async (
     .data;
 export const replacePontoProdutos = async (id: string, produto_ids: string[]) =>
   (await api.put(`/abastecimento/pontos/${id}/produtos`, { produto_ids })).data;
+export const getPontoBicos = async (id: string, params?: { status?: string; busca?: string }) =>
+  (await api.get<AbastecimentoBico[]>(`/abastecimento/pontos/${id}/bicos`, { params })).data;
+export const createPontoBico = async (id: string, payload: Partial<AbastecimentoBico>) =>
+  (await api.post<AbastecimentoBico>(`/abastecimento/pontos/${id}/bicos`, payload)).data;
+export const updatePontoBico = async (pointId: string, bicoId: string, payload: Partial<AbastecimentoBico>) =>
+  (await api.put<AbastecimentoBico>(`/abastecimento/pontos/${pointId}/bicos/${bicoId}`, payload)).data;
+export const updatePontoBicoStatus = async (pointId: string, bicoId: string, status: AbastecimentoStatus) =>
+  (await api.patch<AbastecimentoBico>(`/abastecimento/pontos/${pointId}/bicos/${bicoId}/status`, { status })).data;
 export const deletePonto = async (id: string) =>
   api.delete(`/abastecimento/pontos/${id}`);
 

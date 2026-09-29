@@ -3,6 +3,7 @@ import {
   AbastecimentoServiceError, assertUuid, createAbastecimentoEntrada, createAbastecimentoEspecial, createAbastecimentoPonto, createAbastecimentoTerceiro, deleteAbastecimentoEntrada, deleteAbastecimentoEspecial, deleteAbastecimentoPonto, deleteAbastecimentoTerceiro, getAbastecimentoEntrada, getAbastecimentoEspecial, getAbastecimentoPonto, getAbastecimentoTerceiro, listAbastecimentoEntradas, listAbastecimentoEspeciais, listAbastecimentoPontos, listAbastecimentoProdutos, listAbastecimentoTerceiros, listPontoProdutos, replacePontoProdutos, updateAbastecimentoEntrada, updateAbastecimentoEspecial, updateAbastecimentoPonto, updateAbastecimentoPontoStatus, updateAbastecimentoTerceiro,
 } from '../services/abastecimentos-base.service.js';
 import { createTerceiroIdentificacao, deleteTerceiroIdentificacao, listTerceiroIdentificacoes, updateTerceiroIdentificacao } from '../services/abastecimentos-terceiro-identificacoes.service.js';
+import { createAbastecimentoBico, listAbastecimentoBicos, updateAbastecimentoBico, updateAbastecimentoBicoStatus } from '../services/abastecimentos-bicos.service.js';
 
 const queryText = (value: unknown): string | undefined => value === undefined ? undefined : typeof value === 'string' ? value : (() => { throw new AbastecimentoServiceError(400, 'Filtro deve ser texto.'); })();
 const id = (request: Request): string => assertUuid(request.params.id);
@@ -17,6 +18,10 @@ export const statusPonto = action(async (req,res)=>{res.json(await updateAbastec
 export const deletePonto = action(async (req,res)=>{await deleteAbastecimentoPonto(id(req));res.status(204).send();});
 export const listCompatibilidade = action(async (req,res)=>{res.json(await listPontoProdutos(id(req)));});
 export const replaceCompatibilidade = action(async (req,res)=>{res.json(await replacePontoProdutos(id(req),req.body));});
+export const listBicos = action(async (req,res)=>{res.json(await listAbastecimentoBicos(id(req), { status: queryText(req.query.status), busca: queryText(req.query.busca) }));});
+export const createBico = action(async (req,res)=>{res.status(201).json(await createAbastecimentoBico(id(req), req.body));});
+export const updateBico = action(async (req,res)=>{res.json(await updateAbastecimentoBico(id(req), String(req.params.bicoId), req.body));});
+export const statusBico = action(async (req,res)=>{res.json(await updateAbastecimentoBicoStatus(id(req), String(req.params.bicoId), req.body));});
 export const listTerceiros = action(async (req,res)=>{res.json(await listAbastecimentoTerceiros({status:queryText(req.query.status),codigo:queryText(req.query.codigo),nome:queryText(req.query.nome)}));});
 export const getTerceiro = action(async (req,res)=>{res.json(await getAbastecimentoTerceiro(id(req)));});
 export const createTerceiro = action(async (req,res)=>{res.status(201).json(await createAbastecimentoTerceiro(req.body));});

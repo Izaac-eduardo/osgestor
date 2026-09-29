@@ -74,9 +74,13 @@ export async function listAbastecimentosHistoricoBicos(): Promise<string[]> {
   const result = await pool.query<{ codigo: string }>(`
     SELECT codigo
     FROM (
-      SELECT DISTINCT btrim(bico_codigo_original) AS codigo
+      SELECT btrim(bico_codigo_original) AS codigo
       FROM abastecimentos
       WHERE bico_codigo_original IS NOT NULL AND btrim(bico_codigo_original) <> ''
+      UNION
+      SELECT b.codigo
+      FROM abastecimento_bicos b
+      WHERE b.status='ATIVO' AND b.ponto_id IS NOT NULL AND btrim(b.codigo) <> ''
     ) values_distintos
     ORDER BY CASE WHEN codigo ~ '^\\d+$' THEN 0 ELSE 1 END,
       CASE WHEN codigo ~ '^\\d+$' THEN codigo::integer END NULLS LAST,
