@@ -25,8 +25,8 @@ import type {
 
 export const getAbastecimentoProdutos = async () =>
   (await api.get<AbastecimentoProduto[]>("/abastecimento/produtos")).data;
-export const getPontos = async () =>
-  (await api.get<PontoOperacional[]>("/abastecimento/pontos")).data;
+export const getPontos = async (params?: { status?: string }) =>
+  (await api.get<PontoOperacional[]>("/abastecimento/pontos", { params })).data;
 export const getPontoProdutos = async (id: string) =>
   (
     await api.get<AbastecimentoProduto[]>(
@@ -174,6 +174,8 @@ export const getAbastecimentosHistorico = async (
   ).data;
 export const getAbastecimentosHistoricoBicos = async () =>
   (await api.get<string[]>('/abastecimento/historico/bicos')).data;
+export const createAbastecimentoManual = async (payload: Record<string, unknown>) =>
+  (await api.post('/abastecimento/abastecimentos/manual', payload)).data;
 export const updateAbastecimentoHistorico = async (
   id: string,
   payload: AbastecimentoHistoricoEditPayload,
