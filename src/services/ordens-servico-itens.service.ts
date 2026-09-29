@@ -5,10 +5,13 @@ import {
   getOrdemServico,
 } from './ordens-servico.service.js';
 import { ExecucaoServico, listExecucoesOrdem } from './servicos-os-execucoes.service.js';
+import {
+  isClassificacaoServico,
+  type ClassificacaoOrigem,
+  type ClassificacaoServico,
+} from '../types/servicos-os.js';
 
 type NaturezaOs = 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
-export type ClassificacaoServico = 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO';
-export type ClassificacaoOrigem = 'LEGADO' | 'IMPORTACAO' | 'MANUAL' | 'REVISAO';
 
 export interface FuncionarioOs {
   id: string;
@@ -44,6 +47,7 @@ export interface ProdutoOs {
 interface ServicoFields {
   descricao: string;
   valor: number;
+  classificacaoServico?: ClassificacaoServico;
 }
 
 interface ProdutoFields {
@@ -132,10 +136,20 @@ const parseServico = (body: unknown): ServicoFields => {
   if (!isRecord(body)) {
     throw new OrdemServicoServiceError(400, 'O corpo da requisição deve ser um objeto.');
   }
-  return {
+  const fields: ServicoFields = {
     descricao: requiredText(body.descricao, 'descricao'),
     valor: decimalNumber(body.valor, 'valor', 2, false, 9999999999.99),
   };
+  if (Object.prototype.hasOwnProperty.call(body, 'classificacao_servico')) {
+    if (!isClassificacaoServico(body.classificacao_servico)) {
+      throw new OrdemServicoServiceError(
+        400,
+        'classificacao_servico deve ser INTERNO, TERCEIRO ou INDETERMINADO.',
+      );
+    }
+    fields.classificacaoServico = body.classificacao_servico;
+  }
+  return fields;
 };
 
 const parseProduto = (body: unknown): ProdutoFields => {
@@ -284,11 +298,18 @@ export async function createServicoOs(ordemServicoId: string, body: unknown): Pr
       'OS de natureza MATERIAL aceita somente produtos e não permite serviços.',
     );
   }
-  const result = await pool.query<ServicoOs>(
-    `INSERT INTO servicos_os (ordem_servico_id, descricao, valor)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [ordemServicoId, fields.descricao, fields.valor],
-  );
+  const result = fields.classificacaoServico === undefined
+    ? await pool.query<ServicoOs>(
+      `INSERT INTO servicos_os (ordem_servico_id, descricao, valor)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [ordemServicoId, fields.descricao, fields.valor],
+    )
+    : await pool.query<ServicoOs>(
+      `INSERT INTO servicos_os (
+         ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
+       ) VALUES ($1, $2, $3, $4, 'MANUAL') RETURNING *`,
+      [ordemServicoId, fields.descricao, fields.valor, fields.classificacaoServico],
+    );
   return result.rows[0]!;
 }
 
@@ -298,11 +319,24 @@ export async function updateServicoOs(
   body: unknown,
 ): Promise<ServicoOs> {
   const fields = parseServico(body);
-  const result = await pool.query<ServicoOs>(
-    `UPDATE servicos_os SET descricao = $1, valor = $2
-     WHERE id = $3 AND ordem_servico_id = $4 RETURNING *`,
-    [fields.descricao, fields.valor, servicoId, ordemServicoId],
-  );
+  const result = fields.classificacaoServico === undefined
+    ? await pool.query<ServicoOs>(
+      `UPDATE servicos_os SET descricao = $1, valor = $2
+       WHERE id = $3 AND ordem_servico_id = $4 RETURNING *`,
+      [fields.descricao, fields.valor, servicoId, ordemServicoId],
+    )
+    : await pool.query<ServicoOs>(
+      `UPDATE servicos_os
+          SET descricao = $1, valor = $2,
+              classificacao_servico = $3::varchar,
+              classificacao_origem = CASE
+                WHEN classificacao_servico IS DISTINCT FROM $3::varchar THEN 'REVISAO'
+                ELSE classificacao_origem
+              END
+        WHERE id = $4 AND ordem_servico_id = $5
+        RETURNING *`,
+      [fields.descricao, fields.valor, fields.classificacaoServico, servicoId, ordemServicoId],
+    );
   if (result.rows.length === 0) {
     throw new OrdemServicoServiceError(404, 'Serviço não encontrado nesta Ordem de Serviço.');
   }
