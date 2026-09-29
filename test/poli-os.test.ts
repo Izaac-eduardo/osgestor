@@ -236,6 +236,36 @@ test('parser classifica MENSALIDADE PEDAGIO finalizada sem execucao como TERCEIR
   assert.equal(parsed[0]?.execucoes.length, 0);
 });
 
+test('parser identifica o lançador e os campos de item pelo cabeçalho Vega', () => {
+  const layoutA: unknown[][] = Array.from({ length: 8 }, () => Array(40).fill(null));
+  layoutA[0]![0] = 'O. S.'; layoutA[0]![6] = 'Data O.S'; layoutA[0]![32] = 'Funcionário Abriu O.S.';
+  layoutA[1]![0] = 101; layoutA[1]![6] = '23/09/2026'; layoutA[1]![8] = 'Finalizada'; layoutA[1]![16] = 'OBRA'; layoutA[1]![30] = 'ABC1234'; layoutA[1]![34] = '516'; layoutA[1]![36] = 'LUIS';
+  layoutA[3]![0] = 'Produtos / Serviços'; layoutA[3]![22] = 'Técnico/Operador'; layoutA[3]![30] = 'Qtde'; layoutA[3]![32] = 'Vlr. Unit. ($)'; layoutA[3]![37] = 'Des($)'; layoutA[3]![38] = 'Total Item ($)';
+  layoutA[4]![3] = 1; layoutA[4]![5] = 'SERVICO DE GUINCHO'; layoutA[4]![24] = '999'; layoutA[4]![26] = 'JOAO'; layoutA[4]![30] = 2; layoutA[4]![32] = 100; layoutA[4]![37] = 0; layoutA[4]![38] = 200;
+  const layoutB: unknown[][] = Array.from({ length: 8 }, () => Array(40).fill(null));
+  layoutB[0]![0] = 'O. S.'; layoutB[0]![6] = 'Data O.S'; layoutB[0]![26] = 'Funcionário Abriu O.S.';
+  layoutB[1]![0] = 101; layoutB[1]![6] = '23/09/2026'; layoutB[1]![8] = 'Finalizada'; layoutB[1]![14] = 'OBRA'; layoutB[1]![24] = 'ABC1234'; layoutB[1]![28] = '516'; layoutB[1]![30] = 'LUIS';
+  layoutB[3]![0] = 'Produtos / Serviços'; layoutB[3]![16] = 'Técnico/Operador'; layoutB[3]![24] = 'Qtde'; layoutB[3]![26] = 'Vlr. Unit. ($)'; layoutB[3]![31] = 'Des($)'; layoutB[3]![32] = 'Total Item ($)';
+  layoutB[4]![3] = 1; layoutB[4]![5] = 'SERVICO DE GUINCHO'; layoutB[4]![18] = '999'; layoutB[4]![20] = 'JOAO'; layoutB[4]![24] = 2; layoutB[4]![26] = 100; layoutB[4]![31] = 0; layoutB[4]![32] = 200;
+  const parse = (rows: unknown[][]) => { const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS'); return parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'fixture.xlsx')[0]!; };
+  const parsedA = parse(layoutA), parsedB = parse(layoutB);
+  for (const parsed of [parsedA, parsedB]) {
+    assert.equal(parsed.funcionarioAberturaCodigo, '516'); assert.equal(parsed.funcionarioAberturaNome, 'LUIS');
+    assert.equal(parsed.itens[0]?.tecnicoCodigoOriginal, '999'); assert.equal(parsed.itens[0]?.tecnicoOriginal, 'JOAO');
+    assert.equal(parsed.itens[0]?.quantidade, 2); assert.equal(parsed.itens[0]?.valorUnitario, 100); assert.equal(parsed.itens[0]?.total, 200);
+    assert.equal(parsed.funcionarioAberturaCodigo === parsed.itens[0]?.tecnicoCodigoOriginal, false);
+  }
+});
+
+test('parser mantém lançador quando não há técnico e aceita código de lançador desconhecido', () => {
+  const rows: unknown[][] = Array.from({ length: 6 }, () => Array(40).fill(null));
+  rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S'; rows[0]![32] = 'Funcionário Abriu O.S.';
+  rows[1]![0] = 102; rows[1]![6] = '28/09/2026'; rows[1]![34] = '1316'; rows[1]![36] = 'MARCELO';
+  const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+  const parsed = parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'unknown.xlsx')[0]!;
+  assert.equal(parsed.funcionarioAberturaCodigo, '1316'); assert.equal(parsed.funcionarioAberturaNome, 'MARCELO'); assert.equal(parsed.itens.length, 0);
+});
+
 test('normaliza filtro de frota sem fazer fuzzy matching', () => {
   assert.equal(normalizeFleetCode(' ct32 '), 'CT32');
   assert.equal(normalizeFleetCode('OFICINA'), 'OFICINA');
