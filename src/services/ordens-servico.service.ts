@@ -39,6 +39,8 @@ export interface OrdemServico {
   data_abertura: string;
   data_fechamento: string | null;
   status: OrdemServicoStatus;
+  status_original: string | null;
+  status_origem: 'AUTOMATICO' | 'MANUAL' | null;
   observacoes: string | null;
   created_at: Date;
   updated_at: Date;
