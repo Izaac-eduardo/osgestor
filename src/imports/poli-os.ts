@@ -27,17 +27,18 @@ export function findFleetId(original:string|null,fleets:Array<{id:string;codigo:
 export function productUnit(description:string){ return /^OLEO(\s|$)/i.test(norm(description))?'L':'UN'; }
 const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|BALANCEAMENTO|SOCORRO|MAO DE OBRA|MANUTENCAO|SERVICO|GUINCHO|SOLDA|BORRACHARIA|CHAVEIRO|AFERICAO|DESLOCAMENTO|INSTALACAO|REPARO)\b/;
 export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' { return hasExecution || isMensalidadePedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO'; }
-const internalServiceWhitelist = new Set(['MAO DE OBRA MECANICO', 'MAO DE OBRA LUBRIFICADOR', 'MAO DE OBRA SOLDADOR', 'MAO DE OBRA LAVADOR']);
-const explicitThirdMarker = /\bTERC(?:EIRO|EIROS)?\b/;
-export function classifyImportedService(description: string, hasInternalExecution = false): Pick<ParsedItem, 'classificacao_servico' | 'classificacao_origem'> {
-  const normalized = norm(description).replace(/\s+/g, ' ');
-  if (isMensalidadePedagio(normalized) || explicitThirdMarker.test(normalized)) {
-    return { classificacao_servico: 'TERCEIRO', classificacao_origem: 'IMPORTACAO' };
-  }
-  if (hasInternalExecution && internalServiceWhitelist.has(normalized)) {
-    return { classificacao_servico: 'INTERNO', classificacao_origem: 'IMPORTACAO' };
-  }
-  return { classificacao_servico: 'INDETERMINADO', classificacao_origem: 'IMPORTACAO' };
+export const CODIGOS_SERVICOS_INTERNOS = new Set(['1919', '1916', '2654', '1902', '2257', '1943']);
+const normalizeServiceCode = (value: unknown): string | undefined => {
+  const code = String(value ?? '').trim();
+  return /^\d+$/.test(code) ? code : undefined;
+};
+export function classifyImportedService(code: unknown): Pick<ParsedItem, 'classificacao_servico' | 'classificacao_origem'> {
+  const normalizedCode = normalizeServiceCode(code);
+  if (!normalizedCode) return { classificacao_servico: 'INDETERMINADO', classificacao_origem: 'IMPORTACAO' };
+  return {
+    classificacao_servico: CODIGOS_SERVICOS_INTERNOS.has(normalizedCode) ? 'INTERNO' : 'TERCEIRO',
+    classificacao_origem: 'IMPORTACAO',
+  };
 }
 export function importedServiceOrigin(item: Pick<ParsedItem, 'classificacao_servico' | 'classificacao_servico_original'>): 'IMPORTACAO' | 'REVISAO' {
   return item.classificacao_servico === (item.classificacao_servico_original ?? item.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO';
@@ -72,8 +73,8 @@ export function parsePoliOs(buffer:Buffer,filename:string):ParsedOs[]{
   const wb=XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true}),out:ParsedOs[]=[];
  for(const sn of wb.SheetNames){const sheet=wb.Sheets[sn]!,rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:null}) as unknown[][],layout=detectVegaLayout(rows);let o:ParsedOs|null=null,last:ParsedItem|undefined;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){const row=rows[rowIndex]!;if(isOsRow(row)){if(o)out.push(o);const launcherCode=textAt(row,layout.launcherCodeColumn)||null,launcherName=textAt(row,layout.launcherNameColumn)||null;o={numeroOs:num(row[0]),data:dateOnly(row[6]),cliente:textAt(row,layout.clienteColumn)||null,frotaOriginal:textAt(row,layout.placaColumn)||textAt(row,layout.veiculoColumn)||null,parecerOriginal:null,funcionarioAbertura:launcherCode,funcionarioAberturaCodigo:launcherCode,funcionarioAberturaNome:launcherName,problema:null,status:undefined,itens:[],execucoes:[],statusPreview:'REQUER_REVISAO',pendencias:[],origem:filename};last=undefined;continue}if(!o)continue;
-   const status=textAt(row,8);if(status)o.status=mapStatus(status);const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description&&code){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedService(description,hasExecution):undefined;last={codigo:code,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,...classification,classificacao_servico_original:classification?.classificacao_servico};o.itens.push(last);}
-   const match=/Inicio em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) Termino em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2})/i.exec(norm(executionText));if(match&&last?.tipo==='SERVICO'){const classification=classifyImportedService(last.descricao,true);last.classificacao_servico=classification.classificacao_servico;last.classificacao_servico_original=classification.classificacao_servico;last.classificacao_origem=classification.classificacao_origem;if(last.tecnicoOriginal&&norm(last.tecnicoOriginal)!=='IZAAC EDUARDO')o.execucoes.push({funcionarioOriginal:last.tecnicoOriginal,inicio:localDateTime(match[1]!,match[2]!),fim:localDateTime(match[3]!,match[4]!)});}
+   const status=textAt(row,8);if(status)o.status=mapStatus(status);const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedService(code):undefined;last={codigo:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,...classification,classificacao_servico_original:classification?.classificacao_servico};o.itens.push(last);}
+   const match=/Inicio em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) Termino em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2})/i.exec(norm(executionText));if(match&&last?.tipo==='SERVICO'){const classification=classifyImportedService(last.codigo);last.classificacao_servico=classification.classificacao_servico;last.classificacao_servico_original=classification.classificacao_servico;last.classificacao_origem=classification.classificacao_origem;if(last.tecnicoOriginal&&norm(last.tecnicoOriginal)!=='IZAAC EDUARDO')o.execucoes.push({funcionarioOriginal:last.tecnicoOriginal,inicio:localDateTime(match[1]!,match[2]!),fim:localDateTime(match[3]!,match[4]!)});}
    const annotation=textAt(row,0);if(/^PROBLEMA\s*:/i.test(annotation)){const problem=annotation.replace(/^PROBLEMA\s*:/i,'').trim();if(!/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+(?:\s+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+)?$/.test(problem))o.problema=o.problema?o.problema+'\n'+problem:problem;}else if(/^PARECER/i.test(annotation))o.parecerOriginal=annotation.replace(/^PARECER[^:]*:/i,'').trim();if(/^TOTAL ORDEM/i.test(norm(row.map(value=>String(value??'')).join(' '))))o.totalOrigem=num(row[layout.totalColumn]);
   }if(o)out.push(o);
  }

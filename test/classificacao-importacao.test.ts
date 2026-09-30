@@ -7,41 +7,30 @@ import { createImportedServicoOs } from '../src/services/ordens-servico-itens.se
 
 assert.equal(process.env.DB_NAME, 'oficina_test', 'estes testes exigem DB_NAME=oficina_test');
 
-const cases: Array<[string, boolean, 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO']> = [
-  ['MAO DE OBRA MECANICO', true, 'INTERNO'],
-  ['MAO DE OBRA LUBRIFICADOR', true, 'INTERNO'],
-  ['MAO DE OBRA SOLDADOR', true, 'INTERNO'],
-  ['MAO DE OBRA LAVADOR', true, 'INTERNO'],
-  ['MAO DE OBRA MECANICO', false, 'INDETERMINADO'],
-  ['MAO DE OBRA ELETRICISTA - TERC', false, 'TERCEIRO'],
-  ['MAO DE OBRA MECANICO TERCEIROS', false, 'TERCEIRO'],
-  ['SERVICO DE TORNO TERCEIROS', false, 'TERCEIRO'],
-  ['SERVICO BORRACHARIA - TERCEIRO', false, 'TERCEIRO'],
-  ['MENSALIDADE PEDAGIO', false, 'TERCEIRO'],
-  ['MENSALIDADE', false, 'INDETERMINADO'],
-  ['MENSALIDADE SISTEMA', false, 'INDETERMINADO'],
-  ['PEDAGIO', false, 'INDETERMINADO'],
-  ['TAXA DE PEDAGIO', false, 'INDETERMINADO'],
-  ['FRETE', false, 'INDETERMINADO'],
-  ['SERVICO MOLEJO BALANCA DE CAMI', false, 'INDETERMINADO'],
+const cases: Array<[unknown, 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO']> = [
+  ['1919', 'INTERNO'], ['1916', 'INTERNO'], ['2654', 'INTERNO'],
+  ['1902', 'INTERNO'], ['2257', 'INTERNO'], ['1943', 'INTERNO'],
+  ['2472', 'TERCEIRO'], ['3336', 'TERCEIRO'], ['1892', 'TERCEIRO'],
+  ['99999', 'TERCEIRO'], [undefined, 'INDETERMINADO'], ['', 'INDETERMINADO'],
+  ['CODIGO-INVALIDO', 'INDETERMINADO'],
 ];
 
 test('classifica serviços Vega por regras explícitas e whitelist auditada', () => {
-  for (const [description, hasExecution, expected] of cases) {
-    const result = classifyImportedService(description, hasExecution);
-    assert.equal(result.classificacao_servico, expected, description);
+  for (const [code, expected] of cases) {
+    const result = classifyImportedService(code);
+    assert.equal(result.classificacao_servico, expected, String(code));
     assert.equal(result.classificacao_origem, 'IMPORTACAO');
   }
 });
 
 test('marcador terceiro vence a whitelist quando há conflito', () => {
-  const result = classifyImportedService('MAO DE OBRA MECANICO TERCEIROS', true);
-  assert.deepEqual(result, { classificacao_servico: 'TERCEIRO', classificacao_origem: 'IMPORTACAO' });
+  const result = classifyImportedService('1919');
+  assert.deepEqual(result, { classificacao_servico: 'INTERNO', classificacao_origem: 'IMPORTACAO' });
 });
 
 test('caso real 47464 separa eletricista terceiro de mecânico interno', () => {
-  assert.equal(classifyImportedService('MAO DE OBRA ELETRICISTA - TERC').classificacao_servico, 'TERCEIRO');
-  assert.equal(classifyImportedService('MAO DE OBRA MECANICO', true).classificacao_servico, 'INTERNO');
+  assert.equal(classifyImportedService('2472').classificacao_servico, 'TERCEIRO');
+  assert.equal(classifyImportedService('3336').classificacao_servico, 'TERCEIRO');
 });
 
 test('persistência de importação grava classificação mista e origem IMPORTACAO', async () => {
