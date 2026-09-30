@@ -224,8 +224,8 @@ export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> 
       [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO'],
     );
     for (const product of diff.novosProdutos) await client.query(
-      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario) VALUES($1,$2,$3,$4,$5)',
-      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario],
+      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) VALUES($1,$2,$3,$4,$5,$6)',
+      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario, product.total],
     );
     for (const execution of diff.novasExecucoes) {
       await client.query('INSERT INTO ordens_servico_funcionarios(ordem_servico_id,funcionario_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [current.id, execution.funcionarioId]);

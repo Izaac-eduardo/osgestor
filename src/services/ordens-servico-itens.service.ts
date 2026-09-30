@@ -40,6 +40,7 @@ export interface ProdutoOs {
   unidade: string;
   valor_unitario: string;
   valor_total: string;
+  valor_total_original: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -104,10 +105,11 @@ export interface OrdemServicoDetalhes
   servicos: Array<Omit<ServicoOs, 'valor'> & { valor: number; execucoes: ExecucaoServico[] }>;
   execucoes_gerais: ExecucaoServico[];
   produtos: Array<
-    Omit<ProdutoOs, 'quantidade' | 'valor_unitario' | 'valor_total'> & {
+    Omit<ProdutoOs, 'quantidade' | 'valor_unitario' | 'valor_total' | 'valor_total_original'> & {
       quantidade: number;
       valor_unitario: number;
       valor_total: number;
+      valor_total_original: number | null;
     }
   >;
   total_mao_obra_interna: number;
@@ -470,6 +472,9 @@ export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoD
       quantidade: numericToNumber(produto.quantidade, 'produtos.quantidade'),
       valor_unitario: numericToNumber(produto.valor_unitario, 'produtos.valor_unitario'),
       valor_total: numericToNumber(produto.valor_total, 'produtos.valor_total'),
+      valor_total_original: produto.valor_total_original === null
+        ? null
+        : numericToNumber(produto.valor_total_original, 'produtos.valor_total_original'),
     })),
     total_mao_obra_interna: numericToNumber(
       resumo.total_mao_obra_interna,

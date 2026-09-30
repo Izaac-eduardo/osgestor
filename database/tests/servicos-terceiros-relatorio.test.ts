@@ -17,7 +17,7 @@ test('relatório de terceiros separa serviço, produto e total sem duplicar valo
     try {
       await setup.query('BEGIN');
       await setup.query('CREATE SCHEMA ' + schema);
-      for (const name of ['001_create_oficina_schema.sql', '002_create_servicos_os_execucoes.sql', '003_create_frotas.sql', '004_validate_frotas_prefixos.sql', '005_frotas_codigo_livre.sql', '007_execucoes_gerais_os.sql']) {
+      for (const name of ['001_create_oficina_schema.sql', '002_create_servicos_os_execucoes.sql', '003_create_frotas.sql', '004_validate_frotas_prefixos.sql', '005_frotas_codigo_livre.sql', '007_execucoes_gerais_os.sql', '021_add_valor_total_original_produtos.sql']) {
         const sql = await readFile(__dirname + '/../migrations/' + name, 'utf8');
         await setup.query(sql.replace(/^\s*BEGIN\s*;/i, '').replace(/COMMIT;\s*$/i, ''));
       }

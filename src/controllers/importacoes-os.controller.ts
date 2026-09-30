@@ -164,7 +164,7 @@ export async function confirm(request: Request, response: Response): Promise<voi
         );
         serviceIds.push(insertedService.rows[0]!.id);
       }
-      for(const product of item.itens.filter(x=>x.tipo==='PRODUTO')) await client.query('INSERT INTO produtos_os (ordem_servico_id,descricao,quantidade,unidade,valor_unitario) SELECT id,$2,$3,$4,$5 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs,product.descricao,product.quantidade,product.unidade,product.valorUnitario]);
+      for(const product of item.itens.filter(x=>x.tipo==='PRODUTO')) await client.query('INSERT INTO produtos_os (ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) SELECT id,$2,$3,$4,$5,$6 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs,product.descricao,product.quantidade,product.unidade,product.valorUnitario,product.total]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query('INSERT INTO ordens_servico_funcionarios (ordem_servico_id,funcionario_id) SELECT id,$2 FROM ordens_servico WHERE numero_os=$1 ON CONFLICT DO NOTHING',[item.numeroOs,execution.funcionarioId]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query(
         `INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim)

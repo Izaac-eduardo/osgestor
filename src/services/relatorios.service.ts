@@ -236,6 +236,7 @@ interface ProdutoRelatorioRow {
   unidade: string;
   valor_unitario: string;
   valor_total: string;
+  valor_total_original: string | null;
 }
 
 export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
@@ -268,6 +269,7 @@ export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
     unidade: string;
     valor_unitario: number;
     valor_total: number;
+    valor_total_original: number | null;
   }>;
 }
 
@@ -325,7 +327,7 @@ export async function getOrdensServicoRelatorio(
       [ids],
     ),
     pool.query<ProdutoRelatorioRow>(
-      `SELECT ordem_servico_id, descricao, quantidade, unidade, valor_unitario, valor_total
+      `SELECT ordem_servico_id, descricao, quantidade, unidade, valor_unitario, valor_total, valor_total_original
        FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])
        ORDER BY created_at ASC`,
       [ids],
@@ -392,6 +394,9 @@ export async function getOrdensServicoRelatorio(
       unidade: produto.unidade,
       valor_unitario: numeric(produto.valor_unitario, 'produtos.valor_unitario'),
       valor_total: numeric(produto.valor_total, 'produtos.valor_total'),
+      valor_total_original: produto.valor_total_original === null
+        ? null
+        : numeric(produto.valor_total_original, 'produtos.valor_total_original'),
     })),
   }));
 }
