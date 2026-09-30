@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { pool } from '../config/database.js';
 import { normalizeFleetCode } from '../utils/frotas.js';
 import { normalizeSearchText } from '../utils/text.js';
+import { listExternalFleetIdentifiers, normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, type ExternalFleetIdentifier } from '../services/frota-identificadores.service.js';
 import { buildOsUpdateDiff, loadExistingOs } from '../services/sincronizacao-os.service.js';
 import type { OsUpdateDiff } from '../services/sincronizacao-os.service.js';
 import type { ClassificacaoOrigem, ClassificacaoServico } from '../types/servicos-os.js';
@@ -33,6 +34,14 @@ export function resolveManualStatus(item: ParsedOs, status: string): boolean {
 const ocorrencias = 'ocorr' + String.fromCharCode(234) + 'ncia';
 export function addPending(pendencias:string[],code:string){if(code==='FORNECEDOR_PENDENTE')return;const index=pendencias.findIndex(x=>x===code||x.startsWith(`${code} (`));if(index<0){pendencias.push(code);return}const match=new RegExp(`\\((\\d+) ${ocorrencias}s?\\)$`).exec(pendencias[index]!);const count=(match?Number(match[1]):1)+1;pendencias[index]=`${code} (${count} ${ocorrencias}${count===1?'':'s'})`;}
 export function findFleetId(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>){if(!original)return undefined;const key=normalizeFleetCode(original);const matches=fleets.filter(x=>normalizeFleetCode(x.codigo)===key||normalizeFleetCode(x.placa??'')===key);return matches.length===1?matches[0]!.id:undefined;}
+export function findFleetIdWithAliases(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>,aliases:ExternalFleetIdentifier[],origem=POLIFROTA_ORIGIN){
+ if(!original)return undefined;
+ const directKey=normalizeFleetCode(original),externalKey=normalizeExternalFleetIdentifier(original);
+ const candidates=new Set<string>();
+ for(const fleet of fleets) if(normalizeFleetCode(fleet.codigo)===directKey||normalizeFleetCode(fleet.placa??'')===directKey)candidates.add(fleet.id);
+ for(const alias of aliases) if(alias.origem===origem&&alias.identificador_normalizado===externalKey)candidates.add(alias.frota_id);
+ return candidates.size===1?[...candidates][0]:undefined;
+}
 export function productUnit(description:string){ return /^OLEO(\s|$)/i.test(norm(description))?'L':'UN'; }
 const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|BALANCEAMENTO|SOCORRO|MAO DE OBRA|MANUTENCAO|SERVICO|GUINCHO|SOLDA|BORRACHARIA|CHAVEIRO|AFERICAO|DESLOCAMENTO|INSTALACAO|REPARO)\b/;
 export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' { return hasExecution || isMensalidadePedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO'; }
@@ -92,6 +101,8 @@ export function parsePoliOs(buffer:Buffer,filename:string):ParsedOs[]{
 export async function matchPreview(items:ParsedOs[]){
  let fleets:{id:string;codigo:string;placa:string|null}[]=[];
  try{fleets=(await pool.query<{id:string;codigo:string;placa:string|null}>('SELECT id,codigo,placa FROM frotas')).rows;}catch{}
+ let externalFleetIdentifiers:ExternalFleetIdentifier[]=[];
+ try{externalFleetIdentifiers=await listExternalFleetIdentifiers(POLIFROTA_ORIGIN);}catch{}
  let employees:{id:string;nome:string}[]=[];
  try{employees=(await pool.query<{id:string;nome:string}>('SELECT id,nome FROM funcionarios')).rows;}catch{}
  for(const o of items){
@@ -101,7 +112,7 @@ export async function matchPreview(items:ParsedOs[]){
   const obra=norm(o.parecerOriginal);
   if(obra){try{const r=await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras');const matches=r.rows.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);if(matches.length===1)o.obraId=o.obraId??matches[0]!.id;else addPending(o.pendencias,matches.length?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
   else addPending(o.pendencias,'OBRA_PENDENTE');
-  if(!o.frotaId)o.frotaId=findFleetId(o.frotaOriginal,fleets);
+  if(!o.frotaId)o.frotaId=findFleetIdWithAliases(o.frotaOriginal,fleets,externalFleetIdentifiers,POLIFROTA_ORIGIN);
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');
   for(const e of o.execucoes){const h=employees.filter(x=>norm(x.nome)===norm(e.funcionarioOriginal));if(h.length===1)e.funcionarioId=e.funcionarioId??h[0]!.id;else addPending(o.pendencias,h.length?'FUNCIONARIO_AMBIGUO':'FUNCIONARIO_PENDENTE');}
   o.natureza=o.natureza??classifyNatureza(o.problema,o.execucoes[0]?.funcionarioOriginal??null,o.itens.map(x=>x.descricao).join(' '),o.itens.some(x=>x.tipo==='SERVICO'),o.itens.some(x=>x.tipo==='PRODUTO'),o.status,o.execucoes.length>0,o.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));
