@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { addPending, importedServiceOrigin, matchPreview, parsePoliOs, refreshServiceClassificationPending, validateServiceClassificationsForConfirmation, type ParsedOs } from '../imports/poli-os.js';
+import { addPending, importedServiceOrigin, matchPreview, parsePoliOs, refreshServiceClassificationPending, resolveManualStatus, validateServiceClassificationsForConfirmation, type ParsedOs } from '../imports/poli-os.js';
 import { pool } from '../config/database.js';
 import { resolveLancadorFuncionarioId } from '../services/lancadores-os.service.js';
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
@@ -94,7 +94,10 @@ export async function resolve(request: Request, response: Response): Promise<voi
     return;
   }
   if (body.status !== undefined && !ordemServicoStatuses.includes(body.status as typeof ordemServicoStatuses[number])) { response.status(400).json({ message: 'status inválido.' }); return; }
-  for (const field of ['obraId', 'frotaId', 'natureza', 'status', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
+  const statusPending = item.pendencias.some(value => value.startsWith('STATUS_PENDENTE'));
+  if (body.status !== undefined && !statusPending) { response.status(409).json({ message: 'Somente uma pendencia de status pode ser resolvida manualmente.' }); return; }
+  for (const field of ['obraId', 'frotaId', 'natureza', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
+  if (body.status !== undefined) resolveManualStatus(item, body.status as string);
   item.pendencias = [];
   if (!item.obraId) addPending(item.pendencias, 'OBRA_PENDENTE');
   if (!item.frotaId) addPending(item.pendencias, 'FROTA_PENDENTE');

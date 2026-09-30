@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId, resolveManualStatus } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
@@ -16,7 +16,7 @@ const eCirc = String.fromCharCode(234);
 const syncCurrent = (overrides: Partial<ExistingOsSnapshot> = {}): ExistingOsSnapshot => ({
   id: 'os-1', numeroOs: 10, obraId: 'obra-1', obra: 'Obra', frotaId: 'frota-1', frota: 'ABC', natureza: 'INTERNA', categoria: 'OUTROS', status: 'ABERTA', problema: null, dataFechamento: null, servicos: [], produtos: [], execucoes: [], ...overrides,
 });
-const syncParsed = (overrides: Partial<ParsedOs> = {}): ParsedOs => ({ numeroOs: 10, data: '2026-09-14', cliente: null, frotaOriginal: 'ABC', parecerOriginal: 'Obra', funcionarioAbertura: null, problema: null, natureza: 'INTERNA', categoriaServico: 'OUTROS', status: 'ABERTA', itens: [], execucoes: [], statusPreview: 'NOVA', pendencias: [], origem: 'teste', ...overrides });
+const syncParsed = (overrides: Partial<ParsedOs> = {}): ParsedOs => ({ numeroOs: 10, data: '2026-09-14', cliente: null, frotaOriginal: 'ABC', parecerOriginal: 'Obra', funcionarioAbertura: null, problema: null, natureza: 'INTERNA', categoriaServico: 'OUTROS', status: 'ABERTA', statusOriginal: 'ABERTA', statusOrigem: 'AUTOMATICO', itens: [], execucoes: [], statusPreview: 'NOVA', pendencias: [], origem: 'teste', ...overrides });
 
 test('persistência da sincronização tipa parâmetros opcionais e evita 42P08', () => {
   assert.match(orderUpdateSql, /status=\$1::varchar\(30\)/);
@@ -126,6 +126,28 @@ test('parser reproduz o bloco exportado pelo Poli OS', () => {
   assert.equal(productUnit(`${String.fromCharCode(211)}LEO LUBRIFICANTE`), 'L'); assert.equal(productUnit('FILTRO DE OLEO'), 'UN');
   assert.equal(classifyNatureza('RETIRAR MATERIAL: ESTOPA', 'JOAO', '', false, true), 'MATERIAL'); assert.equal(classifyNatureza('Troca', null, '', true, false, undefined, false, ['IZAAC EDUARDO']), 'TERCEIRO'); assert.equal(classifyNatureza('Troca', 'Izaac', '', true, false, undefined, false, ['JOAO CARLOS']), 'INTERNA');
   assert.equal(mapStatus('ENCERRADA POR VENDA'), 'FINALIZADA'); assert.equal(mapStatus('STATUS NOVO'), undefined);
+});
+
+test('preserva status original e distingue origem automatica de resolucao manual', () => {
+  const parseStatus = (status: string) => {
+    const rows: unknown[][] = Array.from({ length: 4 }, () => Array(40).fill(null));
+    rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S';
+    rows[1]![0] = 47563; rows[1]![6] = '25/09/2026'; rows[2]![8] = status;
+    const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+    return parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'status.xlsx')[0]!;
+  };
+  for (const [original, mapped] of [['Aberta', 'ABERTA'], ['Encerrada por Venda', 'FINALIZADA'], ['Cancelada', 'CANCELADA']] as const) {
+    const parsed = parseStatus(original);
+    assert.equal(parsed.statusOriginal, original); assert.equal(parsed.status, mapped); assert.equal(parsed.statusOrigem, 'AUTOMATICO');
+  }
+  const unknown = parseStatus('Não Faturar Nesse Cadastro');
+  assert.equal(unknown.statusOriginal, 'Não Faturar Nesse Cadastro'); assert.equal(unknown.status, undefined); assert.equal(unknown.statusOrigem, null);
+  unknown.pendencias = ['STATUS_PENDENTE'];
+  assert.equal(resolveManualStatus(unknown, 'CANCELADA'), true);
+  assert.equal(unknown.statusOriginal, 'Não Faturar Nesse Cadastro'); assert.equal(unknown.status, 'CANCELADA'); assert.equal(unknown.statusOrigem, 'MANUAL');
+  assert.equal(unknown.pendencias.includes('STATUS_PENDENTE'), false);
+  const automatic = parseStatus('Aberta'); automatic.pendencias = [];
+  assert.equal(resolveManualStatus(automatic, 'CANCELADA'), false); assert.equal(automatic.status, 'ABERTA'); assert.equal(automatic.statusOrigem, 'AUTOMATICO');
 });
 
 test('reconhece cancelada e consolida pendências repetidas', () => {
