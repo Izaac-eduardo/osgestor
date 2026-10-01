@@ -2,8 +2,8 @@ import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { Pool } from 'pg';
-import { findFleetIdWithAliases } from '../src/imports/poli-os.js';
-import { normalizeExternalFleetIdentifier } from '../src/services/frota-identificadores.service.js';
+import { findFleetIdWithAliasPrecedence, findFleetIdWithAliases } from '../src/imports/poli-os.js';
+import { normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, VEGA_ORIGIN } from '../src/services/frota-identificadores.service.js';
 
 assert.equal(process.env.DB_NAME, 'oficina_test', 'estes testes exigem DB_NAME=oficina_test');
 
@@ -43,6 +43,28 @@ test('matching reúne código, placa e alias e falha em colisões', () => {
   assert.equal(findFleetIdWithAliases('RE02', fleets, [...aliases, { frota_id: 'b', origem: 'POLIFROTA', identificador_normalizado: 'RE02' }]), undefined);
   assert.equal(findFleetIdWithAliases('OUTRO', fleets, [...aliases, { frota_id: 'a', origem: 'POLIFROTA', identificador_normalizado: 'OUTRO' }]), undefined);
   assert.equal(findFleetIdWithAliases('MESMO', fleets, [...aliases, { frota_id: 'b', origem: 'OUTRA', identificador_normalizado: 'MESMO' }]), 'a');
+});
+
+test('matching Vega usa somente aliases VEGA e mantém ausência segura', () => {
+  const fleets = [{ id: 'a', codigo: 'RE09', placa: null }, { id: 'b', codigo: 'RC16', placa: null }];
+  const aliases = [
+    { frota_id: 'a', origem: VEGA_ORIGIN, identificador_normalizado: '416 3' },
+    { frota_id: 'b', origem: POLIFROTA_ORIGIN, identificador_normalizado: 'CB7 4' },
+  ];
+  assert.equal(findFleetIdWithAliases('416 3', fleets, aliases, VEGA_ORIGIN), 'a');
+  assert.equal(findFleetIdWithAliases('CB7 4', fleets, aliases, VEGA_ORIGIN), undefined);
+  assert.equal(findFleetIdWithAliases('CW34 6', fleets, [], VEGA_ORIGIN), undefined);
+});
+
+test('matching por precedência usa VEGA, fallback POLIFROTA e bloqueia ausência', () => {
+  const fleets = [{ id: 'a', codigo: 'RE09', placa: null }, { id: 'b', codigo: 'RC16', placa: null }];
+  const vega = { frota_id: 'a', origem: VEGA_ORIGIN, identificador_normalizado: 'MESMO' };
+  const poli = { frota_id: 'b', origem: POLIFROTA_ORIGIN, identificador_normalizado: 'OUTRO' };
+  assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, poli]), 'a');
+  assert.equal(findFleetIdWithAliasPrecedence('OUTRO', fleets, [poli]), 'b');
+  assert.equal(findFleetIdWithAliasPrecedence('NENHUM', fleets, [vega, poli]), undefined);
+  assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, { ...poli, identificador_normalizado: 'MESMO' }]), 'a');
+  assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, { frota_id: 'b', origem: VEGA_ORIGIN, identificador_normalizado: 'MESMO' }]), undefined);
 });
 
 test('migration 019 aplica unicidade por origem e permite a mesma chave em origens diferentes', async () => {

@@ -1,6 +1,7 @@
 import { pool } from '../config/database.js';
 
 export const POLIFROTA_ORIGIN = 'POLIFROTA';
+export const VEGA_ORIGIN = 'VEGA';
 
 export interface ExternalFleetIdentifier {
   frota_id: string;
