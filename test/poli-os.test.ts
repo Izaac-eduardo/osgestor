@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId, resolveManualStatus } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyImportedService, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId, resolveManualStatus } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
@@ -244,6 +244,15 @@ test('classifica MENSALIDADE PEDAGIO como servico terceiro sem generalizar termo
     assert.equal(classifyItemType(description), 'PRODUTO', description);
     assert.notEqual(classifyNatureza(null, null, description, true, false, 'FINALIZADA', false), 'TERCEIRO', description);
   }
+});
+
+test('classifica PASSAGEM PEDAGIO como servico terceiro sem usar o codigo como regra global', () => {
+  for (const description of ['PASSAGEM PEDAGIO', ' passagem pedagio ', 'PASSAGEM   PEDAGIO', 'PASSAGEM PEDÁGIO']) {
+    assert.equal(classifyItemType(description), 'SERVICO', description);
+  }
+  assert.equal(classifyItemType('OUTRO ITEM VEGA', false), 'PRODUTO');
+  assert.equal(classifyImportedService('2034').classificacao_servico, 'TERCEIRO');
+  assert.equal(classifyImportedService('1919').classificacao_servico, 'INTERNO');
 });
 
 test('parser classifica MENSALIDADE PEDAGIO finalizada sem execucao como TERCEIRO', () => {

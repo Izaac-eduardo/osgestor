@@ -21,6 +21,7 @@ export const normalizePlate=(v:unknown)=>norm(v).replace(/[\s-]/g,'');
 export const normalizeModel=(v:unknown)=>norm(v).replace(/[\s-]/g,'');
 export function matchObraId(obraText:string|null,obras:Array<{id:string;codigo:string;nome:string}>){const key=norm(obraText);if(!key)return undefined;const matches=obras.filter(x=>norm(x.codigo)===key||norm(x.nome)===key);return matches.length===1?matches[0]!.id:undefined;}
 export function isMensalidadePedagio(description:string):boolean { return norm(description)==='MENSALIDADE PEDAGIO'; }
+export function isPassagemPedagio(description:string):boolean { return norm(description)==='PASSAGEM PEDAGIO'; }
 export function classifyNatureza(problem:string|null, _technician:string|null, text:string, hasService=false, hasProducts=false, status?:string, hasExecutions=false, serviceTechnicians:string[]=[]):Natureza|undefined { const p=norm(problem); const normalizedText=norm(text); if(hasProducts&&!hasService&&/^RETIRAR\b/.test(p)) return 'MATERIAL'; if(norm(status)==='FINALIZADA'&&hasProducts&&!hasService&&!hasExecutions) return 'MATERIAL'; if(hasService&&normalizedText.includes('MENSALIDADE PEDAGIO')) return 'TERCEIRO'; if(serviceTechnicians.some((value)=>norm(value)==='IZAAC EDUARDO')||/\bTERCEIRO(S)?\b/.test(normalizedText)) return 'TERCEIRO'; return problem||text?'INTERNA':undefined; }
 export function mapStatus(v:unknown):string|undefined { const s=norm(v); if(s==='ABERTA')return 'ABERTA'; if(s==='FINALIZADA')return 'FINALIZADA'; if(s==='CANCELADA'||s==='CANCELADO'||s==='ENCERRADA POR CANCELAMENTO')return 'CANCELADA'; if(/^ENCERRADA|^FECHADA/.test(s))return 'FINALIZADA'; return undefined; }
 export function resolveManualStatus(item: ParsedOs, status: string): boolean {
@@ -44,7 +45,7 @@ export function findFleetIdWithAliases(original:string|null,fleets:Array<{id:str
 }
 export function productUnit(description:string){ return /^OLEO(\s|$)/i.test(norm(description))?'L':'UN'; }
 const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|BALANCEAMENTO|SOCORRO|MAO DE OBRA|MANUTENCAO|SERVICO|GUINCHO|SOLDA|BORRACHARIA|CHAVEIRO|AFERICAO|DESLOCAMENTO|INSTALACAO|REPARO)\b/;
-export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' { return hasExecution || isMensalidadePedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO'; }
+export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' { return hasExecution || isMensalidadePedagio(description) || isPassagemPedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO'; }
 export const CODIGOS_SERVICOS_INTERNOS = new Set(['1919', '1916', '2654', '1902', '2257', '1943']);
 const normalizeServiceCode = (value: unknown): string | undefined => {
   const code = String(value ?? '').trim();
