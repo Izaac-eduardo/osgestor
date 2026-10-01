@@ -128,6 +128,26 @@ test('parser reproduz o bloco exportado pelo Poli OS', () => {
   assert.equal(mapStatus('ENCERRADA POR VENDA'), 'FINALIZADA'); assert.equal(mapStatus('STATUS NOVO'), undefined);
 });
 
+test('preserva o índice lógico do serviço em cada execução Vega', () => {
+  const rows: unknown[][] = Array.from({ length: 18 }, () => Array(40).fill(null));
+  rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S'; rows[0]![30] = 'Placa';
+  rows[1]![0] = 47690; rows[1]![6] = '28/09/2026'; rows[1]![30] = 'ASB8E02';
+  rows[2]![8] = 'Encerrada por Venda';
+  const addService = (row: number, code: number, technician: string, start: string, end: string) => {
+    rows[row]![3] = code; rows[row]![5] = 'MAO DE OBRA MECANICO'; rows[row]![24] = 1112; rows[row]![26] = technician;
+    rows[row]![30] = 1; rows[row]![32] = 144; rows[row]![38] = 144;
+    rows[row + 1]![19] = `Inicio em 28/09/2026 ${start} Termino em 28/09/2026 ${end}`;
+  };
+  addService(5, 1919, 'JOAO LUCAS', '08:30', '09:30');
+  addService(8, 1919, 'JOAO LUCAS', '12:40', '13:50');
+  addService(11, 1919, 'JOSIEL DE', '10:00', '11:30');
+  addService(14, 1919, 'LUCAS EDUARDO', '12:40', '13:20');
+  const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+  const parsed = parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'teste.xlsx')[0]!;
+  assert.deepEqual(parsed.execucoes.map(value => value.serviceItemIndex), [0, 1, 2, 3]);
+  assert.deepEqual(parsed.execucoes.map(value => value.funcionarioOriginal), ['JOAO LUCAS', 'JOAO LUCAS', 'JOSIEL DE', 'LUCAS EDUARDO']);
+});
+
 test('preserva status original e distingue origem automatica de resolucao manual', () => {
   const parseStatus = (status: string) => {
     const rows: unknown[][] = Array.from({ length: 4 }, () => Array(40).fill(null));

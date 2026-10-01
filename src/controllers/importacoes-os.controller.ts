@@ -153,8 +153,10 @@ export async function confirm(request: Request, response: Response): Promise<voi
       const lancadorCodigo = item.funcionarioAberturaCodigo ?? item.funcionarioAbertura ?? null;
       const lancadorFuncionarioId = await resolveLancadorFuncionarioId(lancadorCodigo, client);
       await client.query('INSERT INTO ordens_servico (numero_os,obra_id,frota_id,prefixo_frota_id,frota_numero,natureza_os,categoria_servico,prestador_terceiro,lancador_codigo_original,lancador_nome_original,lancador_funcionario_id,data_abertura,status,status_original,status_origem,observacoes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)',[item.numeroOs,item.obraId,item.frotaId,frota.prefixo_frota_id,frota.numero===null?null:Number(frota.numero),item.natureza,item.categoriaServico??null,item.natureza==='TERCEIRO'?item.prestadorTerceiro??null:null,lancadorCodigo?.trim()||null,item.funcionarioAberturaNome?.trim()||null,lancadorFuncionarioId,item.data||new Date().toISOString().slice(0,10),item.status,item.statusOriginal,item.statusOrigem,item.problema]);
+      const serviceIdsByItemIndex = new Map<number, string>();
       const serviceIds: string[] = [];
-      for(const service of item.itens.filter(x=>x.tipo==='SERVICO')) {
+      for(const [itemIndex, service] of item.itens.entries()) {
+        if (service.tipo !== 'SERVICO') continue;
         const insertedService = await client.query<{ id: string }>(
           `INSERT INTO servicos_os (
              ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
@@ -163,13 +165,17 @@ export async function confirm(request: Request, response: Response): Promise<voi
           [item.numeroOs, service.descricao, service.total, service.classificacao_servico, importedServiceOrigin(service)],
         );
         serviceIds.push(insertedService.rows[0]!.id);
+        serviceIdsByItemIndex.set(itemIndex, insertedService.rows[0]!.id);
       }
       for(const product of item.itens.filter(x=>x.tipo==='PRODUTO')) await client.query('INSERT INTO produtos_os (ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) SELECT id,$2,$3,$4,$5,$6 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs,product.descricao,product.quantidade,product.unidade,product.valorUnitario,product.total]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query('INSERT INTO ordens_servico_funcionarios (ordem_servico_id,funcionario_id) SELECT id,$2 FROM ordens_servico WHERE numero_os=$1 ON CONFLICT DO NOTHING',[item.numeroOs,execution.funcionarioId]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query(
         `INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim)
          SELECT id,$2,$3,$4,$5 FROM ordens_servico WHERE numero_os=$1`,
-        [item.numeroOs, serviceIds.length === 1 ? serviceIds[0] : null, execution.funcionarioId, execution.inicio, execution.fim],
+        [item.numeroOs, execution.serviceItemIndex === undefined
+          ? (serviceIds.length === 1 ? serviceIds[0] : null)
+          : serviceIdsByItemIndex.get(execution.serviceItemIndex) ?? null,
+          execution.funcionarioId, execution.inicio, execution.fim],
       );
       await client.query('COMMIT'); result.importadas++;
     } catch(error) { await client.query('ROLLBACK'); result.falhas.push({numeroOs:item.numeroOs,motivo:error instanceof Error?error.message:'Falha ao importar.'}); } }
