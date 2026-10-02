@@ -21,6 +21,7 @@ import {
   updateProdutoOsController,
   updateServicoOsController,
 } from '../controllers/ordens-servico-itens.controller.js';
+import { listOrdemServicoOverridesController, removeOrdemServicoOverrideController } from '../controllers/ordens-servico-overrides.controller.js';
 import {
   createExecucaoController,
   deleteExecucaoController,
@@ -44,6 +45,8 @@ ordensServicoRoutes.post('/:id/servicos/:servicoId/execucoes', createExecucaoCon
 ordensServicoRoutes.put('/:id/servicos/:servicoId/execucoes/:execucaoId', updateExecucaoController);
 ordensServicoRoutes.delete('/:id/servicos/:servicoId/execucoes/:execucaoId', deleteExecucaoController);
 ordensServicoRoutes.get('/:id/produtos', listProdutosOsController);
+ordensServicoRoutes.get('/:id/overrides', listOrdemServicoOverridesController);
+ordensServicoRoutes.delete('/:id/overrides/:campo', removeOrdemServicoOverrideController);
 ordensServicoRoutes.post('/:id/produtos', createProdutoOsController);
 ordensServicoRoutes.put('/:id/produtos/:produtoId', updateProdutoOsController);
 ordensServicoRoutes.delete('/:id/produtos/:produtoId', deleteProdutoOsController);

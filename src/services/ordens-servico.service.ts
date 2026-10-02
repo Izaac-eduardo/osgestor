@@ -1,5 +1,6 @@
 import { pool } from '../config/database.js';
 import { normalizeFleetCode } from '../utils/frotas.js';
+import { upsertOverride } from './ordens-servico-overrides.service.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 export const ordemServicoCategorias = [
@@ -104,6 +105,8 @@ interface RelationshipResult {
 
 interface NaturezaChangeResult {
   natureza_os: OrdemServicoNatureza;
+  obra_id: string;
+  status: OrdemServicoStatus;
   possui_funcionarios: boolean;
   possui_servicos: boolean;
 }
@@ -368,34 +371,22 @@ export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
 export async function updateOrdemServico(id: string, body: unknown): Promise<OrdemServico> {
   const fields = parseFields(body, true);
   await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
-  const currentResult = await pool.query<NaturezaChangeResult>(
-    `SELECT
-       natureza_os,
-       EXISTS (
-         SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1
-       ) AS possui_funcionarios,
-       EXISTS (
-         SELECT 1 FROM servicos_os WHERE ordem_servico_id = $1
-       ) AS possui_servicos
-     FROM ordens_servico WHERE id = $1`,
-    [id],
-  );
-  if (currentResult.rows.length === 0) {
-    throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
-  }
-  const current = currentResult.rows[0]!;
-  if (
-    current.natureza_os !== 'MATERIAL'
-    && fields.natureza_os === 'MATERIAL'
-    && (current.possui_funcionarios || current.possui_servicos)
-  ) {
-    throw new OrdemServicoServiceError(
-      409,
-      'Remova os funcionários vinculados e os serviços antes de alterar a natureza para MATERIAL.',
-    );
-  }
+  const client = await pool.connect();
   try {
-    const result = await pool.query<OrdemServico>(
+    await client.query('BEGIN');
+    const currentResult = await client.query<NaturezaChangeResult>(
+      `SELECT natureza_os,obra_id,status,
+         EXISTS (SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1) AS possui_funcionarios,
+         EXISTS (SELECT 1 FROM servicos_os WHERE ordem_servico_id = $1) AS possui_servicos
+       FROM ordens_servico WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (currentResult.rows.length === 0) throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
+    const current = currentResult.rows[0]!;
+    if (current.natureza_os !== 'MATERIAL' && fields.natureza_os === 'MATERIAL' && (current.possui_funcionarios || current.possui_servicos)) {
+      throw new OrdemServicoServiceError(409, 'Remova os funcionários vinculados e os serviços antes de alterar a natureza para MATERIAL.');
+    }
+    const result = await client.query<OrdemServico>(
       `UPDATE ordens_servico SET
          numero_os = $1, obra_id = $2, frota_id = $3, prefixo_frota_id = $4, frota_numero = $5,
          natureza_os = $6, categoria_servico = $7, prestador_terceiro = $8,
@@ -420,30 +411,39 @@ export async function updateOrdemServico(id: string, body: unknown): Promise<Ord
     if (result.rows.length === 0) {
       throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
     }
+    if (current.natureza_os !== fields.natureza_os) await upsertOverride(id, 'natureza_os', current.natureza_os, fields.natureza_os, client);
+    if (current.obra_id !== fields.obra_id) await upsertOverride(id, 'obra_id', current.obra_id, fields.obra_id, client);
+    if (current.status !== fields.status) await upsertOverride(id, 'status', current.status, fields.status, client);
+    await client.query('COMMIT');
     return result.rows[0]!;
-  } catch (error) {
-    return handleWriteError(error);
-  }
+  } catch (error) { await client.query('ROLLBACK'); return handleWriteError(error); }
+  finally { client.release(); }
 }
 
 export async function updateOrdemServicoStatus(id: string, body: unknown): Promise<OrdemServico> {
   if (!isRecord(body) || !isStatus(body.status)) {
     throw new OrdemServicoServiceError(400, 'status inválido.');
   }
-  const result = await pool.query<OrdemServico>(
-    `UPDATE ordens_servico
-     SET status = $1,
-         data_fechamento = CASE
-           WHEN $2 = 'FINALIZADA' AND data_fechamento IS NULL THEN CURRENT_DATE
-           ELSE data_fechamento
-         END
-     WHERE id = $3 RETURNING *`,
-    [body.status, body.status, id],
-  );
-  if (result.rows.length === 0) {
-    throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
-  }
-  return result.rows[0]!;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = (await client.query<{ status: OrdemServicoStatus }>('SELECT status FROM ordens_servico WHERE id=$1 FOR UPDATE', [id])).rows[0];
+    if (!current) throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
+    const result = await client.query<OrdemServico>(
+      `UPDATE ordens_servico
+       SET status = $1,
+           data_fechamento = CASE
+             WHEN $2 = 'FINALIZADA' AND data_fechamento IS NULL THEN CURRENT_DATE
+             ELSE data_fechamento
+           END
+       WHERE id = $3 RETURNING *`,
+      [body.status, body.status, id],
+    );
+    if (current.status !== body.status) await upsertOverride(id, 'status', current.status, body.status, client);
+    await client.query('COMMIT');
+    return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); return handleWriteError(error); }
+  finally { client.release(); }
 }
 
 export async function deleteOrdemServico(id: string): Promise<void> {
