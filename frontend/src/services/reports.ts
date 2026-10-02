@@ -1,6 +1,7 @@
-import type{AxiosRequestConfig}from'axios';import{api}from'./api';import type{DashboardSummary,ExpensesByProject,ExpensesByVehicle,OrdersByWeek,ReportExportKind,ReportFilters}from'../types/reports'
+import type{AxiosRequestConfig}from'axios';import{api}from'./api';import type{DashboardData,DashboardSummary,ExpensesByProject,ExpensesByVehicle,OrdersByWeek,ReportExportKind,ReportFilters}from'../types/reports'
 const params=(filters:ReportFilters={})=>Object.fromEntries(Object.entries(filters).filter(([,v])=>v!==undefined&&v!==null&&v!==''));const config=(filters:ReportFilters={},signal?:AbortSignal):AxiosRequestConfig=>({params:params(filters),signal})
 export async function getDashboardSummary(signal?:AbortSignal,filters:ReportFilters={}):Promise<DashboardSummary>{return(await api.get<DashboardSummary>('/relatorios/resumo',config(filters,signal))).data}
+export async function getDashboard(filters:Record<string,string|undefined>,signal?:AbortSignal):Promise<DashboardData>{return(await api.get<DashboardData>('/dashboard/resumo',config(filters,signal))).data}
 export async function getExpensesByProject(signal?:AbortSignal,filters:ReportFilters={}):Promise<ExpensesByProject[]>{return(await api.get<ExpensesByProject[]>('/relatorios/gastos-por-obra',config(filters,signal))).data}
 export async function getExpensesByVehicle(filters:ReportFilters={},signal?:AbortSignal):Promise<ExpensesByVehicle[]>{return(await api.get<ExpensesByVehicle[]>('/relatorios/gastos-por-veiculo',config(filters,signal))).data}
 export async function getOrdersByWeek(signal?:AbortSignal,filters:ReportFilters={}):Promise<OrdersByWeek[]>{return(await api.get<OrdersByWeek[]>('/relatorios/os-por-semana',config(filters,signal))).data}

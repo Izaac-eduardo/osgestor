@@ -7,6 +7,7 @@ import { obrasRoutes } from './obras.routes.js';
 import { ordensServicoRoutes } from './ordens-servico.routes.js';
 import { prefixosFrotaRoutes } from './prefixos-frota.routes.js';
 import { relatoriosRoutes } from './relatorios.routes.js';
+import { dashboardController } from '../controllers/dashboard.controller.js';
 import { abastecimentoRoutes } from './abastecimento.routes.js';
 import { abastecimentosImportRoutes } from './abastecimentos-import.routes.js';
 
@@ -17,6 +18,7 @@ routes.use('/ordens-servico', ordensServicoRoutes);
 routes.use('/prefixos-frota', prefixosFrotaRoutes);
 routes.use('/frotas', frotasRoutes);
 routes.use('/relatorios', relatoriosRoutes);
+routes.get('/dashboard/resumo', dashboardController);
 routes.use('/importacoes-os', importacoesOsRoutes);
 routes.use('/abastecimento', abastecimentoRoutes);
 routes.use('/abastecimento/importacoes', abastecimentosImportRoutes);
