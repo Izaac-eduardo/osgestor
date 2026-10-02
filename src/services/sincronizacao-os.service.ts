@@ -219,17 +219,17 @@ export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> 
     const nextProblem = diff.problema?.novo ?? current.problema;
     await client.query(orderUpdateSql, [nextStatus, nextCategory, nextProblem, current.id]);
     for (const service of diff.novosServicos) await client.query(
-      `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem)
-       VALUES($1,$2,$3,$4,$5)`,
-      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO'],
+      `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO', parsed.importacaoId ?? null, service.origemLinha ?? null, service.sequenciaImportacao ?? null, service.codigo_poli ?? service.codigo ?? null, service.fingerprintContexto ?? null, service.hashConteudo ?? null],
     );
     for (const product of diff.novosProdutos) await client.query(
-      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) VALUES($1,$2,$3,$4,$5,$6)',
-      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario, product.total],
+      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario, product.total, parsed.importacaoId ?? null, product.origemLinha ?? null, product.sequenciaImportacao ?? null, product.codigo_poli ?? product.codigo ?? null, product.fingerprintContexto ?? null, product.hashConteudo ?? null],
     );
     for (const execution of diff.novasExecucoes) {
       await client.query('INSERT INTO ordens_servico_funcionarios(ordem_servico_id,funcionario_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [current.id, execution.funcionarioId]);
-      await client.query('INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim) VALUES($1,NULL,$2,$3,$4)', [current.id, execution.funcionarioId, execution.inicio, execution.fim]);
+      await client.query('INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim,importacao_id,origem_linha,sequencia_importacao,servico_sequencia_importacao,fingerprint_contexto,hash_conteudo) VALUES($1,NULL,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [current.id, execution.funcionarioId, execution.inicio, execution.fim, parsed.importacaoId ?? null, execution.origemLinha ?? null, execution.sequenciaImportacao ?? null, execution.servicoSequenciaImportacao ?? null, execution.fingerprintContexto ?? null, execution.hashConteudo ?? null]);
     }
     const persisted = await loadExistingOsUsing(client, parsed.numeroOs);
     if (!persisted || buildOsUpdateDiff(parsed, persisted).estado !== 'SEM_ALTERACOES') {

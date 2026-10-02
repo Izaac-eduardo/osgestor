@@ -7,6 +7,7 @@ import { resolveLancadorFuncionarioId } from '../services/lancadores-os.service.
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
 import { SynchronizationConflictError, synchronizeOrder } from '../services/sincronizacao-os.service.js';
 import { isClassificacaoServico } from '../types/servicos-os.js';
+import { buildPoliImport, type PoliImport } from '../imports/poli-canonical.js';
 
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
@@ -28,11 +29,11 @@ async function loadPreview(token: string): Promise<ParsedOs[] | undefined> {
      WHERE x.id=$1 AND x.status='ATIVA' AND x.expires_at > now() ORDER BY i.numero_os`, [token]);
   return result.rows.length ? result.rows.map(row => row.payload_json) : undefined;
 }
-async function savePreview(token: string, filename: string, items: ParsedOs[]): Promise<void> {
+async function savePreview(token: string, metadata: PoliImport, items: ParsedOs[]): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query("INSERT INTO importacoes_os(id,arquivo_nome,expires_at) VALUES ($1,$2,now()+interval '24 hours')", [token, filename]);
+    await client.query("INSERT INTO importacoes_os(id,arquivo_nome,origem_sistema,hash_arquivo,tamanho_arquivo,tipo_importacao,expires_at) VALUES ($1,$2,$3,$4,$5,$6,now()+interval '24 hours')", [token, metadata.arquivoNome, metadata.origemSistema, metadata.hashArquivo, metadata.tamanhoArquivo, metadata.tipoImportacao]);
     for (const item of items) await client.query(
       'INSERT INTO importacoes_os_itens(importacao_id,numero_os,payload_json,status_preview,pendencias_json) VALUES ($1,$2,$3,$4,$5)',
       [token, item.numeroOs, JSON.stringify(item), item.statusPreview, JSON.stringify(item.pendencias)],
@@ -55,9 +56,12 @@ export async function analyze(request: Request, response: Response): Promise<voi
     const filename = String((request as Request & { file?: { originalname: string } }).file?.originalname ?? request.body?.filename ?? 'upload.xls');
     const extension = path.extname(filename).toLowerCase();
     if (extension !== '.xls' && extension !== '.xlsx') { response.status(400).json({ message: 'Apenas arquivos .xls ou .xlsx são aceitos.' }); return; }
-    const items = await matchPreview(parsePoliOs(upload(request), filename));
+    const buffer = upload(request);
+    const metadata = buildPoliImport(buffer, filename, 'DIARIA', 'POLI');
+    const items = await matchPreview(parsePoliOs(buffer, filename, metadata));
     const token = randomUUID();
-    await savePreview(token, filename, items);
+    for (const item of items) item.importacaoId = token;
+    await savePreview(token, metadata, items);
     response.status(200).json({ token, filename, total: items.length, counts: { prontas: items.filter(x=>x.statusPreview==='PRONTA').length, revisao: items.filter(x=>x.statusPreview==='REQUER_REVISAO').length, jaCadastradas: items.filter(x=>x.statusPreview==='JA_CADASTRADA').length }, items });
   } catch (error) { response.status(400).json({ message: error instanceof Error ? error.message : 'Não foi possível analisar o arquivo.' }); }
 }
@@ -159,23 +163,25 @@ export async function confirm(request: Request, response: Response): Promise<voi
         if (service.tipo !== 'SERVICO') continue;
         const insertedService = await client.query<{ id: string }>(
           `INSERT INTO servicos_os (
-             ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
+             ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem,
+             importacao_id, origem_linha, sequencia_importacao, codigo_poli, fingerprint_contexto, hash_conteudo
            ) SELECT id, $2, $3, $4, $5
+             , $6, $7, $8, $9, $10, $11
              FROM ordens_servico WHERE numero_os = $1 RETURNING id`,
-          [item.numeroOs, service.descricao, service.total, service.classificacao_servico, importedServiceOrigin(service)],
+          [item.numeroOs, service.descricao, service.total, service.classificacao_servico, importedServiceOrigin(service), token, service.origemLinha ?? null, service.sequenciaImportacao ?? null, service.codigo_poli ?? service.codigo ?? null, service.fingerprintContexto ?? null, service.hashConteudo ?? null],
         );
         serviceIds.push(insertedService.rows[0]!.id);
         serviceIdsByItemIndex.set(itemIndex, insertedService.rows[0]!.id);
       }
-      for(const product of item.itens.filter(x=>x.tipo==='PRODUTO')) await client.query('INSERT INTO produtos_os (ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) SELECT id,$2,$3,$4,$5,$6 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs,product.descricao,product.quantidade,product.unidade,product.valorUnitario,product.total]);
+      for(const product of item.itens.filter(x=>x.tipo==='PRODUTO')) await client.query('INSERT INTO produtos_os (ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo) SELECT id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs,product.descricao,product.quantidade,product.unidade,product.valorUnitario,product.total,token,product.origemLinha ?? null,product.sequenciaImportacao ?? null,product.codigo_poli ?? product.codigo ?? null,product.fingerprintContexto ?? null,product.hashConteudo ?? null]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query('INSERT INTO ordens_servico_funcionarios (ordem_servico_id,funcionario_id) SELECT id,$2 FROM ordens_servico WHERE numero_os=$1 ON CONFLICT DO NOTHING',[item.numeroOs,execution.funcionarioId]);
       for(const execution of item.execucoes.filter(x=>x.funcionarioId)) await client.query(
-        `INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim)
-         SELECT id,$2,$3,$4,$5 FROM ordens_servico WHERE numero_os=$1`,
+        `INSERT INTO servicos_os_execucoes(ordem_servico_id,servico_os_id,funcionario_id,inicio,fim,importacao_id,origem_linha,sequencia_importacao,servico_sequencia_importacao,fingerprint_contexto,hash_conteudo)
+         SELECT id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11 FROM ordens_servico WHERE numero_os=$1`,
         [item.numeroOs, execution.serviceItemIndex === undefined
           ? (serviceIds.length === 1 ? serviceIds[0] : null)
           : serviceIdsByItemIndex.get(execution.serviceItemIndex) ?? null,
-          execution.funcionarioId, execution.inicio, execution.fim],
+          execution.funcionarioId, execution.inicio, execution.fim, token, execution.origemLinha ?? null, execution.sequenciaImportacao ?? null, execution.servicoSequenciaImportacao ?? null, execution.fingerprintContexto ?? null, execution.hashConteudo ?? null],
       );
       await client.query('COMMIT'); result.importadas++;
     } catch(error) { await client.query('ROLLBACK'); result.falhas.push({numeroOs:item.numeroOs,motivo:error instanceof Error?error.message:'Falha ao importar.'}); } }

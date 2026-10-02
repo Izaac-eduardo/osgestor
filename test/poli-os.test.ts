@@ -160,11 +160,13 @@ test('preserva status original e distingue origem automatica de resolucao manual
     const parsed = parseStatus(original);
     assert.equal(parsed.statusOriginal, original); assert.equal(parsed.status, mapped); assert.equal(parsed.statusOrigem, 'AUTOMATICO');
   }
-  const unknown = parseStatus('Não Faturar Nesse Cadastro');
-  assert.equal(unknown.statusOriginal, 'Não Faturar Nesse Cadastro'); assert.equal(unknown.status, undefined); assert.equal(unknown.statusOrigem, null);
+  const cancelada = parseStatus('Não Faturar Nesse Cadastro');
+  assert.equal(cancelada.statusOriginal, 'Não Faturar Nesse Cadastro'); assert.equal(cancelada.status, 'CANCELADA'); assert.equal(cancelada.statusOrigem, 'AUTOMATICO');
+  const unknown = parseStatus('STATUS NOVO');
+  assert.equal(unknown.statusOriginal, 'STATUS NOVO'); assert.equal(unknown.status, undefined); assert.equal(unknown.statusOrigem, null);
   unknown.pendencias = ['STATUS_PENDENTE'];
   assert.equal(resolveManualStatus(unknown, 'CANCELADA'), true);
-  assert.equal(unknown.statusOriginal, 'Não Faturar Nesse Cadastro'); assert.equal(unknown.status, 'CANCELADA'); assert.equal(unknown.statusOrigem, 'MANUAL');
+  assert.equal(unknown.statusOriginal, 'STATUS NOVO'); assert.equal(unknown.status, 'CANCELADA'); assert.equal(unknown.statusOrigem, 'MANUAL');
   assert.equal(unknown.pendencias.includes('STATUS_PENDENTE'), false);
   const automatic = parseStatus('Aberta'); automatic.pendencias = [];
   assert.equal(resolveManualStatus(automatic, 'CANCELADA'), false); assert.equal(automatic.status, 'ABERTA'); assert.equal(automatic.statusOrigem, 'AUTOMATICO');
