@@ -6,6 +6,7 @@ import { listExternalFleetIdentifiers, normalizeExternalFleetIdentifier, POLIFRO
 import { buildOsUpdateDiff, loadExistingOs } from '../services/sincronizacao-os.service.js';
 import type { OsUpdateDiff } from '../services/sincronizacao-os.service.js';
 import type { ClassificacaoOrigem, ClassificacaoServico } from '../types/servicos-os.js';
+import { listExternalObraIdentifiers, resolveExternalObraIdentifier, VEGA_OBRA_ORIGIN, type ExternalObraIdentifier } from '../services/obra-identificadores.service.js';
 import {
   buildExecutionContentHash,
   buildExecutionContextFingerprint,
@@ -127,12 +128,14 @@ export async function matchPreview(items:ParsedOs[]){
  try{externalFleetIdentifiers=(await Promise.all([VEGA_ORIGIN,POLIFROTA_ORIGIN].map(origem=>listExternalFleetIdentifiers(origem)))).flat();}catch{}
  let employees:{id:string;nome:string}[]=[];
  try{employees=(await pool.query<{id:string;nome:string}>('SELECT id,nome FROM funcionarios')).rows;}catch{}
+ let obraAliases:ExternalObraIdentifier[]=[];
+ try{obraAliases=await listExternalObraIdentifiers(VEGA_OBRA_ORIGIN);}catch{}
  for(const o of items){
   o.pendencias=[];
   refreshServiceClassificationPending(o.pendencias,o.itens);
   if(!o.status)addPending(o.pendencias,'STATUS_PENDENTE');
   const obra=norm(o.parecerOriginal);
-  if(obra){try{const r=await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras');const matches=r.rows.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);if(matches.length===1)o.obraId=o.obraId??matches[0]!.id;else addPending(o.pendencias,matches.length?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
+  if(obra){try{const obras=await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras');const direct=obras.rows.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);const resolved=await resolveExternalObraIdentifier(o.parecerOriginal,obras.rows,obraAliases,VEGA_OBRA_ORIGIN);if(resolved)o.obraId=o.obraId??resolved;else addPending(o.pendencias,direct.length>1?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
   else addPending(o.pendencias,'OBRA_PENDENTE');
   if(!o.frotaId)o.frotaId=findFleetIdWithAliasPrecedence(o.frotaOriginal,fleets,externalFleetIdentifiers);
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');

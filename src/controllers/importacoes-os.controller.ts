@@ -8,6 +8,7 @@ import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
 import { SynchronizationConflictError, synchronizeOrder } from '../services/sincronizacao-os.service.js';
 import { isClassificacaoServico } from '../types/servicos-os.js';
 import { buildPoliImport, type PoliImport } from '../imports/poli-canonical.js';
+import { createExternalObraIdentifier, VEGA_OBRA_ORIGIN } from '../services/obra-identificadores.service.js';
 
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
@@ -99,8 +100,13 @@ export async function resolve(request: Request, response: Response): Promise<voi
   }
   if (body.status !== undefined && !ordemServicoStatuses.includes(body.status as typeof ordemServicoStatuses[number])) { response.status(400).json({ message: 'status inválido.' }); return; }
   const statusPending = item.pendencias.some(value => value.startsWith('STATUS_PENDENTE'));
+  const obraPending = item.pendencias.some(value => value.startsWith('OBRA_PENDENTE') || value.startsWith('OBRA_AMBIGUA'));
   if (body.status !== undefined && !statusPending) { response.status(409).json({ message: 'Somente uma pendencia de status pode ser resolvida manualmente.' }); return; }
   for (const field of ['obraId', 'frotaId', 'natureza', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
+  if (body.obraId !== undefined && obraPending && item.parecerOriginal && typeof body.obraId === 'string') {
+    try { await createExternalObraIdentifier(body.obraId, VEGA_OBRA_ORIGIN, item.parecerOriginal); }
+    catch (error) { response.status(409).json({ message: error instanceof Error ? error.message : 'Não foi possível persistir o alias da obra.' }); return; }
+  }
   if (body.status !== undefined) resolveManualStatus(item, body.status as string);
   item.pendencias = [];
   if (!item.obraId) addPending(item.pendencias, 'OBRA_PENDENTE');
