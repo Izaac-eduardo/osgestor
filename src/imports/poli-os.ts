@@ -110,7 +110,11 @@ const headerColumnStarting=(rows:unknown[][],label:string)=>{const expected=norm
 export const detectVegaLayout=(rows:unknown[][]):VegaLayout=>{const launcher=headerColumn(rows,'FUNCIONARIO ABRIU O.S.'),technician=headerColumn(rows,'TECNICO/OPERADOR'),client=headerColumn(rows,'CLIENTE'),vehicle=headerColumn(rows,'VEICULO'),plate=headerColumn(rows,'PLACA'),quantity=headerColumn(rows,'QTDE'),unitValue=headerColumnStarting(rows,'VLR. UNIT.'),discount=headerColumnStarting(rows,'DES'),total=headerColumnStarting(rows,'TOTAL ITEM');return {clienteColumn:client===undefined?16:client+4,veiculoColumn:vehicle??29,placaColumn:plate??30,launcherCodeColumn:launcher===undefined?34:launcher+2,launcherNameColumn:launcher===undefined?36:launcher+4,technicianCodeColumn:technician===undefined?24:technician+2,technicianNameColumn:technician===undefined?26:technician+4,quantityColumn:quantity??30,unitValueColumn:unitValue??32,discountColumn:discount??37,totalColumn:total??38};};
 const executionTextFromRow=(row:unknown[])=>row.map(value=>String(value??'').replace(/\s+/g,' ').trim()).find(value=>/INICIO EM \d{2}\/\d{2}\/\d{4} \d{2}:\d{2} TERMINO EM \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/.test(norm(value)))??'';
 const isOsRow=(row:unknown[])=>num(row[0])>0&&textAt(row,6)!=='';
-export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliImport = buildPoliImport(buffer, filename)):ParsedOs[]{
+export interface PoliParserOptions {
+  resolveDatabase?: boolean;
+}
+
+export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliImport = buildPoliImport(buffer, filename), options: PoliParserOptions = {}):ParsedOs[]{
   const wb=XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true}),out:ParsedOs[]=[];
  for(const sn of wb.SheetNames){const sheet=wb.Sheets[sn]!,rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:null}) as unknown[][],layout=detectVegaLayout(rows);let o:ParsedOs|null=null,last:ParsedItem|undefined;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){const row=rows[rowIndex]!;if(isOsRow(row)){if(o)out.push(o);const launcherCode=textAt(row,layout.launcherCodeColumn)||null,launcherName=textAt(row,layout.launcherNameColumn)||null;o={numeroOs:num(row[0]),data:dateOnly(row[6]),cliente:textAt(row,layout.clienteColumn)||null,frotaOriginal:textAt(row,layout.placaColumn)||textAt(row,layout.veiculoColumn)||null,parecerOriginal:null,funcionarioAbertura:launcherCode,funcionarioAberturaCodigo:launcherCode,funcionarioAberturaNome:launcherName,problema:null,status:undefined,statusOriginal:null,statusOrigem:null,itens:[],execucoes:[],statusPreview:'REQUER_REVISAO',pendencias:[],origem:filename};last=undefined;continue}if(!o)continue;
@@ -121,7 +125,7 @@ export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliIm
  }
  for(const item of out){item.categoriaServico=classifyCategory(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao));item.natureza=classifyNatureza(item.problema,item.execucoes[0]?.funcionarioOriginal??null,item.itens.map(x=>x.descricao).join(' '),item.itens.some(x=>x.tipo==='SERVICO'),item.itens.some(x=>x.tipo==='PRODUTO'),item.status,item.execucoes.length>0,item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));const electricianCategory=classifyCategoryWithNatureza(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao),item.natureza);if(electricianCategory==='ELETRICA')item.categoriaServico=electricianCategory;}return out;
 }
-export async function matchPreview(items:ParsedOs[]){
+export async function matchPreview(items:ParsedOs[], options: PoliParserOptions = {}){
  let fleets:{id:string;codigo:string;placa:string|null}[]=[];
  try{fleets=(await pool.query<{id:string;codigo:string;placa:string|null}>('SELECT id,codigo,placa FROM frotas')).rows;}catch{}
  let externalFleetIdentifiers:ExternalFleetIdentifier[]=[];
@@ -130,12 +134,14 @@ export async function matchPreview(items:ParsedOs[]){
  try{employees=(await pool.query<{id:string;nome:string}>('SELECT id,nome FROM funcionarios')).rows;}catch{}
  let obraAliases:ExternalObraIdentifier[]=[];
  try{obraAliases=await listExternalObraIdentifiers(VEGA_OBRA_ORIGIN);}catch{}
+ let obras:{id:string;codigo:string;nome:string}[]=[];
+ try{obras=(await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras')).rows;}catch{}
  for(const o of items){
   o.pendencias=[];
   refreshServiceClassificationPending(o.pendencias,o.itens);
   if(!o.status)addPending(o.pendencias,'STATUS_PENDENTE');
   const obra=norm(o.parecerOriginal);
-  if(obra){try{const obras=await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras');const direct=obras.rows.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);const resolved=await resolveExternalObraIdentifier(o.parecerOriginal,obras.rows,obraAliases,VEGA_OBRA_ORIGIN);if(resolved)o.obraId=o.obraId??resolved;else addPending(o.pendencias,direct.length>1?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
+  if(obra){try{const direct=obras.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);const resolved=await resolveExternalObraIdentifier(o.parecerOriginal,obras,obraAliases,VEGA_OBRA_ORIGIN);if(resolved)o.obraId=o.obraId??resolved;else addPending(o.pendencias,direct.length>1?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
   else addPending(o.pendencias,'OBRA_PENDENTE');
   if(!o.frotaId)o.frotaId=findFleetIdWithAliasPrecedence(o.frotaOriginal,fleets,externalFleetIdentifiers);
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');
@@ -143,7 +149,9 @@ export async function matchPreview(items:ParsedOs[]){
   o.natureza=o.natureza??classifyNatureza(o.problema,o.execucoes[0]?.funcionarioOriginal??null,o.itens.map(x=>x.descricao).join(' '),o.itens.some(x=>x.tipo==='SERVICO'),o.itens.some(x=>x.tipo==='PRODUTO'),o.status,o.execucoes.length>0,o.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));
   if(!o.natureza)addPending(o.pendencias,'NATUREZA_PENDENTE');
   if(!o.problema&&!o.itens.length)addPending(o.pendencias,'DADOS_INCOMPLETOS');
-  try{const existing=await loadExistingOs(o.numeroOs);if(existing){o.diff=buildOsUpdateDiff(o,existing);const blockingPendencias=o.pendencias.filter(value=>!((value.startsWith('FROTA_PENDENTE')&&existing.frotaId)||(value.startsWith('OBRA_PENDENTE')&&existing.obraId)));o.statusPreview=blockingPendencias.length?'REQUER_REVISAO':o.diff.estado;}else o.statusPreview=o.pendencias.length?'REQUER_REVISAO':'NOVA';}catch{o.statusPreview='REQUER_REVISAO';}
+  if (options.resolveDatabase !== false) {
+   try{const existing=await loadExistingOs(o.numeroOs);if(existing){o.diff=buildOsUpdateDiff(o,existing);const blockingPendencias=o.pendencias.filter(value=>!((value.startsWith('FROTA_PENDENTE')&&existing.frotaId)||(value.startsWith('OBRA_PENDENTE')&&existing.obraId)));o.statusPreview=blockingPendencias.length?'REQUER_REVISAO':o.diff.estado;}else o.statusPreview=o.pendencias.length?'REQUER_REVISAO':'NOVA';}catch{o.statusPreview='REQUER_REVISAO';}
+  }
  }
  return items;
 }
