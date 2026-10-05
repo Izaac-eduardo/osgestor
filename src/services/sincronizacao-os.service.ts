@@ -17,6 +17,7 @@ export interface ExistingOsSnapshot {
   obraId: string;
   obra: string | null;
   frotaId: string | null;
+  frotaOverrideId?: string | null;
   frota: string | null;
   natureza: string;
   categoria: string | null;
@@ -195,12 +196,13 @@ async function loadExistingOsUsing(db: { query: typeof pool.query }, numeroOs: n
       WHERE os.numero_os=$1 FOR UPDATE OF os`, [numeroOs]);
   if (!order.rows[0]) return undefined;
   const row = order.rows[0];
-  const [services, products, executions] = await Promise.all([
+  const [services, products, executions, fleetOverride] = await Promise.all([
     db.query<{ id: string; descricao: string; valor: string }>('SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]),
     db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>('SELECT id,descricao,quantidade,unidade,valor_unitario FROM produtos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]),
     db.query<{ id: string; funcionario_id: string; inicio: string; fim: string; servico_os_id: string | null }>('SELECT id,funcionario_id,to_char(inicio,\'YYYY-MM-DD"T"HH24:MI\') inicio,to_char(fim,\'YYYY-MM-DD"T"HH24:MI\') fim,servico_os_id FROM servicos_os_execucoes WHERE ordem_servico_id=$1', [row.id]),
+    db.query<{ frota_id_override: string | null }>(`SELECT frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo='frota_id'`, [row.id]),
   ]);
-  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataFechamento: row.data_fechamento, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
+  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataFechamento: row.data_fechamento, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
 }
 
 export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> {

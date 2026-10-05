@@ -16,6 +16,23 @@ test('divergência histórica de natureza vira REVIEW', () => assert.equal(class
 test('obra não resolvida vira BLOCKED', () => assert.equal(classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', pendencias: ['OBRA_PENDENTE'] }), snapshot()).classification, 'BLOCKED'));
 test('frota não resolvida vira BLOCKED', () => assert.equal(classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', pendencias: ['FROTA_PENDENTE'] }), snapshot()).classification, 'BLOCKED'));
 test('frota divergente vira REVIEW por modelo dual', () => assert.equal(classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: 'frota-2' }), snapshot()).classification, 'REVIEW'));
+test('override de frota resolve fonte desconhecida sem UNRESOLVED_FLEET', () => {
+  const result = classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: undefined, pendencias: ['FROTA_PENDENTE'] }), snapshot({ overrides: [{ campo: 'frota_id', valor_origem: '242D3', valor_override: 'frota-1', frota_id_override: 'frota-1' }] }));
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_FLEET'), false);
+  assert.equal(result.protectedOverrides.some(value => value.field === 'frota_id'), true);
+  assert.equal(result.classification, 'PROTECTED_OVERRIDE');
+});
+test('override de frota igual à fonte não cria conflito falso', () => {
+  const result = classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'frota_id', valor_origem: '242D3', valor_override: 'frota-1', frota_id_override: 'frota-1' }] }));
+  assert.equal(result.differences.some(value => value.field === 'frota_id'), false);
+  assert.equal(result.classification, 'NO_CHANGE');
+});
+test('fonte de frota divergente preserva override e exige revisão', () => {
+  const result = classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: 'frota-2' }), snapshot({ overrides: [{ campo: 'frota_id', valor_origem: '242D3', valor_override: 'frota-1', frota_id_override: 'frota-1' }] }));
+  assert.equal(result.protectedOverrides.some(value => value.field === 'frota_id'), true);
+  assert.equal(result.differences.some(value => value.field === 'frota_id' && value.action === 'PRESERVE'), true);
+  assert.equal(result.classification, 'REVIEW');
+});
 test('item sem identidade vira REVIEW', () => assert.equal(classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: 'frota-1', itens: [{ tipo: 'PRODUTO', descricao: 'Filtro', quantidade: 1, valorUnitario: 10, total: 10, unidade: 'UN' }] }), snapshot()).classification, 'REVIEW'));
 test('item ausente no consolidado vira REVIEW por possível remoção', () => assert.equal(classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-1', frotaId: 'frota-1' }), snapshot({ products: [{ id: 'p-1', ordem_servico_id: 'os-1', descricao: 'Filtro', quantidade: '1', unidade: 'UN', valor_unitario: '10', codigo_poli: null, fingerprint_contexto: null, hash_conteudo: null }] })).classification, 'REVIEW'));
 test('override mais outro conflito permanece REVIEW', () => assert.equal(classifyReconciliation(parsed({ status: 'FINALIZADA', natureza: 'TERCEIRO', obraId: 'obra-1', frotaId: 'frota-1' }), snapshot({ order: { ...snapshot().order, status: 'CANCELADA' }, overrides: [{ campo: 'status', valor_origem: 'FINALIZADA', valor_override: 'CANCELADA' }] })).classification, 'REVIEW'));

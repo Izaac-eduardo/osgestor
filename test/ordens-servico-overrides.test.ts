@@ -48,6 +48,25 @@ test('migration, valores JSONB, FK, unicidade e NULL são seguros', async () => 
   assert.equal(nullable.valor_override, 'CANCELADA');
 });
 
+test('override de frota usa coluna tipada, aceita frota existente e rejeita alvo inexistente', async () => {
+  const order = await createOrder('INTERNA');
+  const saved = await upsertOverride(order.created.id, 'frota_id', '242D3', order.frotaId);
+  assert.equal(saved.campo, 'frota_id');
+  assert.equal(saved.valor_origem, '242D3');
+  assert.equal(saved.valor_override, order.frotaId);
+  assert.equal(saved.frota_id_override, order.frotaId);
+  await assert.rejects(() => upsertOverride(order.created.id, 'frota_id', '242D3', randomUUID()), /frota do override/);
+  const column = (await pool.query<{ data_type: string; is_nullable: string }>(`SELECT data_type,is_nullable FROM information_schema.columns WHERE table_name='ordens_servico_overrides' AND column_name='frota_id_override'`)).rows[0]!;
+  assert.deepEqual(column, { data_type: 'uuid', is_nullable: 'YES' });
+});
+
+test('constraints impedem coluna tipada de frota em outro campo e preservam FK RESTRICT', async () => {
+  const order = await createOrder('INTERNA');
+  await assert.rejects(() => pool.query(`INSERT INTO ordens_servico_overrides(ordem_servico_id,campo,valor_origem,valor_override,frota_id_override) VALUES($1,'obra_id','null','null',$2)`, [order.created.id, order.frotaId]));
+  const fk = (await pool.query<{ definition: string }>(`SELECT pg_get_constraintdef(oid) definition FROM pg_constraint WHERE conname='ordens_servico_overrides_frota_id_override_fkey'`)).rows[0]!;
+  assert.match(fk.definition, /REFERENCES frotas\(id\) ON DELETE RESTRICT/);
+});
+
 test('edição humana cria e atualiza um único override de natureza atomicamente', async () => {
   const { created, obraId, frotaId } = await createOrder('INTERNA');
   await updateOrdemServico(created.id, { numero_os: Number(created.numero_os), obra_id: obraId, frota_id: frotaId, natureza_os: 'TERCEIRO', data_abertura: '2026-10-02', status: 'ABERTA', observacoes: 'L5 test' });
