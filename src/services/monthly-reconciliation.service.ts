@@ -39,6 +39,7 @@ export interface MonthlyReconciliationReport {
   summary: { totalOs: number; classifications: Record<ReconciliationClassification, number>; totalDifferences: number };
   reasonCounts: Record<string, number>;
   fieldCounts: Record<string, number>;
+  metrics: { itemMatchUncertain: { total: number; products: number; services: number } };
   results: ReconciliationResult[];
 }
 
@@ -68,8 +69,13 @@ function overrideFor(snapshot: Snapshot, field: DbOverride['campo']): DbOverride
 }
 
 function compareField(result: ReconciliationResult, snapshot: Snapshot, field: 'natureza_os' | 'obra_id' | 'status', currentValue: unknown, sourceValue: unknown, safe: boolean, reasonCode: ReconciliationReasonCode, safeReason: string): void {
-  if (sourceValue === undefined || sourceValue === null || currentValue === sourceValue) return;
   const override = overrideFor(snapshot, field);
+  if (field === 'obra_id' && override && typeof override.valor_override === 'string' && currentValue === override.valor_override) {
+    result.protectedOverrides.push({ field, sourceValue: sourceValue ?? null, currentValue, valorOrigem: override.valor_origem, valorOverride: override.valor_override });
+    if (sourceValue !== undefined && sourceValue !== currentValue) result.differences.push({ domain: 'os', field, currentValue, sourceValue, action: 'PRESERVE', reasonCode: 'PROTECTED_OVERRIDE', protected: true });
+    return;
+  }
+  if (sourceValue === undefined || sourceValue === null || currentValue === sourceValue) return;
   if (override && override.valor_origem !== sourceValue) {
     result.reviews.push({ reasonCode: 'SOURCE_CHANGED_AFTER_OVERRIDE', description: `${field}: a fonte mudou após o override.` });
     result.differences.push({ domain: 'os', field, currentValue, sourceValue, action: 'REVIEW', reasonCode: 'SOURCE_CHANGED_AFTER_OVERRIDE', protected: true });
@@ -171,12 +177,15 @@ export function classifyReconciliation(parsed: ParsedOs, snapshot: Snapshot | un
     return result;
   }
   const order = snapshot.order;
+  const obraOverride = overrideFor(snapshot, 'obra_id');
+  const obraOverrideProtected = Boolean(obraOverride && typeof obraOverride.valor_override === 'string' && order.obra_id === obraOverride.valor_override);
   result.audit = { sourceItemCounts: { products: parsed.itens.filter(item => item.tipo === 'PRODUTO').length, services: parsed.itens.filter(item => item.tipo === 'SERVICO').length }, currentItemCounts: { products: snapshot.products.length, services: snapshot.services.length }, currentNatureza: order.natureza_os, sourceNatureza: parsed.natureza ?? null, currentStatus: order.status, sourceStatus: parsed.status ?? null };
   if (parsed.pendencias.some(value => value.startsWith('OBRA_PENDENTE') || value.startsWith('OBRA_AMBIGUA'))) result.blockers.push({ reasonCode: 'UNRESOLVED_WORK', description: 'Obra externa não resolvida com segurança.' });
   if (parsed.pendencias.some(value => value.startsWith('FROTA_PENDENTE'))) result.blockers.push({ reasonCode: 'UNRESOLVED_FLEET', description: 'Frota externa não resolvida com segurança.' });
   compareField(result, snapshot, 'status', order.status, parsed.status, Boolean(parsed.status && statusSafe(order.status, parsed.status)), 'STATUS_CONFLICT', 'Transição de status homologada e progressiva.');
   compareField(result, snapshot, 'natureza_os', order.natureza_os, parsed.natureza, false, 'NATURE_CONFLICT', 'Divergência histórica de natureza exige revisão.');
   compareField(result, snapshot, 'obra_id', order.obra_id, parsed.obraId, Boolean(parsed.obraId), 'OBRA_CONFLICT', 'Referência de obra resolvida diretamente ou por alias persistente.');
+  if (obraOverrideProtected) result.blockers = result.blockers.filter(value => value.reasonCode !== 'UNRESOLVED_WORK');
   if (parsed.frotaId && parsed.frotaId !== order.frota_id) {
     result.reviews.push({ reasonCode: 'AMBIGUOUS_FLEET_MODEL', description: 'Representação dual da frota não permite decisão inequívoca.' });
     result.differences.push({ domain: 'reference', field: 'frota_id', currentValue: order.frota_id, sourceValue: parsed.frotaId, action: 'REVIEW', reasonCode: 'AMBIGUOUS_FLEET_MODEL', protected: false });
@@ -211,11 +220,19 @@ export async function reconcileMonthly(buffer: Buffer, filename: string): Promis
   const classifications = Object.fromEntries(reconciliationClassifications.map(value => [value, 0])) as Record<ReconciliationClassification, number>;
   const reasonCounts: Record<string, number> = {};
   const fieldCounts: Record<string, number> = {};
+  const itemMatchUncertain = { total: 0, products: 0, services: 0 };
   for (const result of results) {
     classifications[result.classification]++;
-    for (const difference of result.differences) { addCount(fieldCounts, difference.field); if (difference.reasonCode) addCount(reasonCounts, difference.reasonCode); }
-    for (const review of result.reviews) addCount(reasonCounts, review.reasonCode);
+    for (const difference of result.differences) {
+      addCount(fieldCounts, difference.field);
+      if (difference.reasonCode) addCount(reasonCounts, difference.reasonCode);
+      if (difference.reasonCode === 'ITEM_MATCH_UNCERTAIN') {
+        itemMatchUncertain.total++;
+        if (difference.field === 'produtos') itemMatchUncertain.products++;
+        if (difference.field === 'servicos') itemMatchUncertain.services++;
+      }
+    }
     for (const blocker of result.blockers) addCount(reasonCounts, blocker.reasonCode);
   }
-  return { metadata: { arquivo: filename, importacao, parser: 'src/imports/poli-canonical.ts + src/imports/poli-os.ts', readOnly: true, queryStrategy: 'parser canônico sem resolução FOR UPDATE; referências em lote; snapshot por ANY(uuid[])' }, summary: { totalOs: results.length, classifications, totalDifferences: results.reduce((sum, value) => sum + value.differences.length, 0) }, reasonCounts, fieldCounts, results };
+  return { metadata: { arquivo: filename, importacao, parser: 'src/imports/poli-canonical.ts + src/imports/poli-os.ts', readOnly: true, queryStrategy: 'parser canônico sem resolução FOR UPDATE; referências em lote; snapshot por ANY(uuid[])' }, summary: { totalOs: results.length, classifications, totalDifferences: results.reduce((sum, value) => sum + value.differences.length, 0) }, reasonCounts, fieldCounts, metrics: { itemMatchUncertain }, results };
 }

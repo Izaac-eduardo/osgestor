@@ -43,6 +43,7 @@ const output = {
   summary: report.summary,
   reasonCounts,
   fieldCounts,
+  metrics: report.metrics,
   safeUpdatesByField,
   protectedOverridesByField,
   reviewsByReason,
@@ -58,7 +59,7 @@ const classifications = report.summary.classifications;
 const top = Object.entries(reasonCounts).slice(0, 12).map(([key, value]) => `- ${key}: ${value}`).join('\n') || '- Nenhum';
 const md = `# Preview mensal L.6 — Setembro\n\n- Arquivo: ${input}\n- Tamanho: ${buffer.length} bytes\n- SHA-256: ${hash}\n- O.S. processadas: ${report.summary.totalOs}\n- Estratégia: ${report.metadata.queryStrategy}\n- Read-only: SIM\n\n## Classificações\n\n| Classificação | Quantidade |\n|---|---:|\n${Object.entries(classifications).map(([key, value]) => `| ${key} | ${value} |`).join('\n')}\n| TOTAL | ${report.summary.totalOs} |\n\n## Motivos principais\n\n${top}\n\n## Contagens operacionais\n\nAntes e depois são idênticas: **${equalCounts ? 'SIM' : 'NÃO'}**\n\n\`\`\`json\n${JSON.stringify({ before, after }, null, 2)}\n\`\`\`\n\nNenhum alias de obra ou override foi criado. Nenhum registro operacional foi alterado.\n`;
 await writeFile(markdownPath, md, 'utf8');
-console.log(JSON.stringify({ jsonPath, markdownPath, totalOs: report.summary.totalOs, classifications, equalCounts, reasonCounts: Object.fromEntries(Object.entries(reasonCounts).slice(0, 12)) }, null, 2));
+console.log(JSON.stringify({ jsonPath, markdownPath, totalOs: report.summary.totalOs, classifications, equalCounts, itemMatchUncertain: report.metrics.itemMatchUncertain, reasonCounts: Object.fromEntries(Object.entries(reasonCounts).slice(0, 12)) }, null, 2));
 await pool.end();
 }
 

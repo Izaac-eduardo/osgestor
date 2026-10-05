@@ -64,3 +64,43 @@ test('obra unívoca sem outros conflitos pode produzir SAFE_UPDATE', () => {
   const result = classifyReconciliation(parsed({ status: 'ABERTA', natureza: 'INTERNA', obraId: 'obra-2', frotaId: 'frota-1' }), snapshot());
   assert.equal(result.classification, 'SAFE_UPDATE');
 });
+
+test('override de obra resolve TRIPOLONI sem alias global', () => {
+  const result = classifyReconciliation(parsed({ pendencias: ['OBRA_PENDENTE'], parecerOriginal: 'TRIPOLONI', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'obra_id', valor_origem: 'obra-antiga', valor_override: 'obra-1' }] }));
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), false);
+  assert.equal(result.protectedOverrides.some(value => value.field === 'obra_id'), true);
+  assert.equal(result.classification, 'PROTECTED_OVERRIDE');
+});
+
+test('override de obra resolve LOCADO sem alias global', () => {
+  const result = classifyReconciliation(parsed({ pendencias: ['OBRA_PENDENTE'], parecerOriginal: 'LOCADO', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'obra_id', valor_origem: 'obra-antiga', valor_override: 'obra-1' }] }));
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), false);
+});
+
+test('identificador desconhecido sem alias e sem override continua BLOCKED', () => {
+  const result = classifyReconciliation(parsed({ pendencias: ['OBRA_PENDENTE'], parecerOriginal: 'DESCONHECIDO', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot());
+  assert.equal(result.classification, 'BLOCKED');
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), true);
+});
+
+test('alias determinístico sem override continua resolvido normalmente', () => {
+  const result = classifyReconciliation(parsed({ obraId: 'obra-1', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot());
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), false);
+});
+
+test('alias igual ao override preserva a decisão humana', () => {
+  const result = classifyReconciliation(parsed({ obraId: 'obra-1', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'obra_id', valor_origem: 'obra-antiga', valor_override: 'obra-1' }] }));
+  assert.equal(result.protectedOverrides.some(value => value.field === 'obra_id'), true);
+});
+
+test('alias divergente não substitui override humano', () => {
+  const result = classifyReconciliation(parsed({ obraId: 'obra-2', status: 'ABERTA', natureza: 'INTERNA', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'obra_id', valor_origem: 'obra-antiga', valor_override: 'obra-1' }] }));
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), false);
+  assert.equal(result.protectedOverrides.some(value => value.field === 'obra_id'), true);
+  assert.equal(result.differences.some(value => value.reasonCode === 'PROTECTED_OVERRIDE'), true);
+});
+
+test('overrides de natureza e status não resolvem obra', () => {
+  const result = classifyReconciliation(parsed({ pendencias: ['OBRA_PENDENTE'], status: 'FINALIZADA', natureza: 'TERCEIRO', frotaId: 'frota-1' }), snapshot({ overrides: [{ campo: 'natureza_os', valor_origem: 'INTERNA', valor_override: 'TERCEIRO' }, { campo: 'status', valor_origem: 'ABERTA', valor_override: 'FINALIZADA' }] }));
+  assert.equal(result.blockers.some(value => value.reasonCode === 'UNRESOLVED_WORK'), true);
+});
