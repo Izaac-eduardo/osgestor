@@ -47,7 +47,9 @@ interface DbOrder { id: string; numero_os: string; obra_id: string; frota_id: st
 interface DbItem { id: string; ordem_servico_id: string; descricao: string; quantidade?: string; unidade?: string; valor_unitario?: string; valor?: string; classificacao_servico?: string; classificacao_origem?: string; codigo_poli: string | null; fingerprint_contexto: string | null; hash_conteudo: string | null; }
 interface DbExecution { id: string; ordem_servico_id: string; servico_os_id: string | null; funcionario_id: string; inicio: string; fim: string; fingerprint_contexto: string | null; hash_conteudo: string | null; }
 interface DbOverride { ordem_servico_id: string; campo: 'natureza_os' | 'obra_id' | 'status' | 'frota_id'; valor_origem: unknown; valor_override: unknown; frota_id_override: string | null; }
-interface Snapshot { order: DbOrder; services: DbItem[]; products: DbItem[]; executions: DbExecution[]; overrides: DbOverride[]; }
+interface DbItemVinculo { ordem_servico_id: string; tipo_item: 'PRODUTO' | 'SERVICO'; produto_os_id: string | null; servico_os_id: string | null; fingerprint_contexto: string; estado_vinculo: 'ATIVO' | 'REVOGADO'; }
+export interface ReconciliationSnapshot { order: DbOrder; services: DbItem[]; products: DbItem[]; executions: DbExecution[]; overrides: DbOverride[]; vinculos?: DbItemVinculo[]; }
+type Snapshot = ReconciliationSnapshot;
 
 const text = (value: unknown): string => normalizeSearchText(String(value ?? ''));
 const money = (value: unknown): string => Number(value ?? 0).toFixed(2);
@@ -117,11 +119,30 @@ function matchItemIdentity(incoming: ParsedItem, existing: DbItem[], consumed: S
   return { level: 'NONE', candidateContext: 'no identifiable candidate' };
 }
 
-function compareItemType(result: ReconciliationResult, incoming: ParsedItem[], existing: DbItem[], field: 'servicos' | 'produtos'): void {
+function linkedIdentity(incoming: ParsedItem, existing: DbItem[], consumed: Set<string>, links: DbItemVinculo[], orderId: string, tipoItem: 'PRODUTO' | 'SERVICO'): ItemIdentityDecision {
+  const candidates = links.filter(link =>
+    link.estado_vinculo === 'ATIVO'
+    && link.ordem_servico_id === orderId
+    && link.tipo_item === tipoItem
+    && link.fingerprint_contexto === incoming.fingerprintContexto
+  );
+  if (candidates.length !== 1) {
+    return { level: candidates.length > 1 ? 'AMBIGUOUS' : 'NONE', candidateContext: candidates.length > 1 ? 'multiple active persisted links for contextual fingerprint' : 'no active persisted instance link' };
+  }
+  const targetId = tipoItem === 'PRODUTO' ? candidates[0]!.produto_os_id : candidates[0]!.servico_os_id;
+  const row = existing.find(item => item.id === targetId && !consumed.has(item.id));
+  return row
+    ? { level: 'DETERMINISTIC', row, candidateContext: 'active persisted instance link' }
+    : { level: 'AMBIGUOUS', candidateContext: 'persisted link target unavailable or already consumed' };
+}
+
+function compareItemType(result: ReconciliationResult, incoming: ParsedItem[], existing: DbItem[], field: 'servicos' | 'produtos', links: DbItemVinculo[], orderId: string): void {
   const consumed = new Set<string>();
   const unmatchedIncoming: Array<{ item: ParsedItem; decision: ItemIdentityDecision }> = [];
   for (const item of incoming) {
-    const decision = matchItemIdentity(item, existing, consumed);
+    const tipoItem = field === 'servicos' ? 'SERVICO' : 'PRODUTO';
+    const linkedDecision = linkedIdentity(item, existing, consumed, links, orderId, tipoItem);
+    const decision = linkedDecision.level === 'DETERMINISTIC' ? linkedDecision : matchItemIdentity(item, existing, consumed);
     if (decision.level === 'DETERMINISTIC' && decision.row) consumed.add(decision.row.id);
     else unmatchedIncoming.push({ item, decision });
   }
@@ -147,8 +168,9 @@ function compareItemType(result: ReconciliationResult, incoming: ParsedItem[], e
 }
 
 function compareItems(result: ReconciliationResult, parsed: ParsedOs, snapshot: Snapshot): void {
-  compareItemType(result, parsed.itens.filter(item => item.tipo === 'SERVICO'), snapshot.services, 'servicos');
-  compareItemType(result, parsed.itens.filter(item => item.tipo === 'PRODUTO'), snapshot.products, 'produtos');
+  const links = snapshot.vinculos ?? [];
+  compareItemType(result, parsed.itens.filter(item => item.tipo === 'SERVICO'), snapshot.services, 'servicos', links, snapshot.order.id);
+  compareItemType(result, parsed.itens.filter(item => item.tipo === 'PRODUTO'), snapshot.products, 'produtos', links, snapshot.order.id);
   for (const execution of parsed.execucoes) if (!execution.funcionarioId || !execution.hashConteudo) {
     result.reviews.push({ reasonCode: 'UNLINKED_EXECUTION', description: 'Source execution lacks sufficient identity/provenance.' });
     result.differences.push({ domain: 'execution', field: 'execucoes', currentValue: null, sourceValue: execution, action: 'REVIEW', reasonCode: 'UNLINKED_EXECUTION', protected: false });
@@ -209,13 +231,14 @@ async function loadSnapshots(numbers: number[]): Promise<Map<number, Snapshot>> 
   const orders = (await pool.query<DbOrder>(`SELECT id,numero_os,obra_id,frota_id,natureza_os,categoria_servico,status,status_original,status_origem,observacoes FROM ordens_servico WHERE numero_os = ANY($1::bigint[])`, [numbers])).rows;
   const ids = orders.map(row => row.id);
   if (!ids.length) return snapshots;
-  const [services, products, executions, overrides] = await Promise.all([
+  const [services, products, executions, overrides, vinculos] = await Promise.all([
     pool.query<DbItem>(`SELECT id,ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,codigo_poli,fingerprint_contexto,hash_conteudo FROM servicos_os WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbItem>(`SELECT id,ordem_servico_id,descricao,quantidade,unidade,valor_unitario,codigo_poli,fingerprint_contexto,hash_conteudo FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbExecution>(`SELECT id,ordem_servico_id,servico_os_id,funcionario_id,to_char(inicio,'YYYY-MM-DD"T"HH24:MI') inicio,to_char(fim,'YYYY-MM-DD"T"HH24:MI') fim,fingerprint_contexto,hash_conteudo FROM servicos_os_execucoes WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbOverride>(`SELECT ordem_servico_id,campo,valor_origem,valor_override,frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
+    pool.query<DbItemVinculo>(`SELECT ordem_servico_id,tipo_item,produto_os_id,servico_os_id,fingerprint_contexto,estado_vinculo FROM ordens_servico_item_vinculos WHERE ordem_servico_id = ANY($1::uuid[]) AND estado_vinculo='ATIVO'`, [ids]),
   ]);
-  for (const order of orders) snapshots.set(Number(order.numero_os), { order, services: services.rows.filter(row => row.ordem_servico_id === order.id), products: products.rows.filter(row => row.ordem_servico_id === order.id), executions: executions.rows.filter(row => row.ordem_servico_id === order.id), overrides: overrides.rows.map(row => ({ ...row, valor_origem: decodeJson(row.valor_origem), valor_override: decodeJson(row.valor_override) })).filter(row => row.ordem_servico_id === order.id) });
+  for (const order of orders) snapshots.set(Number(order.numero_os), { order, services: services.rows.filter(row => row.ordem_servico_id === order.id), products: products.rows.filter(row => row.ordem_servico_id === order.id), executions: executions.rows.filter(row => row.ordem_servico_id === order.id), overrides: overrides.rows.map(row => ({ ...row, valor_origem: decodeJson(row.valor_origem), valor_override: decodeJson(row.valor_override) })).filter(row => row.ordem_servico_id === order.id), vinculos: vinculos.rows.filter(row => row.ordem_servico_id === order.id) });
   return snapshots;
 }
 
