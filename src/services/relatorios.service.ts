@@ -270,6 +270,7 @@ export interface OrdemServicoRelatorio extends Omit<OrdemRelatorioRow,
     valor_unitario: number;
     valor_total: number;
     valor_total_original: number | null;
+    valor_total_efetivo: number;
   }>;
 }
 
@@ -397,13 +398,14 @@ export async function getOrdensServicoRelatorio(
       valor_total_original: produto.valor_total_original === null
         ? null
         : numeric(produto.valor_total_original, 'produtos.valor_total_original'),
+      valor_total_efetivo: numeric(produto.valor_total_original ?? produto.valor_total, 'produtos.valor_total_efetivo'),
     })),
   }));
 }
 export async function getGastosPorVeiculo(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
     'obra_id', 'prefixo_frota_id', 'frota_numero', 'frota_codigo', 'data_inicio', 'data_fim',
-    'natureza_os', 'categoria_servico',
+    'natureza_os', 'categoria_servico', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
   const result = await pool.query<GastosVeiculoRow>(
@@ -434,7 +436,7 @@ export async function getGastosPorVeiculo(filters: RelatorioFilters) {
 
 export async function getGastosPorObra(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'obra_id', 'frota_codigo', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico',
+    'obra_id', 'frota_codigo', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
   const result = await pool.query<GastosObraRow>(

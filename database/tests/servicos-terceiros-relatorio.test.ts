@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pool } from '../../src/config/database.js';
-import { getOrdensServicoRelatorio } from '../../src/services/relatorios.service.js';
+import { getGastosPorObra, getGastosPorVeiculo, getOrdensServicoRelatorio } from '../../src/services/relatorios.service.js';
 import { exportOrdensServicoPdf } from '../../src/services/ordens-servico-pdf.service.js';
+import { exportOsPorSemanaPdf } from '../../src/services/relatorios-pdf.service.js';
 
 test('relatório de terceiros separa serviço, produto e total sem duplicar valores', async () => {
   const schema = 'test_servicos_terceiros_' + randomUUID().replace(/-/g, '');
@@ -32,7 +33,9 @@ test('relatório de terceiros separa serviço, produto e total sem duplicar valo
     const productOnly = await insertOrder(90002);
     const mixed = await insertOrder(90003);
     await pool.query("INSERT INTO servicos_os(ordem_servico_id,descricao,valor) VALUES ($1,'FRETE',500),($2,'ALINHAMENTO',300)", [serviceOnly, mixed]);
-    await pool.query("INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario) VALUES ($1,'KIT DE JUNTAS',1,'UN',200),($2,'PNEU',2,'UN',50)", [productOnly, mixed]);
+    await pool.query("INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original) VALUES ($1,'KIT DE JUNTAS',1,'UN',200,175),($2,'PNEU',2,'UN',50,75)", [productOnly, mixed]);
+
+    const open = await insertOrder(90004);
 
     const report = await getOrdensServicoRelatorio({ natureza_os: 'TERCEIRO' });
     const byNumber = new Map(report.map(order => [Number(order.numero_os), order]));
@@ -43,17 +46,34 @@ test('relatório de terceiros separa serviço, produto e total sem duplicar valo
     assert.equal(byNumber.get(90001)?.total_os, 500);
     assert.deepEqual(byNumber.get(90002)?.produtos.map(item => item.descricao), ['KIT DE JUNTAS']);
     assert.equal(byNumber.get(90002)?.total_servicos_terceiros, 0);
-    assert.equal(byNumber.get(90002)?.total_produtos, 200);
-    assert.equal(byNumber.get(90002)?.total_os, 200);
+    assert.equal(byNumber.get(90002)?.total_produtos, 175);
+    assert.equal(byNumber.get(90002)?.total_os, 175);
     assert.deepEqual(byNumber.get(90003)?.servicos.map(item => item.descricao), ['ALINHAMENTO']);
     assert.deepEqual(byNumber.get(90003)?.produtos.map(item => item.descricao), ['PNEU']);
     assert.equal(byNumber.get(90003)?.total_servicos_terceiros, 300);
-    assert.equal(byNumber.get(90003)?.total_produtos, 100);
-    assert.equal(byNumber.get(90003)?.total_os, 400);
+    assert.equal(byNumber.get(90003)?.total_produtos, 75);
+    assert.equal(byNumber.get(90003)?.total_os, 375);
+    assert.equal(byNumber.get(90003)?.produtos[0]?.valor_total_efetivo, 75);
+
+    await pool.query("UPDATE ordens_servico SET status='ABERTA' WHERE id=$1", [open]);
+    const allWorks = await getGastosPorObra({ obra_id: obra });
+    const openWorks = await getGastosPorObra({ obra_id: obra, status: 'ABERTA' });
+    const finalWorks = await getGastosPorObra({ obra_id: obra, status: 'FINALIZADA' });
+    assert.equal(allWorks[0]?.quantidade_os, 4);
+    assert.equal(openWorks[0]?.quantidade_os, 1);
+    assert.equal(finalWorks[0]?.quantidade_os, 3);
+
+    const openVehicles = await getGastosPorVeiculo({ obra_id: obra, status: 'ABERTA' });
+    const finalVehicles = await getGastosPorVeiculo({ obra_id: obra, status: 'FINALIZADA' });
+    assert.equal(openVehicles[0]?.quantidade_os, 1);
+    assert.equal(finalVehicles[0]?.quantidade_os, 3);
 
     const pdf = await exportOrdensServicoPdf({ natureza_os: 'TERCEIRO' });
     assert.ok(pdf.length > 0);
     assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    const weeklyPdf = await exportOsPorSemanaPdf({ obra_id: obra });
+    assert.ok(weeklyPdf.length > 0);
+    assert.equal(weeklyPdf.subarray(0, 5).toString(), '%PDF-');
   } finally {
     pool.options.options = previousOptions;
     if (schemaCreated) { await pool.query('SET search_path TO public'); await pool.query('DROP SCHEMA ' + schema + ' CASCADE'); }
