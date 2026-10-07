@@ -136,3 +136,58 @@ main.page-content>*{position:relative}
 .stat-card__icon--green,.stat-card__icon--slate{color:#f7531d;background:rgba(247,83,29,.1)}
 .dashboard-kpi--blue .dashboard-kpi__icon,.dashboard-kpi--orange .dashboard-kpi__icon,.dashboard-kpi--green .dashboard-kpi__icon,.dashboard-kpi--navy .dashboard-kpi__icon{color:#f7531d;background:rgba(247,83,29,.1)!important}
 @media(max-width:760px){.reports-filters__grid{padding-inline:16px}}
+
+/* M.4.4 — ações universais compactas e limpeza de filtros */
+.order-actions .button--secondary,.order-actions .button--edit,.order-actions .button--danger,.project-actions .button-link--edit,.project-actions .button-link--danger{display:inline-flex;width:32px;min-width:32px;height:32px;min-height:32px;align-items:center;justify-content:center;padding:0;border-radius:.4rem;font-size:0;line-height:1}
+.order-actions .button--secondary{color:#000;background:#fff;border:1px solid #000}
+.order-actions .button--secondary:hover{color:#000;background:#f5f5f5;border-color:#000}
+.order-actions .button--edit,.project-actions .button-link--edit{color:#fff;background:#000;border:1px solid #000}
+.order-actions .button--edit:hover,.project-actions .button-link--edit:hover{color:#fff;background:#1b1b1b;border-color:#1b1b1b}
+.order-actions .button--danger,.project-actions .button-link--danger{color:#fff;background:#b42318;border:1px solid #b42318}
+.order-actions .button--danger:hover,.project-actions .button-link--danger:hover{color:#fff;background:#8f1c13;border-color:#8f1c13}
+.order-actions svg,.project-actions .button-link--edit svg,.project-actions .button-link--danger svg{width:16px;height:16px;margin:0}
+.reports-filters footer .button-link{min-height:34px;padding:.4rem .6rem;color:#000;background:#fff;border:1px solid #000;border-radius:.4rem;font-size:.75rem;font-weight:650;line-height:1}
+.reports-filters footer .button-link:hover{color:#000;background:#f5f5f5;border-color:#f7531d}
+@media(max-width:520px){.order-actions .button--secondary,.order-actions .button--edit,.order-actions .button--danger,.project-actions .button-link--edit,.project-actions .button-link--danger{width:34px;min-width:34px;height:34px;min-height:34px}}
+.frotas-terceiras-table .button-link--danger{color:#000;background:#fff;border-color:#000}
+.frotas-terceiras-table .button-link--danger:hover{color:#000;background:#f5f5f5;border-color:#f7531d}
+@media(max-width:760px){.order-mobile-card .order-actions .button{width:auto;min-width:0;height:34px;min-height:34px;padding:.4rem .6rem;font-size:.75rem}}
+
+.status-toggle{position:relative;display:inline-flex;width:42px;min-width:42px;height:24px;min-height:24px;align-items:center;padding:3px;border:1px solid transparent;border-radius:999px;cursor:pointer;transition:background-color 190ms ease,box-shadow 190ms ease}
+.status-toggle span{display:block;width:18px;height:18px;background:#fff;border-radius:50%;box-shadow:0 1px 2px rgba(0,0,0,.2);transform:translateX(0);transition:transform 190ms ease}
+.status-toggle--active{background:#dff2e9;border-color:#286c54}
+.status-toggle--active span{transform:translateX(18px)}
+.status-toggle--inactive{background:#e9eef1;border-color:#64727c}
+.status-toggle:focus-visible{outline:2px solid #f7531d;outline-offset:2px}
+.status-toggle:disabled{cursor:not-allowed;opacity:.55}
+@media(prefers-reduced-motion:reduce){.status-toggle,.status-toggle span{transition:none}}
+
+/* M.4.4.2 — overlays sempre relativos à viewport */
+main.page-content>.modal-backdrop,main.page-content>.nested-backdrop{position:fixed;inset:0}
+.modal-backdrop{z-index:100}
+.nested-backdrop{z-index:130}
+.item-form{display:flex;max-height:calc(100vh - 2rem);flex-direction:column;overflow:hidden}
+.item-form>main{overflow-y:auto}
+@media(max-width:500px){.nested-backdrop{align-items:center;padding:1rem}.item-form{max-height:calc(100vh - 2rem);border-radius:.65rem}}
+
+/* M.4.5 — microanimações globais */
+@keyframes m45-backdrop-in{from{opacity:0}to{opacity:1}}
+@keyframes m45-modal-in{from{opacity:0;transform:translateY(4px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes m45-panel-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.modal-backdrop,.nested-backdrop{animation:m45-backdrop-in 170ms ease-out both}
+.modal-backdrop>.order-form,.modal-backdrop>.order-details,.nested-backdrop>.confirm-dialog,.nested-backdrop>.item-form{animation:m45-modal-in 200ms ease-out both}
+.dashboard-kpis .dashboard-kpi{animation:m45-panel-in 200ms ease-out both}
+.dashboard-kpis .dashboard-kpi:nth-child(2){animation-delay:40ms}
+.dashboard-kpis .dashboard-kpi:nth-child(3){animation-delay:80ms}
+.dashboard-kpis .dashboard-kpi:nth-child(4){animation-delay:120ms}
+.dashboard-grid--two{animation:m45-panel-in 220ms ease-out 90ms both}
+.stat-card,.data-card,.report-card{transition:transform 180ms ease,box-shadow 180ms ease}
+.stat-card:hover,.data-card:hover,.report-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.08)}
+.button,.button-link{transition:color 160ms ease,background-color 160ms ease,border-color 160ms ease,box-shadow 160ms ease,transform 100ms ease}
+.button:not(:disabled):active,.button-link:not(:disabled):active{transform:scale(.98)}
+.order-actions .button:not(:disabled):hover,.project-actions .button-link:not(:disabled):hover{transform:translateY(-1px)}
+.sidebar__link{transition:color 160ms ease,background-color 160ms ease}
+.sidebar__link--active::before{transition:opacity 160ms ease}
+input[type="text"],input[type="date"],input[type="number"],input[type="email"],input[type="search"],select,textarea{transition:border-color 160ms ease,box-shadow 160ms ease}
+table tbody tr{transition:background-color 140ms ease}
+@media(prefers-reduced-motion:reduce){.modal-backdrop,.nested-backdrop,.modal-backdrop>.order-form,.modal-backdrop>.order-details,.nested-backdrop>.confirm-dialog,.nested-backdrop>.item-form,.dashboard-kpis .dashboard-kpi,.dashboard-grid--two{animation:none!important}.stat-card:hover,.data-card:hover,.report-card:hover,.button:not(:disabled):active,.button-link:not(:disabled):active,.order-actions .button:not(:disabled):hover,.project-actions .button-link:not(:disabled):hover{transform:none}.button,.button-link,.sidebar__link,.sidebar__link--active::before,input[type="text"],input[type="date"],input[type="number"],input[type="email"],input[type="search"],select,textarea,table tbody tr{transition:none}}

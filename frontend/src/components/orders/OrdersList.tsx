@@ -68,13 +68,13 @@ function Actions({ order, deletingId, onView, onEdit, onDelete }: Props & { orde
   const busy = deletingId === order.id
   return (
     <span className="order-actions">
-      <button className="button button--secondary" disabled={busy} type="button" onClick={() => onView(order.id)}>
+      <button aria-label="Visualizar" title="Visualizar" className="button button--secondary" disabled={busy} type="button" onClick={() => onView(order.id)}>
         <Eye size={16} />Visualizar
       </button>
-      <button className="button button--secondary" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
+      <button aria-label="Editar" title="Editar" className="button button--secondary" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
         <Pencil size={16} />Editar
       </button>
-      <button className="button-link button-link--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
+      <button aria-label="Excluir" title="Excluir" className="button-link button-link--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
         <Trash2 size={16} />{busy ? 'Excluindo...' : 'Excluir'}
       </button>
     </span>
