@@ -62,7 +62,7 @@ input,select{font:inherit}.orders-filters,.orders-results{margin-bottom:var(--s6
 /* M.4 — identidade visual Itaipu Engenharia / OSGestor */
 :root{--brand-orange:#df6b12;--brand-orange-hover:#b95708;--brand-orange-soft:#fff0e3;--brand-black:#111315;--brand-graphite:#23272b;--brand-white:#fff;--surface:#fff;--surface-muted:#f4f5f5;--border:#dfe2e3;--text-primary:#1c2226;--text-secondary:#687277;--text:var(--text-primary);--muted:var(--text-secondary);--bg:var(--surface-muted);--navy:var(--brand-black);--navy-2:var(--brand-graphite);--blue:var(--brand-orange);--blue-soft:var(--brand-orange-soft);--shadow:0 1px 2px rgba(17,19,21,.06),0 5px 16px rgba(17,19,21,.05)}
 body{background:var(--surface-muted);color:var(--text-primary)}
-.app-shell{background-color:var(--surface-muted);background-image:linear-gradient(90deg,rgba(244,245,245,.98) 0%,rgba(244,245,245,.93) 64%,rgba(244,245,245,.84) 100%),url('/background-itaipu.png');background-position:center,right 3rem bottom;background-repeat:repeat,no-repeat;background-size:auto,min(46vw,623px)}
+.app-shell{background-color:var(--surface-muted);background-image:linear-gradient(90deg,rgba(244,245,245,.98) 0%,rgba(244,245,245,.93) 64%,rgba(244,245,245,.84) 100%),url('/background-itaipu-black.png');background-position:center,right 3rem bottom;background-repeat:repeat,no-repeat;background-size:auto,min(46vw,623px)}
 .sidebar{background:linear-gradient(180deg,var(--brand-black) 0%,var(--brand-graphite) 100%);border-right-color:rgba(255,255,255,.08)}
 .sidebar__brand{border-bottom-color:rgba(255,255,255,.12)}
 .sidebar__brand-identity{justify-content:center}
@@ -111,7 +111,7 @@ input[type="text"]:focus,input[type="date"]:focus,input[type="number"]:focus,inp
 .button-link--edit{color:#fff;background:#000}
 .button-link--edit:hover{color:#fff;background:#1b1b1b}
 main.page-content{position:relative;isolation:isolate;background:#fff;overflow:hidden}
-main.page-content::before{position:absolute;right:-4rem;bottom:-7rem;z-index:-1;width:min(48vw,620px);height:min(48vw,620px);content:"";background-image:url('/background-itaipu.png');background-repeat:no-repeat;background-position:right bottom;background-size:contain;opacity:.055;pointer-events:none}
+main.page-content::before{position:absolute;right:-4rem;bottom:-7rem;z-index:-1;width:min(48vw,620px);height:min(48vw,620px);content:"";background-image:url('/background-itaipu-black.png');background-repeat:no-repeat;background-position:right bottom;background-size:contain;opacity:.035;pointer-events:none}
 main.page-content>*{position:relative}
 @keyframes m41-fade-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .page-heading,.dashboard-filters,.dashboard-kpis,.dashboard-grid--three,.dashboard-secondary-panels{animation:m41-fade-up 240ms ease-out both}
@@ -119,3 +119,20 @@ main.page-content>*{position:relative}
 .dashboard-kpi{transition:box-shadow 160ms ease,transform 160ms ease}.dashboard-kpi:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.08)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}.dashboard-kpi:hover{transform:none}}
 @media(max-width:900px){main.page-content::before{right:-7rem;bottom:-4rem;width:520px;height:520px}}
+
+/* M.4.3 — ações e métricas compartilhadas */
+.order-actions,.project-actions{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+.order-actions .button--secondary,.project-actions .button-link,.item-actions .button-link{min-height:34px;padding:.4rem .6rem;border:1px solid #000;border-radius:.4rem;color:#000;background:#fff;font-size:.75rem;font-weight:650;line-height:1}
+.order-actions .button--secondary:hover,.project-actions .button-link:not(.button-link--danger):hover,.item-actions .button-link:hover{color:#000;background:#f7f7f7;border-color:#f7531d}
+.project-actions .button-link--danger,.order-actions .button-link--danger,.item-actions .icon-button--danger{color:#fff;background:#b42318;border-color:#b42318}
+.project-actions .button-link--danger:hover,.order-actions .button-link--danger:hover{color:#fff;background:#8f1c13;border-color:#8f1c13}
+.frotas-terceiras-table .button-link--danger{color:#000;background:#fff;border-color:#000}
+.frotas-terceiras-table .button-link--danger:hover{color:#000;background:#f7f7f7;border-color:#f7531d}
+.project-actions .button-link:disabled,.order-actions .button:disabled,.item-actions .button-link:disabled{opacity:.55}
+.reports-filters__grid{box-sizing:border-box;padding-inline:20px}
+.reports-filters__more{box-sizing:border-box}
+.stat-card__icon,.dashboard-kpi__icon{width:40px;height:40px;color:#f7531d;background:rgba(247,83,29,.1);border-radius:.55rem}
+.stat-card__icon--amber{color:#f7531d;background:rgba(247,83,29,.1)}
+.stat-card__icon--green,.stat-card__icon--slate{color:#f7531d;background:rgba(247,83,29,.1)}
+.dashboard-kpi--blue .dashboard-kpi__icon,.dashboard-kpi--orange .dashboard-kpi__icon,.dashboard-kpi--green .dashboard-kpi__icon,.dashboard-kpi--navy .dashboard-kpi__icon{color:#f7531d;background:rgba(247,83,29,.1)!important}
+@media(max-width:760px){.reports-filters__grid{padding-inline:16px}}
