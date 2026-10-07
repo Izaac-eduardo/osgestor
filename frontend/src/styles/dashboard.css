@@ -3,3 +3,31 @@
 @media(max-width:760px){.dashboard-filter-heading{align-items:flex-start;flex-direction:column}.dashboard-filter-actions{width:100%}.dashboard-filter-actions button{flex:1}.dashboard-filter-grid,.dashboard-grid--two{grid-template-columns:1fr}.service-summary{grid-template-columns:1fr}.dashboard-kpis--secondary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.dashboard-filter-grid,.dashboard-kpis,.dashboard-kpis--secondary{grid-template-columns:1fr}.dashboard-kpi strong{font-size:1.2rem}.dashboard-donut{flex-direction:column}.dashboard-legend{width:100%;padding:0 1rem}}
  .dashboard-period-presets{display:flex;flex-wrap:wrap;gap:.45rem}.dashboard-period-presets .button{min-height:36px}.dashboard-kpi em{display:block;margin-top:.3rem;color:var(--muted);font-size:.72rem;font-style:normal}.dashboard-empty-inline{margin:0;padding:1.25rem;color:var(--muted);font-size:.8rem;text-align:center}
+.dashboard-content{gap:1rem}.dashboard-filters{padding:.8rem 1rem;margin-bottom:1rem}.dashboard-filter-heading{margin-bottom:.7rem}.dashboard-kpis{gap:.75rem}.dashboard-kpi{min-height:82px;padding:.7rem .85rem}.dashboard-kpi strong{font-size:1.2rem}.dashboard-grid--two,.dashboard-grid--three{gap:1rem}.dashboard-grid--three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-panel>header{padding:.7rem 1rem}.dashboard-chart{padding:.5rem .75rem}.dashboard-ranking{padding:.05rem 1rem .25rem}.dashboard-ranking__row{gap:.5rem;padding:.35rem 0;line-height:1.15}.dashboard-ranking__label small{margin-top:.1rem;line-height:1.1}.dashboard-ranking--single-line .dashboard-ranking__row{padding:.3rem 0}.dashboard-donut--compact{min-height:205px}.dashboard-secondary-panels{margin-top:-.1rem}
+@media(max-width:1100px){.dashboard-grid--three{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.dashboard-grid--three{grid-template-columns:1fr}.dashboard-secondary-panels{margin-top:0}}
+
+/* M.4 — acabamento visual do dashboard sem alterar sua estrutura ou dados */
+.dashboard-filter-heading>div:first-child{color:var(--brand-orange-hover)}
+.dashboard-filter-grid label{color:var(--text-secondary)}
+.dashboard-filter-grid input,.dashboard-filter-grid select{border-color:var(--border);color:var(--text-primary)}
+.dashboard-filter-grid input:focus,.dashboard-filter-grid select:focus{border-color:var(--brand-orange);box-shadow:0 0 0 3px rgba(223,107,18,.14);outline:0}
+.dashboard-kpi strong{color:var(--text-primary)}
+.dashboard-kpi--blue .dashboard-kpi__icon,.dashboard-kpi--orange .dashboard-kpi__icon{background:var(--brand-orange)}
+.dashboard-kpi--navy .dashboard-kpi__icon{background:var(--brand-graphite)}
+.dashboard-panel h2{color:var(--text-primary)}
+.dashboard-ranking__row b,.dashboard-footnote strong{color:var(--brand-orange-hover)}
+.dashboard-ranking__row{border-bottom-color:#eceeef}
+.service-summary>div{background:var(--surface-muted);border-color:var(--border)}
+.service-summary strong{color:var(--text-primary)}
+
+/* M.4.1 — dashboard claro, com destaque mínimo da marca */
+.dashboard-filters,.dashboard-panel,.dashboard-kpi{background:#fff;border-color:#e3e5e6;box-shadow:0 1px 2px rgba(0,0,0,.05),0 4px 12px rgba(0,0,0,.04)}
+.dashboard-filter-heading>div:first-child{color:#f7531d}
+.dashboard-kpi__icon{background:#000!important;color:#fff}
+.dashboard-kpi--orange .dashboard-kpi__icon{background:#f7531d!important}
+.dashboard-kpi--green .dashboard-kpi__icon,.dashboard-kpi--amber .dashboard-kpi__icon,.dashboard-kpi--red .dashboard-kpi__icon,.dashboard-kpi--slate .dashboard-kpi__icon{background:#000!important}
+.dashboard-kpi strong{color:#111}
+.dashboard-panel h2{color:#111}
+.dashboard-ranking__row b,.dashboard-footnote strong{color:#f7531d}
+.dashboard-chart{background:#fff}

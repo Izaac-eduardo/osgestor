@@ -58,3 +58,64 @@ input,select{font:inherit}.orders-filters,.orders-results{margin-bottom:var(--s6
 .cadastros-tabs{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:var(--s5)}.frotas-terceiras-toolbar{align-items:stretch;flex-wrap:wrap}.frotas-terceiras-toolbar>label{flex:0 1 auto;min-width:140px;flex-direction:column;align-items:stretch;gap:.35rem}.frotas-terceiras-toolbar .frotas-terceiras-search{display:flex;min-width:220px;flex:1;flex-direction:row;align-items:center}.frotas-terceiras-toolbar select{min-width:130px}.frotas-terceiras-unlinked{color:var(--muted);font-style:italic}.frotas-terceiras-table td:first-child strong{font-weight:650}.frotas-terceiras-form small{display:block;margin-top:.35rem;color:var(--muted);font-size:.72rem}@media(max-width:760px){.frotas-terceiras-toolbar>label{flex:1 1 180px}.frotas-terceiras-toolbar .frotas-terceiras-search{flex-basis:100%}.cadastros-tabs{overflow-x:auto;flex-wrap:nowrap}.cadastros-tabs .button{white-space:nowrap}}
 .sidebar__close{display:none}@media(max-width:900px){.sidebar__close{display:inline-grid}}
 .button-link--edit{background:#285877}.button-link--edit:hover{background:#20435e}.button--edit{background:#285877}.button--edit:hover{background:#20435e}
+
+/* M.4 — identidade visual Itaipu Engenharia / OSGestor */
+:root{--brand-orange:#df6b12;--brand-orange-hover:#b95708;--brand-orange-soft:#fff0e3;--brand-black:#111315;--brand-graphite:#23272b;--brand-white:#fff;--surface:#fff;--surface-muted:#f4f5f5;--border:#dfe2e3;--text-primary:#1c2226;--text-secondary:#687277;--text:var(--text-primary);--muted:var(--text-secondary);--bg:var(--surface-muted);--navy:var(--brand-black);--navy-2:var(--brand-graphite);--blue:var(--brand-orange);--blue-soft:var(--brand-orange-soft);--shadow:0 1px 2px rgba(17,19,21,.06),0 5px 16px rgba(17,19,21,.05)}
+body{background:var(--surface-muted);color:var(--text-primary)}
+.app-shell{background-color:var(--surface-muted);background-image:linear-gradient(90deg,rgba(244,245,245,.98) 0%,rgba(244,245,245,.93) 64%,rgba(244,245,245,.84) 100%),url('/background-itaipu.png');background-position:center,right 3rem bottom;background-repeat:repeat,no-repeat;background-size:auto,min(46vw,623px)}
+.sidebar{background:linear-gradient(180deg,var(--brand-black) 0%,var(--brand-graphite) 100%);border-right-color:rgba(255,255,255,.08)}
+.sidebar__brand{border-bottom-color:rgba(255,255,255,.12)}
+.sidebar__brand-identity{justify-content:center}
+.sidebar__link{color:#d9dddf}
+.sidebar__link:hover{color:var(--brand-white);background:rgba(223,107,18,.18)}
+.sidebar__link--active{color:#17191b;background:var(--brand-orange);box-shadow:inset 3px 0 var(--brand-white),0 6px 16px rgba(0,0,0,.18)}
+.sidebar__link--active:hover{color:#17191b;background:var(--brand-orange-hover)}
+.sidebar__section-label{color:#d7a77e}
+.topbar{background:rgba(255,255,255,.94);border-bottom-color:var(--border)}
+.page-content{color:var(--text-primary)}
+.button--primary{color:#17191b;background:var(--brand-orange);border-color:var(--brand-orange);box-shadow:0 3px 8px rgba(185,87,8,.18)}
+.button--primary:hover{color:#17191b;background:var(--brand-orange-hover);border-color:var(--brand-orange-hover)}
+.button--secondary{color:var(--text-primary);background:var(--surface);border-color:#aeb7bb}
+.button--secondary:hover{color:var(--brand-orange-hover);background:var(--brand-orange-soft);border-color:var(--brand-orange)}
+.button:focus-visible,.button-link:focus-visible,a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(223,107,18,.42);outline-offset:2px}
+input[type="text"],input[type="date"],input[type="number"],input[type="email"],input[type="search"],input[type="file"],select,textarea{color:var(--text-primary);background:var(--surface);border-color:var(--border)}
+input[type="text"]:focus,input[type="date"]:focus,input[type="number"]:focus,input[type="email"]:focus,input[type="search"]:focus,select:focus,textarea:focus{border-color:var(--brand-orange);box-shadow:0 0 0 3px rgba(223,107,18,.14);outline:0}
+table thead th{color:var(--text-primary);background:var(--surface-muted);border-bottom-color:var(--brand-orange-soft)}
+table tbody tr:hover{background:#fffaf5}
+.data-card,.orders-filters,.orders-results,.projects-table-wrap,.modal,.dashboard-panel,.dashboard-kpi{background:var(--surface);border-color:var(--border);box-shadow:var(--shadow)}
+.button--edit,.button-link--edit{color:#17191b;background:var(--brand-orange)}
+.button--edit:hover,.button-link--edit:hover{color:#17191b;background:var(--brand-orange-hover)}
+.link-button,.entrada-report-navigation a{color:var(--brand-orange-hover)}
+.status-badge--success{border-color:#b9dfcd}
+@media(max-width:900px){.app-shell{background-size:auto,min(72vw,520px);background-position:center,right bottom}}
+
+/* M.4.1 — preto puro, laranja Itaipu e movimento discreto */
+:root{--brand-black:#000000;--brand-orange:#f7531d;--brand-orange-hover:#d94313;--brand-orange-soft:#fff0eb;--brand-blue-soft:#89b1d3;--brand-white:#ffffff;--brand-graphite:#000000;--navy:var(--brand-black);--navy-2:var(--brand-black);--blue:var(--brand-orange);--blue-soft:var(--brand-orange-soft);--surface:#ffffff;--surface-muted:#f7f8f8;--border:#e3e5e6;--text-primary:#111111;--text-secondary:#667078;--text:var(--text-primary);--muted:var(--text-secondary);--bg:var(--surface-muted);--shadow:0 1px 2px rgba(0,0,0,.05),0 4px 12px rgba(0,0,0,.04)}
+.app-shell{background-color:#fff;background-image:none}
+.sidebar{background:#000000;border-right-color:#000000}
+.sidebar__link{color:rgba(255,255,255,.78);transition:color 160ms ease,background-color 160ms ease}
+.sidebar__link:hover{color:#fff;background:rgba(255,255,255,.06)}
+.sidebar__link--active,.sidebar__link--active:hover{position:relative;color:#fff;background:rgba(255,255,255,.045);box-shadow:none}
+.sidebar__link--active::before{position:absolute;left:0;top:8px;bottom:8px;width:3px;content:"";background:#f7531d;border-radius:0 2px 2px 0}
+.sidebar__link--active svg{color:#f7531d}
+.sidebar__section-label{color:rgba(255,255,255,.5)}
+.sidebar__brand{border-bottom-color:rgba(255,255,255,.14)}
+.topbar{background:#fff;border-bottom-color:var(--border)}
+.button--primary,.button--edit{color:#fff;background:#000;border-color:#000;box-shadow:none}
+.button--primary:hover,.button--edit:hover{color:#fff;background:#1b1b1b;border-color:#1b1b1b}
+.button--secondary{color:#000;background:#fff;border-color:#000}
+.button--secondary:hover{color:#000;background:#f7f7f7;border-color:#f7531d}
+.button:focus-visible,.button-link:focus-visible,a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #f7531d;outline-offset:2px}
+input[type="text"]:focus,input[type="date"]:focus,input[type="number"]:focus,input[type="email"]:focus,input[type="search"]:focus,select:focus,textarea:focus{border-color:#f7531d;box-shadow:0 0 0 3px rgba(247,83,29,.14)}
+.data-card,.orders-filters,.orders-results,.projects-table-wrap,.modal,.dashboard-panel,.dashboard-kpi{background:#fff;border-color:var(--border);box-shadow:var(--shadow);border-radius:.6rem}
+.button-link--edit{color:#fff;background:#000}
+.button-link--edit:hover{color:#fff;background:#1b1b1b}
+main.page-content{position:relative;isolation:isolate;background:#fff;overflow:hidden}
+main.page-content::before{position:absolute;right:-4rem;bottom:-7rem;z-index:-1;width:min(48vw,620px);height:min(48vw,620px);content:"";background-image:url('/background-itaipu.png');background-repeat:no-repeat;background-position:right bottom;background-size:contain;opacity:.055;pointer-events:none}
+main.page-content>*{position:relative}
+@keyframes m41-fade-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.page-heading,.dashboard-filters,.dashboard-kpis,.dashboard-grid--three,.dashboard-secondary-panels{animation:m41-fade-up 240ms ease-out both}
+.dashboard-kpis{animation-delay:45ms}.dashboard-grid--three{animation-delay:90ms}.dashboard-secondary-panels{animation-delay:135ms}
+.dashboard-kpi{transition:box-shadow 160ms ease,transform 160ms ease}.dashboard-kpi:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.08)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}.dashboard-kpi:hover{transform:none}}
+@media(max-width:900px){main.page-content::before{right:-7rem;bottom:-4rem;width:520px;height:520px}}

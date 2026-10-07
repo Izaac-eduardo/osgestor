@@ -44,7 +44,9 @@ test('dashboard agrega cards, rankings, natureza, horas e filtros sem duplicar O
     assert.equal(dashboard.resumo.interna_os, 2);
     assert.equal(dashboard.resumo.terceiros, 200);
     assert.equal(dashboard.resumo.terceiros_os, 1);
-    assert.equal(dashboard.categorias.find(row => row.categoria === 'MECANICA')?.quantidade, 3);
+    assert.equal(dashboard.categorias.find(row => row.categoria === 'MECANICA')?.quantidade, 1);
+    assert.equal(dashboard.categorias.find(row => row.categoria === 'SEM CATEGORIA')?.quantidade, 1);
+    assert.equal(dashboard.categorias.find(row => row.categoria === 'OUTROS'), undefined);
     assert.equal(dashboard.top_frotas.length, 1);
     assert.equal(dashboard.naturezas.find(row => row.natureza === 'MATERIAL')?.gasto, 80);
     assert.equal(dashboard.horas_funcionarios[0]?.minutos, 90);
@@ -54,6 +56,9 @@ test('dashboard agrega cards, rankings, natureza, horas e filtros sem duplicar O
     assert.equal(filtered.resumo.total_os, 0);
     const obraFiltered = await getDashboard({ data_inicio: '2026-10-01', data_fim: '2026-10-06', obra_id: obra, natureza_os: 'TERCEIRO' });
     assert.equal(obraFiltered.resumo.total_os, 2);
+    assert.deepEqual(obraFiltered.categorias, []);
+    const materialFiltered = await getDashboard({ data_inicio: '2026-10-01', data_fim: '2026-10-06', natureza_os: 'MATERIAL' });
+    assert.deepEqual(materialFiltered.categorias, []);
   } finally {
     pool.options.options = previousOptions;
     if (created) { await pool.query('SET search_path TO public'); await pool.query(`DROP SCHEMA ${schema} CASCADE`); }

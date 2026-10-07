@@ -103,8 +103,7 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot)
   if (status && statusSafety(status.atual, status.novo) === 'review') divergencias.push('STATUS_REGRESSIVO_OU_CONFLITANTE');
 
   const incomingCategory = parsed.categoriaServico ?? null;
-  const categoryIsEmptyEquivalent = current.categoria === null && incomingCategory === 'OUTROS';
-  const categoria = !categoryIsEmptyEquivalent && incomingCategory !== current.categoria ? { atual: current.categoria, novo: incomingCategory } : undefined;
+  const categoria = incomingCategory !== null && incomingCategory !== current.categoria ? { atual: current.categoria, novo: incomingCategory } : undefined;
   if (categoria && specificCategory(current.categoria) && !specificCategory(incomingCategory)) divergencias.push('CATEGORIA_NAO_REGRESSIVA');
   if (categoria && specificCategory(current.categoria) && specificCategory(incomingCategory)) divergencias.push('CATEGORIA_CONFLITANTE');
 
@@ -174,7 +173,7 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot)
   if (produtosAlterados.length) divergencias.push('PRODUTO_ALTERADO');
 
   const safeStatus = !status || statusSafety(status.atual, status.novo) === 'safe';
-  const safeCategory = !categoria || (current.categoria === 'OUTROS' && specificCategory(incomingCategory));
+  const safeCategory = !categoria || current.categoria === null || (current.categoria === 'OUTROS' && specificCategory(incomingCategory));
   const safeNature = !natureza || divergencias.every(value => value !== 'NATUREZA_SEM_EVIDENCIA_FORTE');
   const safeProblem = !problema || !current.problema;
   const canUpdate = !divergencias.length && safeStatus && safeCategory && safeNature && safeProblem;

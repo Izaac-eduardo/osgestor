@@ -18,6 +18,16 @@ const syncCurrent = (overrides: Partial<ExistingOsSnapshot> = {}): ExistingOsSna
 });
 const syncParsed = (overrides: Partial<ParsedOs> = {}): ParsedOs => ({ numeroOs: 10, data: '2026-09-14', cliente: null, frotaOriginal: 'ABC', parecerOriginal: 'Obra', funcionarioAbertura: null, problema: null, natureza: 'INTERNA', categoriaServico: 'OUTROS', status: 'ABERTA', statusOriginal: 'ABERTA', statusOrigem: 'AUTOMATICO', itens: [], execucoes: [], statusPreview: 'NOVA', pendencias: [], origem: 'teste', ...overrides });
 
+test('categoria NULL não apaga informação conhecida durante sincronização', () => {
+  const incomingNull = syncParsed({ categoriaServico: null });
+  assert.equal(buildOsUpdateDiff(incomingNull, syncCurrent({ categoria: 'MECANICA' })).estado, 'SEM_ALTERACOES');
+  assert.equal(buildOsUpdateDiff(incomingNull, syncCurrent({ categoria: 'OUTROS' })).estado, 'SEM_ALTERACOES');
+  assert.equal(buildOsUpdateDiff(incomingNull, syncCurrent({ categoria: null })).estado, 'SEM_ALTERACOES');
+  const fillsUnknown = buildOsUpdateDiff(syncParsed({ categoriaServico: 'MECANICA' }), syncCurrent({ categoria: null }));
+  assert.deepEqual(fillsUnknown.categoria, { atual: null, novo: 'MECANICA' });
+  assert.equal(fillsUnknown.podeAtualizarAutomaticamente, true);
+});
+
 test('persistência da sincronização tipa parâmetros opcionais e evita 42P08', () => {
   assert.match(orderUpdateSql, /status=\$1::varchar\(30\)/);
   assert.match(orderUpdateSql, /categoria_servico=\$2::varchar\(50\)/);
@@ -242,8 +252,10 @@ test('classifica categorias de serviÃ§o por descriÃ§Ã£o normalizada', () =
   assert.equal(classifyCategory(['SERVICO BORRACHARIA']), 'BORRACHARIA');
   assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICADOR']), 'LUBRIFICACAO');
   assert.equal(classifyCategory(['MAO DE OBRA LUBRIFICAR']), 'LUBRIFICACAO');
-  assert.equal(classifyCategory(['SERVICO ESPECIAL']), 'OUTROS');
-  assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO BORRACHARIA']), 'OUTROS');
+  assert.equal(classifyCategory([]), null);
+  assert.equal(classifyCategory(['SERVICO ESPECIAL']), null);
+  assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO ESPECIAL']), null);
+  assert.equal(classifyCategory(['MAO DE OBRA MECANICO', 'SERVICO BORRACHARIA']), null);
 });
 
 test('classifica serviços terceiros explícitos sem transformar produtos reais', () => {
@@ -338,8 +350,9 @@ test('mapeia cancelamento apenas em variantes explÃ­citas', () => {
 test('classifica eletricista como ELETRICA somente em TERCEIRO', () => {
   for (const description of ['MAO DE OBRA ELETRICISTA', 'MÃO DE OBRA ELETRICISTA', 'MAO DE OBRA - ELETRICISTA']) {
     assert.equal(classifyCategoryWithNatureza([description], 'TERCEIRO'), 'ELETRICA');
-    assert.equal(classifyCategoryWithNatureza([description], 'INTERNA'), 'OUTROS');
+    assert.equal(classifyCategoryWithNatureza([description], 'INTERNA'), null);
   }
+  assert.equal(classifyCategoryWithNatureza([], 'TERCEIRO'), null);
   assert.equal(classifyNatureza(null, null, 'TERCEIRO MAO DE OBRA ELETRICISTA', true, false), 'TERCEIRO');
 });
 
