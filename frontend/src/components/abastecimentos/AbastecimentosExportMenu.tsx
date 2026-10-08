@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import axios from 'axios'
+import { ChevronDown, Download } from 'lucide-react'
 import { downloadAbastecimentosExport, type AbastecimentosExportFormat, type AbastecimentosExportKind, type AbastecimentosExportParams } from '../../services/abastecimentos'
 
 const exportErrorMessage = async (cause: unknown): Promise<string> => {
@@ -20,5 +21,6 @@ export function AbastecimentosExportMenu({ kind, filters }: { kind: Abasteciment
     setError(null)
     try { await downloadAbastecimentosExport(kind, format, filters) } catch (cause) { setError(await exportErrorMessage(cause)) } finally { setBusy(null) }
   }
-  return <div className="abastecimentos-export-menu"><span>Exportar:</span><button className="button button--secondary" type="button" disabled={Boolean(busy)} onClick={() => void download('pdf')}>{busy === 'pdf' ? 'Gerando PDF…' : 'PDF'}</button><button className="button button--secondary" type="button" disabled={Boolean(busy)} onClick={() => void download('excel')}>{busy === 'excel' ? 'Gerando Excel…' : 'Excel'}</button>{error && <small role="alert">{error}</small>}</div>
+  const [open, setOpen] = useState(false)
+  return <div className="reports-export-menu"><button className="button button--secondary" type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}><Download size={17} />Exportar<ChevronDown size={15} /></button>{open && <div className="reports-export-menu__panel"><strong>Exportações disponíveis</strong><div><span>Relatório de abastecimentos</span><button type="button" disabled={Boolean(busy)} onClick={() => void download('excel')}>{busy === 'excel' ? 'Gerando Excel…' : 'Excel'}</button><button type="button" disabled={Boolean(busy)} onClick={() => void download('pdf')}>{busy === 'pdf' ? 'Gerando PDF…' : 'PDF'}</button></div>{error && <small className="report-download-error" role="alert">{error}</small>}</div>}</div>
 }

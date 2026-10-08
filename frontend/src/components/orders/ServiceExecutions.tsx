@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import axios from 'axios'
-import { Clock3, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Clock3, Plus, SquarePen, Trash, X } from 'lucide-react'
 import { ConfirmDialog } from '../ConfirmDialog'
 import {
   createServiceExecution, removeServiceExecution, updateServiceExecution,
@@ -66,8 +66,8 @@ export function ServiceExecutions({ orderId, service, employees, onRefresh }: Pr
               <span><strong>{execution.funcionario_nome}</strong><small>{formatDate(execution.inicio)} · {execution.inicio.slice(11,16)} → {execution.fim.slice(11,16)}</small></span>
       <strong>{formatWorkDuration(execution.duracao_minutos)}</strong>
               <span className="item-actions">
-                <button className="icon-button" aria-label="Editar período" onClick={() => setEditing(execution)}><Pencil size={15}/></button>
-                <button className="icon-button icon-button--danger" aria-label="Excluir período" onClick={() => setRemoving(execution)}><Trash2 size={15}/></button>
+                <button className="icon-button" aria-label="Editar período" title="Editar período" onClick={() => setEditing(execution)}><SquarePen size={16} aria-hidden="true"/></button>
+                <button className="icon-button icon-button--danger" aria-label="Excluir período" title="Excluir período" onClick={() => setRemoving(execution)}><Trash size={16} aria-hidden="true"/></button>
               </span>
             </div>
           ))

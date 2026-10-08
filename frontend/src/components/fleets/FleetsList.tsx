@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from 'lucide-react'
+import { SquarePen, Trash } from 'lucide-react'
 import { StatusToggle } from '../StatusToggle'
 import type { Fleet } from '../../types/fleets'
 type Props = { items: Fleet[]; busyId: string | null; onEdit: (id: string) => void; onStatus: (item: Fleet) => void; onDelete: (item: Fleet) => void }
@@ -7,9 +7,9 @@ function Badge({ item }: { item: Fleet }) {
 }
 function Actions({ item, ...props }: Props & { item: Fleet }) {
   return <span className="project-actions">
-    <button aria-label="Editar" title="Editar" className="button-link button-link--edit" disabled={props.busyId !== null} onClick={() => props.onEdit(item.id)}><Pencil size={15}/></button>
+    <button aria-label="Editar" title="Editar" className="button-link button-link--edit" disabled={props.busyId !== null} onClick={() => props.onEdit(item.id)}><SquarePen size={16}/></button>
     <StatusToggle active={item.status === 'ATIVO'} disabled={props.busyId !== null} onClick={() => props.onStatus(item)} />
-    <button aria-label="Excluir" title="Excluir" className="button-link button-link--danger" disabled={props.busyId !== null} onClick={() => props.onDelete(item)}><Trash2 size={15}/></button>
+    <button aria-label="Excluir" title="Excluir" className="button-link button-link--danger" disabled={props.busyId !== null} onClick={() => props.onDelete(item)}><Trash size={16}/></button>
   </span>
 }
 export function FleetsList(props: Props) {

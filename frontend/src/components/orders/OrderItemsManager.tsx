@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import axios from 'axios'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Plus, SquarePen, Trash } from 'lucide-react'
 import { ConfirmDialog } from '../ConfirmDialog'
 import {
   addOrderEmployee, createOrderProduct, createOrderService, getEmployees,
@@ -61,5 +61,5 @@ export function OrderItemsManager({order,onRefresh}:Props){
   </>
 }
 function ManagedSection({title,hidden,onAdd,add,children}:{title:string;hidden?:boolean;onAdd:()=>void;add:string;children:React.ReactNode}){if(hidden)return null;return <section className="details-section"><header><h3>{title}</h3><button className="button-link" onClick={onAdd} type="button"><Plus size={15}/>{add}</button></header>{children}</section>}
-function Row({title,sub,value,onEdit,onReplace,onRemove}:{title:string;sub?:string;value?:string;onEdit?:()=>void;onReplace?:()=>void;onRemove:()=>void}){return <div className="detail-row"><span><strong>{title}</strong>{sub&&<small>{sub}</small>}</span>{value&&<strong>{value}</strong>}<span className="item-actions">{onReplace&&<button className="button-link item-action-text" type="button" onClick={onReplace}>Trocar</button>}{onEdit&&<button aria-label={`Editar ${title}`} className="icon-button" type="button" onClick={onEdit}><Pencil size={16}/></button>}<button aria-label={`Remover ${title}`} className="icon-button icon-button--danger" type="button" onClick={onRemove}><Trash2 size={16}/></button></span></div>}
+function Row({title,sub,value,onEdit,onReplace,onRemove}:{title:string;sub?:string;value?:string;onEdit?:()=>void;onReplace?:()=>void;onRemove:()=>void}){return <div className="detail-row"><span><strong>{title}</strong>{sub&&<small>{sub}</small>}</span>{value&&<strong>{value}</strong>}<span className="item-actions">{onReplace&&<button className="button-link item-action-text" type="button" onClick={onReplace}>Trocar</button>}{onEdit&&<button aria-label={`Editar ${title}`} title={`Editar ${title}`} className="icon-button" type="button" onClick={onEdit}><SquarePen size={16} aria-hidden="true"/></button>}<button aria-label={`Remover ${title}`} title={`Remover ${title}`} className="icon-button icon-button--danger" type="button" onClick={onRemove}><Trash size={16} aria-hidden="true"/></button></span></div>}
 function Empty({text}:{text:string}){return <p className="details-empty">{text}</p>}

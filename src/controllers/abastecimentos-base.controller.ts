@@ -6,6 +6,7 @@ import { createTerceiroIdentificacao, deleteTerceiroIdentificacao, listTerceiroI
 import { createAbastecimentoBico, listAbastecimentoBicos, updateAbastecimentoBico, updateAbastecimentoBicoStatus } from '../services/abastecimentos-bicos.service.js';
 
 const queryText = (value: unknown): string | undefined => value === undefined ? undefined : typeof value === 'string' ? value : (() => { throw new AbastecimentoServiceError(400, 'Filtro deve ser texto.'); })();
+const queryPage = (value: unknown): number | undefined => value === undefined ? undefined : typeof value === 'string' && Number.isFinite(Number(value)) ? Number(value) : (() => { throw new AbastecimentoServiceError(400, 'Página deve ser numérica.'); })();
 const id = (request: Request): string => assertUuid(request.params.id);
 const action = (handler: (request: Request, response: Response) => Promise<void>) => async (request: Request, response: Response): Promise<void> => { try { await handler(request, response); } catch (error) { if (error instanceof AbastecimentoServiceError) { response.status(error.statusCode).json({ message: error.message }); return; } console.error('Erro interno no módulo de abastecimentos.'); response.status(500).json({ message: 'Erro interno do servidor.' }); } };
 
@@ -36,7 +37,7 @@ export const getEspecial = action(async (req,res)=>{res.json(await getAbastecime
 export const createEspecial = action(async (req,res)=>{res.status(201).json(await createAbastecimentoEspecial(req.body));});
 export const updateEspecial = action(async (req,res)=>{res.json(await updateAbastecimentoEspecial(id(req),req.body));});
 export const deleteEspecial = action(async (req,res)=>{await deleteAbastecimentoEspecial(id(req));res.status(204).send();});
-export const listEntradas = action(async (req,res)=>{res.json(await listAbastecimentoEntradas({data_inicio:queryText(req.query.data_inicio),data_fim:queryText(req.query.data_fim),produto_id:queryText(req.query.produto_id),produto_codigo:queryText(req.query.produto_codigo),numero_nf:queryText(req.query.numero_nf),ponto_id:queryText(req.query.ponto_id)}));});
+export const listEntradas = action(async (req,res)=>{res.json(await listAbastecimentoEntradas({data_inicio:queryText(req.query.data_inicio),data_fim:queryText(req.query.data_fim),produto_id:queryText(req.query.produto_id),produto_codigo:queryText(req.query.produto_codigo),numero_nf:queryText(req.query.numero_nf),ponto_id:queryText(req.query.ponto_id),page:queryPage(req.query.page)}));});
 export const getEntrada = action(async (req,res)=>{res.json(await getAbastecimentoEntrada(id(req)));});
 export const createEntrada = action(async (req,res)=>{res.status(201).json(await createAbastecimentoEntrada(req.body));});
 export const updateEntrada = action(async (req,res)=>{await assertEntradaSemDestinoVinculado(id(req));res.json(await updateAbastecimentoEntrada(id(req),req.body));});

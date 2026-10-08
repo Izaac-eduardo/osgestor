@@ -124,6 +124,12 @@ export interface EntradaFilters {
   produto_id?: string
   numero_nf?: string
   ponto_id?: string
+  page?: number
+}
+
+export interface EntradasResponse {
+  items: Entrada[]
+  pagination: { page: number; limit: number; total: number; total_pages: number }
 }
 
 export interface EntradasRelatorioFilters { data_inicio?: string; data_fim?: string; produto_id?: string; numero_nf?: string; ponto_id?: string; periodo?: 'dia' | 'mes'; page?: number; limit?: number }

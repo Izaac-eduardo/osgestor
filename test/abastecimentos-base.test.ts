@@ -141,7 +141,31 @@ test('Fase 4: CRUD operacional, compatibilidade e entradas de abastecimento', as
 
     const filtered = await request(base, `/abastecimento/entradas?ponto_id=${pointId}`);
     assert.equal(filtered.response.status, 200);
-    assert.equal(filtered.body.length, 2);
+    assert.equal(filtered.body.items.length, 2);
+    assert.deepEqual(filtered.body.pagination, { page: 1, limit: 20, total: 2, total_pages: 1 });
+
+    for (let index = 0; index < 41; index += 1) {
+      const paged = await request(base, '/abastecimento/entradas', {
+        method: 'POST',
+        body: JSON.stringify({ ...baseEntry, numero_nf: `PAGE-${suffix}-${index}`, litros_nf: '1.000', destinos: [] }),
+      });
+      assert.equal(paged.response.status, 201, JSON.stringify(paged.body));
+      entryIds.push(paged.body.id);
+    }
+    const pageOne = await request(base, `/abastecimento/entradas?numero_nf=PAGE-${suffix}&page=1`);
+    const pageTwo = await request(base, `/abastecimento/entradas?numero_nf=PAGE-${suffix}&page=2`);
+    const pageThree = await request(base, `/abastecimento/entradas?numero_nf=PAGE-${suffix}&page=3`);
+    assert.equal(pageOne.body.items.length, 20);
+    assert.equal(pageTwo.body.items.length, 20);
+    assert.equal(pageThree.body.items.length, 1);
+    assert.deepEqual(pageOne.body.pagination, { page: 1, limit: 20, total: 41, total_pages: 3 });
+    assert.equal(new Set([...pageOne.body.items, ...pageTwo.body.items, ...pageThree.body.items].map((item: any) => item.id)).size, 41);
+    const empty = await request(base, `/abastecimento/entradas?numero_nf=NAO-EXISTE-${suffix}`);
+    assert.deepEqual(empty.body, { items: [], pagination: { page: 1, limit: 20, total: 0, total_pages: 0 } });
+    const invalidLow = await request(base, `/abastecimento/entradas?numero_nf=PAGE-${suffix}&page=0`);
+    const invalidHigh = await request(base, `/abastecimento/entradas?numero_nf=PAGE-${suffix}&page=99`);
+    assert.equal(invalidLow.body.pagination.page, 1);
+    assert.equal(invalidHigh.body.pagination.page, 3);
 
     const updated = await request(base, `/abastecimento/entradas/${entryIds[0]}`, {
       method: 'PUT',

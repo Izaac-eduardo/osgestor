@@ -1,4 +1,4 @@
-import { Eye, Pencil, Trash2 } from 'lucide-react'
+import { Eye, SquarePen, Trash } from 'lucide-react'
 import type { ServiceOrder } from '../../types/orders'
 import { formatCurrency, formatDate } from '../../utils/formatters'
 import { orderCategoryLabels, orderNatureLabels } from '../../utils/orderLabels'
@@ -20,7 +20,7 @@ export function OrdersList(props: Props) {
           <thead>
             <tr>
               <th>O.S.</th><th>Frota</th><th>Obra</th><th>Natureza / categoria</th>
-              <th>Status</th><th>Abertura</th><th>Fechamento</th><th>Total</th><th>Ações</th>
+              <th>Status</th><th>Abertura</th><th>Fechamento</th><th>Total</th><th className="table-actions-column">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -37,7 +37,7 @@ export function OrdersList(props: Props) {
                 <td>{formatDate(order.data_abertura)}</td>
                 <td>{formatDate(order.data_fechamento)}</td>
                 <td>{formatCurrency(Number(order.total_os))}</td>
-                <td><Actions order={order} {...props} /></td>
+                <td className="table-actions-cell"><Actions order={order} {...props} /></td>
               </tr>
             ))}
           </tbody>
@@ -69,13 +69,13 @@ function Actions({ order, deletingId, onView, onEdit, onDelete }: Props & { orde
   return (
     <span className="order-actions">
       <button aria-label="Visualizar" title="Visualizar" className="button button--secondary" disabled={busy} type="button" onClick={() => onView(order.id)}>
-        <Eye size={16} />Visualizar
+        <Eye size={16} aria-hidden="true" />
       </button>
-      <button aria-label="Editar" title="Editar" className="button button--secondary" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
-        <Pencil size={16} />Editar
+      <button aria-label="Editar" title="Editar" className="button button--edit" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
+        <SquarePen size={16} aria-hidden="true" />
       </button>
-      <button aria-label="Excluir" title="Excluir" className="button-link button-link--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
-        <Trash2 size={16} />{busy ? 'Excluindo...' : 'Excluir'}
+      <button aria-label={busy ? 'Excluindo...' : 'Excluir'} title={busy ? 'Excluindo...' : 'Excluir'} className="button button--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
+        <Trash size={16} aria-hidden="true" />
       </button>
     </span>
   )

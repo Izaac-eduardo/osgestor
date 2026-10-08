@@ -11,6 +11,7 @@ import type {
   AbastecimentoProduto,
   DestinacaoEspecial,
   Entrada,
+  EntradasResponse,
   EntradaFilters,
   EntradaPayload,
   EntradasRelatorioFilters,
@@ -156,7 +157,7 @@ export const deleteDestinacaoEspecial = async (id: string) =>
   api.delete(`/abastecimento/destinacoes-especiais/${id}`);
 
 export const getEntradas = async (params: EntradaFilters) =>
-  (await api.get<Entrada[]>("/abastecimento/entradas", { params })).data;
+  (await api.get<EntradasResponse>("/abastecimento/entradas", { params })).data;
 export const getEntrada = async (id: string) =>
   (await api.get<Entrada>(`/abastecimento/entradas/${id}`)).data;
 export const createEntrada = async (payload: EntradaPayload) =>

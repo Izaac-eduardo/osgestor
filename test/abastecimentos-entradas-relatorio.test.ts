@@ -33,7 +33,7 @@ test('relatório de entradas agrega sem duplicar NF e destinos', async () => {
     assert.deepEqual(monthly.evolucao.map(item => item.periodo), ['2025-09', '2026-09']);
     const page = await (await fetch(`${base}/abastecimento/relatorios/entradas?limit=2&page=2`)).json() as { items: unknown[]; pagination: { page: number; total: number; total_pages: number }; summary: { entradas: number } };
     assert.equal(page.items.length, 1); assert.deepEqual(page.pagination, { page: 2, limit: 2, total: 3, total_pages: 2 }); assert.equal(page.summary.entradas, 3);
-    const operationalList = await (await fetch(`${base}/abastecimento/entradas?numero_nf=NF-REPETIDA`)).json() as Array<{ destinos: Array<{ ponto_codigo: string }> }>;
-    assert.equal(operationalList.length, 2); assert.ok(operationalList.some(item => item.destinos.length === 2));
+    const operationalList = await (await fetch(`${base}/abastecimento/entradas?numero_nf=NF-REPETIDA`)).json() as { items: Array<{ destinos: Array<{ ponto_codigo: string }> }>; pagination: { total: number; limit: number; total_pages: number } };
+    assert.equal(operationalList.items.length, 2); assert.deepEqual(operationalList.pagination, { page: 1, limit: 20, total: 2, total_pages: 1 }); assert.ok(operationalList.items.some(item => item.destinos.length === 2));
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); await pool.query('DELETE FROM abastecimento_entrada_destinos WHERE entrada_id=ANY($1::uuid[])', [entries]); await pool.query('DELETE FROM abastecimento_entradas WHERE id=ANY($1::uuid[])', [entries]); }
 });
