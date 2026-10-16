@@ -79,7 +79,6 @@ export function ImportarOsPage() {
     [projects, setProjects] = useState<Project[]>([]),
     [fleets, setFleets] = useState<Fleet[]>([]),
     [fleetSearch, setFleetSearch] = useState<Record<number, string>>({}),
-    [projectSearch, setProjectSearch] = useState<Record<number, string>>({}),
     [naturezaMotivos, setNaturezaMotivos] = useState<Record<number, string>>(
       {},
     );
@@ -582,38 +581,25 @@ export function ImportarOsPage() {
                         ? order.pendencias.map(label).join(", ")
                         : "Nenhuma pendência específica informada."}
                       <div className="import-corrections">
-                        <>
-                          <input
-                            list={`import-obras-${order.numeroOs}`}
-                            placeholder="Buscar obra por nome..."
-                            value={
-                              projectSearch[order.numeroOs] ??
-                              projects.find(
-                                (project) => project.id === order.obraId,
-                              )?.nome ??
-                              ""
-                            }
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setProjectSearch((current) => ({
-                                ...current,
-                                [order.numeroOs]: value,
-                              }));
-                              const found = projects.find(
-                                (project) =>
-                                  searchValue(project.nome) ===
-                                  searchValue(value),
-                              );
-                              if (found)
-                                void patch(order, { obraId: found.id });
-                            }}
-                          />
-                          <datalist id={`import-obras-${order.numeroOs}`}>
-                            {projects.map((project) => (
-                              <option key={project.id} value={project.nome} />
+                        <select
+                          aria-label={`Obra da O.S. ${order.numeroOs}`}
+                          value={order.obraId ?? ""}
+                          onChange={(event) =>
+                            void patch(order, {
+                              obraId: event.target.value || null,
+                            })
+                          }
+                          disabled={busy}
+                        >
+                          <option value="">Selecionar obra</option>
+                          {projects
+                            .filter((project) => project.status === "ATIVA")
+                            .map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.codigo} — {project.nome}
+                              </option>
                             ))}
-                          </datalist>
-                        </>
+                        </select>
                         <div className="import-fleet-picker">
                           <input
                             placeholder="Buscar frota por código, placa ou modelo"

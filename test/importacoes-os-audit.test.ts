@@ -99,6 +99,49 @@ test('atualização segura grava IMPORTAR com snapshots anterior/posterior', asy
   } finally { await cleanup([number], [token]); }
 });
 
+test('seleção de obra atualiza status, permite troca e limpar restaura a pendência', async () => {
+  const reference = await refs();
+  const alternate = (await pool.query<{ id: string }>('SELECT id FROM obras WHERE status=\'ATIVA\' AND id<>$1 LIMIT 1', [reference.obraId])).rows[0]?.id;
+  assert.ok(alternate);
+  const token = randomUUID(); const number = 571400009; const item = parsed(number);
+  item.frotaId = reference.frotaId; item.pendencias = ['OBRA_PENDENTE']; item.statusPreview = 'REQUER_REVISAO';
+  try {
+    await preview(token, item);
+    const selected = responseOf();
+    await resolve({ params: { token, numeroOs: String(number) }, body: { obraId: reference.obraId }, authUser: actor } as never, selected as never);
+    const selectedBody = selected.body as ParsedOs;
+    assert.equal(selected.statusCode, 200); assert.equal(selectedBody.obraId, reference.obraId); assert.equal(selectedBody.statusPreview, 'PRONTA'); assert.deepEqual(selectedBody.pendencias, []);
+
+    const changed = responseOf();
+    await resolve({ params: { token, numeroOs: String(number) }, body: { obraId: alternate }, authUser: actor } as never, changed as never);
+    const changedBody = changed.body as ParsedOs;
+    assert.equal(changed.statusCode, 200); assert.equal(changedBody.obraId, alternate); assert.equal(changedBody.statusPreview, 'PRONTA');
+
+    const cleared = responseOf();
+    await resolve({ params: { token, numeroOs: String(number) }, body: { obraId: null }, authUser: actor } as never, cleared as never);
+    const clearedBody = cleared.body as ParsedOs;
+    assert.equal(cleared.statusCode, 200); assert.equal(clearedBody.obraId, undefined); assert.equal(clearedBody.statusPreview, 'REQUER_REVISAO'); assert.deepEqual(clearedBody.pendencias, ['OBRA_PENDENTE']);
+  } finally { await cleanup([], [token]); }
+});
+
+test('mudança manual da classificação recalcula a natureza sem alterar o valor', async () => {
+  const reference = await refs(); const token = randomUUID(); const number = 571400010;
+  const item = parsed(number); item.obraId = reference.obraId; item.frotaId = reference.frotaId; item.natureza = 'INTERNA';
+  item.itens = [{ descricao: 'FRETE', quantidade: 1, valorUnitario: 165, total: 165, unidade: 'UN', tipo: 'SERVICO', classificacao_servico: 'INTERNO', classificacao_servico_original: 'INTERNO', classificacao_origem: 'IMPORTACAO' }];
+  try {
+    await preview(token, item);
+    const third = responseOf();
+    await resolve({ params: { token, numeroOs: String(number) }, body: { servicoIndex: 0, classificacao_servico: 'TERCEIRO' }, authUser: actor } as never, third as never);
+    const thirdBody = third.body as ParsedOs;
+    assert.equal(third.statusCode, 200); assert.equal(thirdBody.natureza, 'TERCEIRO'); assert.equal(thirdBody.itens[0]?.total, 165); assert.equal(thirdBody.itens[0]?.classificacao_servico, 'TERCEIRO');
+
+    const internal = responseOf();
+    await resolve({ params: { token, numeroOs: String(number) }, body: { servicoIndex: 0, classificacao_servico: 'INTERNO' }, authUser: actor } as never, internal as never);
+    const internalBody = internal.body as ParsedOs;
+    assert.equal(internal.statusCode, 200); assert.equal(internalBody.natureza, 'INTERNA'); assert.equal(internalBody.itens[0]?.total, 165);
+  } finally { await cleanup([], [token]); }
+});
+
 test('resoluções individuais de frota e obra ficam vinculadas ao lote e à O.S.', async () => {
   const reference = await refs();
   const fleetNumber = 571400005; const fleetToken = randomUUID(); const fleetItem = parsed(fleetNumber);

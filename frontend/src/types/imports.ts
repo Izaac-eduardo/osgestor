@@ -64,7 +64,7 @@ export interface ImportOrder {
   frotaOriginal: string | null;
   frotaId?: string;
   parecerOriginal: string | null;
-  obraId?: string;
+  obraId?: string | null;
   funcionarioAbertura: string | null;
   funcionarioAberturaCodigo?: string | null;
   funcionarioAberturaNome?: string | null;

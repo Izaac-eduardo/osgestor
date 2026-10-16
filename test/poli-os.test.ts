@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyImportedService, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, mapStatus, productUnit, matchObraId, resolveManualStatus } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyImportedService, classifyImportedServiceForDescription, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, isPreventiveReviewService, isRastreamentoDeFrota, mapStatus, naturezaExclusivaDosServicos, productUnit, matchObraId, refreshNaturezaFromServiceClassifications, resolveManualStatus } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';
@@ -136,6 +136,55 @@ test('parser reproduz o bloco exportado pelo Poli OS', () => {
   assert.equal(productUnit(`${String.fromCharCode(211)}LEO LUBRIFICANTE`), 'L'); assert.equal(productUnit('FILTRO DE OLEO'), 'UN');
   assert.equal(classifyNatureza('RETIRAR MATERIAL: ESTOPA', 'JOAO', '', false, true), 'MATERIAL'); assert.equal(classifyNatureza('Troca', null, '', true, false, undefined, false, ['IZAAC EDUARDO']), 'TERCEIRO'); assert.equal(classifyNatureza('Troca', 'Izaac', '', true, false, undefined, false, ['JOAO CARLOS']), 'INTERNA');
   assert.equal(mapStatus('ENCERRADA POR VENDA'), 'FINALIZADA'); assert.equal(mapStatus('STATUS NOVO'), undefined);
+});
+
+test('classifica RASTREAMENTO DE FROTA como serviço terceirizado', () => {
+  assert.equal(isRastreamentoDeFrota('RASTREAMENTO DE FROTA'), true);
+  assert.equal(classifyItemType('RASTREAMENTO DE FROTA'), 'SERVICO');
+  assert.equal(classifyImportedService('2375').classificacao_servico, 'TERCEIRO');
+  assert.equal(classifyItemType('RASTREAMENTO DE FROTA MENSAL'), 'PRODUTO');
+  const rows: unknown[][] = Array.from({ length: 8 }, () => Array(40).fill(null));
+  rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S'; rows[0]![30] = 'Placa';
+  rows[1]![0] = 48076; rows[1]![6] = '07/10/2026'; rows[1]![30] = 'ABC1D23';
+  rows[2]![8] = 'Encerrada por Venda';
+  rows[5]![3] = 2375; rows[5]![5] = 'RASTREAMENTO DE FROTA'; rows[5]![30] = 1; rows[5]![32] = 53; rows[5]![38] = 53;
+  const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+  const parsed = parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), 'rastreamento.xlsx')[0]!;
+  assert.equal(parsed.itens[0]?.tipo, 'SERVICO'); assert.equal(parsed.itens[0]?.classificacao_servico, 'TERCEIRO'); assert.equal(parsed.natureza, 'TERCEIRO');
+});
+
+test('reconcilia natureza com serviços exclusivamente internos, terceiros ou mistos', () => {
+  assert.equal(naturezaExclusivaDosServicos([{ tipo: 'SERVICO', classificacao_servico: 'TERCEIRO' }]), 'TERCEIRO');
+  assert.equal(naturezaExclusivaDosServicos([{ tipo: 'SERVICO', classificacao_servico: 'INTERNO' }]), 'INTERNA');
+  assert.equal(naturezaExclusivaDosServicos([{ tipo: 'SERVICO', classificacao_servico: 'TERCEIRO' }, { tipo: 'SERVICO', classificacao_servico: 'INTERNO' }]), undefined);
+  assert.equal(naturezaExclusivaDosServicos([{ tipo: 'SERVICO', classificacao_servico: 'TERCEIRO' }, { tipo: 'PRODUTO' }]), undefined);
+  const item = { natureza: 'INTERNA' as const, itens: [{ tipo: 'SERVICO' as const, classificacao_servico: 'TERCEIRO' as const }], execucoes: [] };
+  refreshNaturezaFromServiceClassifications(item);
+  assert.equal(item.natureza, 'TERCEIRO');
+  const conflicting = { natureza: 'INTERNA' as const, itens: [{ tipo: 'SERVICO' as const, classificacao_servico: 'TERCEIRO' as const }], execucoes: [{ funcionarioOriginal: 'JOAO', inicio: '', fim: '' }] };
+  refreshNaturezaFromServiceClassifications(conflicting);
+  assert.equal(conflicting.natureza, 'INTERNA');
+});
+
+test('classifica revisões preventivas por quilometragem e horímetro como TERCEIRO', () => {
+  for (const description of [
+    'REVISAO VEICULOS 30000 KM',
+    'REVISAO VEICULOS 30.000 KM',
+    'revisão   veículos 20 000 km',
+    'REVISAO 500H CATERPILLAR',
+    'REVISAO 1000 H CATERPILLAR',
+    'REVISAO 1500H VOLVO',
+    'REVISAO 2000H KOMATSU',
+    'REVISAO PREVENTIVA',
+  ]) {
+    assert.equal(isPreventiveReviewService(description), true, description);
+    assert.equal(classifyItemType(description), 'SERVICO', description);
+    assert.equal(classifyImportedServiceForDescription(description, '1919').classificacao_servico, 'TERCEIRO', description);
+  }
+  for (const description of ['FILTRO DE OLEO', 'OLEO MOTOR', 'KIT DE JUNTAS', 'REVISAO DE PNEU']) {
+    assert.equal(isPreventiveReviewService(description), false, description);
+    assert.equal(classifyItemType(description), 'PRODUTO', description);
+  }
 });
 
 test('preserva o índice lógico do serviço em cada execução Vega', () => {

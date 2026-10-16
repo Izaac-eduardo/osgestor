@@ -35,6 +35,12 @@ export function matchObraId(obraText:string|null,obras:Array<{id:string;codigo:s
 export function isMensalidadePedagio(description:string):boolean { return norm(description)==='MENSALIDADE PEDAGIO'; }
 export function isPassagemPedagio(description:string):boolean { return norm(description)==='PASSAGEM PEDAGIO'; }
 export function classifyNatureza(problem:string|null, _technician:string|null, text:string, hasService=false, hasProducts=false, status?:string, hasExecutions=false, serviceTechnicians:string[]=[]):Natureza|undefined { const p=norm(problem); const normalizedText=norm(text); if(hasProducts&&!hasService&&/^RETIRAR\b/.test(p)) return 'MATERIAL'; if(norm(status)==='FINALIZADA'&&hasProducts&&!hasService&&!hasExecutions) return 'MATERIAL'; if(hasService&&normalizedText.includes('MENSALIDADE PEDAGIO')) return 'TERCEIRO'; if(serviceTechnicians.some((value)=>norm(value)==='IZAAC EDUARDO')||/\bTERCEIRO(S)?\b/.test(normalizedText)) return 'TERCEIRO'; return problem||text?'INTERNA':undefined; }
+export function isRastreamentoDeFrota(description:string):boolean { return norm(description)==='RASTREAMENTO DE FROTA'; }
+const preventiveReviewPattern = /\b(?:PREVENTIVA|PERIODICA)\b|\d+(?:[.,]\s*\d+|\s+\d+)*\s*(?:KM|KMS|H|HR|HRS|HORA|HORAS|HORIMETRO)\b/;
+export function isPreventiveReviewService(description:string):boolean {
+ const normalized=norm(description);
+ return /^REVISAO\b/.test(normalized)&&preventiveReviewPattern.test(normalized);
+}
 export function mapStatus(v:unknown):string|undefined { const s=norm(v); if(s==='ABERTA')return 'ABERTA'; if(s==='FINALIZADA')return 'FINALIZADA'; if(s==='CANCELADA'||s==='CANCELADO'||s==='ENCERRADA POR CANCELAMENTO'||s==='NAO FATURAR NESSE CADASTRO')return 'CANCELADA'; if(/^ENCERRADA|^FECHADA/.test(s))return 'FINALIZADA'; return undefined; }
 export function resolveManualStatus(item: ParsedOs, status: string): boolean {
   const pending = item.pendencias.some(value => value.startsWith('STATUS_PENDENTE'));
@@ -87,7 +93,7 @@ const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|B
  * serviço, o item permanece produto; o catálogo gerencial não é sobrescrito.
  */
 export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' {
-  return hasExecution || isMensalidadePedagio(description) || isPassagemPedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO';
+  return hasExecution || isPreventiveReviewService(description) || isRastreamentoDeFrota(description) || isMensalidadePedagio(description) || isPassagemPedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO';
 }
 export const CODIGOS_SERVICOS_INTERNOS = new Set(['1919', '1916', '2654', '1902', '2257', '1943']);
 const normalizeServiceCode = (value: unknown): string | undefined => {
@@ -102,9 +108,24 @@ export function classifyImportedService(code: unknown): Pick<ParsedItem, 'classi
     classificacao_origem: 'IMPORTACAO',
   };
 }
+export function classifyImportedServiceForDescription(description:string, code:unknown): Pick<ParsedItem, 'classificacao_servico' | 'classificacao_origem'> {
+ return isPreventiveReviewService(description) ? { classificacao_servico: 'TERCEIRO', classificacao_origem: 'IMPORTACAO' } : classifyImportedService(code);
+}
 export function classifyPoliItem(item: Pick<ParsedItem, 'codigo_poli' | 'codigo' | 'tipo'>): PoliItemCategoryResolution { return resolvePoliItemCategory(item); }
 export function importedServiceOrigin(item: Pick<ParsedItem, 'classificacao_servico' | 'classificacao_servico_original'>): 'IMPORTACAO' | 'REVISAO' {
   return item.classificacao_servico === (item.classificacao_servico_original ?? item.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO';
+}
+export function naturezaExclusivaDosServicos(items: Pick<ParsedItem, 'tipo' | 'classificacao_servico'>[]): Natureza|undefined {
+ const services=items.filter(item=>item.tipo==='SERVICO');
+ if(!services.length||items.some(item=>item.tipo==='PRODUTO')) return undefined;
+ if(services.every(item=>item.classificacao_servico==='TERCEIRO')) return 'TERCEIRO';
+ if(services.every(item=>item.classificacao_servico==='INTERNO')) return 'INTERNA';
+ return undefined;
+}
+export function refreshNaturezaFromServiceClassifications(item: Pick<ParsedOs, 'itens'|'natureza'|'execucoes'>): void {
+ const natureza=naturezaExclusivaDosServicos(item.itens);
+ if(natureza==='TERCEIRO'&&item.execucoes.length) return;
+ if(natureza) item.natureza=natureza;
 }
 export function unresolvedServiceCount(items: ParsedItem[]): number {
   return items.filter(item => item.tipo === 'SERVICO' && item.classificacao_servico === 'INDETERMINADO').length;
@@ -141,12 +162,12 @@ export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliIm
   const wb=XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true}),out:ParsedOs[]=[];
  for(const sn of wb.SheetNames){const sheet=wb.Sheets[sn]!,rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:null}) as unknown[][],layout=detectVegaLayout(rows);let o:ParsedOs|null=null,last:ParsedItem|undefined;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){const row=rows[rowIndex]!;if(isOsRow(row)){if(o)out.push(o);const launcherCode=textAt(row,layout.launcherCodeColumn)||null,launcherName=textAt(row,layout.launcherNameColumn)||null;o={numeroOs:num(row[0]),data:dateOnly(row[6]),cliente:textAt(row,layout.clienteColumn)||null,frotaOriginal:textAt(row,layout.placaColumn)||textAt(row,layout.veiculoColumn)||null,parecerOriginal:null,funcionarioAbertura:launcherCode,funcionarioAberturaCodigo:launcherCode,funcionarioAberturaNome:launcherName,problema:null,status:undefined,statusOriginal:null,statusOrigem:null,itens:[],execucoes:[],statusPreview:'REQUER_REVISAO',pendencias:[],origem:filename};last=undefined;continue}if(!o)continue;
-   const statusOriginal=String(row[8]??'');if(statusOriginal.trim()){o.statusOriginal=statusOriginal.trim();const mappedStatus=mapStatus(statusOriginal);o.status=mappedStatus;o.statusOrigem=mappedStatus?'AUTOMATICO':null;}const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedService(code):undefined;const managerCategory=classifyPoliItem({ codigo_poli: code||undefined, tipo });const sequenciaImportacao=o.itens.length+1;last={codigo:code||undefined,codigo_poli:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,origemLinha:rowIndex+1,sequenciaImportacao,...classification,classificacao_servico_original:classification?.classificacao_servico,categoria_gerencial:managerCategory.categoria_gerencial,subcategoria_gerencial:managerCategory.subcategoria_gerencial,origem_classificacao:managerCategory.origem_classificacao};last.fingerprintContexto=buildItemContextFingerprint(importMetadata,o.numeroOs,tipo,sequenciaImportacao);last.hashConteudo=buildItemContentHash(last);o.itens.push(last);}
+   const statusOriginal=String(row[8]??'');if(statusOriginal.trim()){o.statusOriginal=statusOriginal.trim();const mappedStatus=mapStatus(statusOriginal);o.status=mappedStatus;o.statusOrigem=mappedStatus?'AUTOMATICO':null;}const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedServiceForDescription(description,code):undefined;const managerCategory=classifyPoliItem({ codigo_poli: code||undefined, tipo });const sequenciaImportacao=o.itens.length+1;last={codigo:code||undefined,codigo_poli:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,origemLinha:rowIndex+1,sequenciaImportacao,...classification,classificacao_servico_original:classification?.classificacao_servico,categoria_gerencial:managerCategory.categoria_gerencial,subcategoria_gerencial:managerCategory.subcategoria_gerencial,origem_classificacao:managerCategory.origem_classificacao};last.fingerprintContexto=buildItemContextFingerprint(importMetadata,o.numeroOs,tipo,sequenciaImportacao);last.hashConteudo=buildItemContentHash(last);o.itens.push(last);}
    const match=/Inicio em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) Termino em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2})/i.exec(norm(executionText));if(match&&last?.tipo==='SERVICO'){const classification=classifyImportedService(last.codigo);last.classificacao_servico=classification.classificacao_servico;last.classificacao_servico_original=classification.classificacao_servico;last.classificacao_origem=classification.classificacao_origem;const serviceItemIndex=o.itens.length-1;if(last.tecnicoOriginal&&norm(last.tecnicoOriginal)!=='IZAAC EDUARDO'){const sequenciaImportacao=o.execucoes.length+1;const servicoSequenciaImportacao=last.sequenciaImportacao ?? serviceItemIndex+1;const execution:ParsedExecucao={funcionarioOriginal:last.tecnicoOriginal,inicio:localDateTime(match[1]!,match[2]!),fim:localDateTime(match[3]!,match[4]!),serviceItemIndex,origemLinha:rowIndex+1,sequenciaImportacao,servicoSequenciaImportacao};execution.fingerprintContexto=buildExecutionContextFingerprint(importMetadata,o.numeroOs,sequenciaImportacao,servicoSequenciaImportacao);execution.hashConteudo=buildExecutionContentHash(execution);o.execucoes.push(execution);}}
    const annotation=textAt(row,0);if(/^PROBLEMA\s*:/i.test(annotation)){const problem=annotation.replace(/^PROBLEMA\s*:/i,'').trim();if(!/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+(?:\s+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+)?$/.test(problem))o.problema=o.problema?o.problema+'\n'+problem:problem;}else if(/^PARECER/i.test(annotation))o.parecerOriginal=annotation.replace(/^PARECER[^:]*:/i,'').trim();if(/^TOTAL ORDEM/i.test(norm(row.map(value=>String(value??'')).join(' '))))o.totalOrigem=num(row[layout.totalColumn]);
   }if(o)out.push(o);
  }
- for(const item of out){item.categoriaServico=classifyCategory(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao));item.natureza=classifyNatureza(item.problema,item.execucoes[0]?.funcionarioOriginal??null,item.itens.map(x=>x.descricao).join(' '),item.itens.some(x=>x.tipo==='SERVICO'),item.itens.some(x=>x.tipo==='PRODUTO'),item.status,item.execucoes.length>0,item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));const electricianCategory=classifyCategoryWithNatureza(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao),item.natureza);if(electricianCategory==='ELETRICA')item.categoriaServico=electricianCategory;}return out;
+ for(const item of out){item.categoriaServico=classifyCategory(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao));item.natureza=item.itens.some(x=>x.tipo==='SERVICO'&&isRastreamentoDeFrota(x.descricao))?'TERCEIRO':classifyNatureza(item.problema,item.execucoes[0]?.funcionarioOriginal??null,item.itens.map(x=>x.descricao).join(' '),item.itens.some(x=>x.tipo==='SERVICO'),item.itens.some(x=>x.tipo==='PRODUTO'),item.status,item.execucoes.length>0,item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));refreshNaturezaFromServiceClassifications(item);const electricianCategory=classifyCategoryWithNatureza(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao),item.natureza);if(electricianCategory==='ELETRICA')item.categoriaServico=electricianCategory;}return out;
 }
 export async function matchPreview(items:ParsedOs[], options: PoliParserOptions = {}){
  let fleets:{id:string;codigo:string;placa:string|null;status:string}[]=[];
@@ -173,6 +194,7 @@ export async function matchPreview(items:ParsedOs[], options: PoliParserOptions 
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');
   for(const e of o.execucoes){const h=employees.filter(x=>norm(x.nome)===norm(e.funcionarioOriginal));if(h.length===1)e.funcionarioId=e.funcionarioId??h[0]!.id;else addPending(o.pendencias,h.length?'FUNCIONARIO_AMBIGUO':'FUNCIONARIO_PENDENTE');}
   o.natureza=o.natureza??classifyNatureza(o.problema,o.execucoes[0]?.funcionarioOriginal??null,o.itens.map(x=>x.descricao).join(' '),o.itens.some(x=>x.tipo==='SERVICO'),o.itens.some(x=>x.tipo==='PRODUTO'),o.status,o.execucoes.length>0,o.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));
+  refreshNaturezaFromServiceClassifications(o);
   if(!o.natureza)addPending(o.pendencias,'NATUREZA_PENDENTE');
   if(!o.problema&&!o.itens.length)addPending(o.pendencias,'DADOS_INCOMPLETOS');
   if (options.resolveDatabase !== false) {

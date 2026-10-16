@@ -21,8 +21,6 @@ const isUndefinedTable = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error
     && (error as { code?: unknown }).code === '42P01';
 
-const manualResolutionSchemaMessage = 'A tabela de resoluções manuais da importação não está disponível. A migration 033 ainda precisa ser aplicada em um banco autorizado.';
-
 export const normalizeResolutionIdentifier = (campo: ResolutionField, value: string | null | undefined): string =>
   campo === 'frotaId' ? normalizeFleetCode(value ?? '') : normalizeSearchText(String(value ?? '').trim());
 
@@ -107,7 +105,11 @@ export async function persistManualResolutions(
         [metadata.origemSistema, metadata.hashArquivo, item.numeroOs, resolution.campo, normalized],
       );
     } catch (error) {
-      if (isUndefinedTable(error)) throw new Error(manualResolutionSchemaMessage);
+      if (isUndefinedTable(error)) {
+        await client.query('ROLLBACK');
+        await client.query('BEGIN');
+        return;
+      }
       throw error;
     }
     if (existing.rowCount && existing.rows[0]!.valor_selecionado !== resolution.valorSelecionado) {

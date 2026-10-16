@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { PoolClient } from 'pg';
-import { addPending, importedServiceOrigin, matchPreview, parsePoliOs, refreshServiceClassificationPending, resolveManualStatus, validateServiceClassificationsForConfirmation, type ParsedOs } from '../imports/poli-os.js';
+import { addPending, importedServiceOrigin, matchPreview, parsePoliOs, refreshNaturezaFromServiceClassifications, refreshServiceClassificationPending, resolveManualStatus, validateServiceClassificationsForConfirmation, type ParsedOs } from '../imports/poli-os.js';
 import { pool } from '../config/database.js';
 import { resolveLancadorFuncionarioId } from '../services/lancadores-os.service.js';
 import { ordemServicoStatuses } from '../services/ordens-servico.service.js';
@@ -180,6 +180,7 @@ export async function resolve(request: Request, response: Response): Promise<voi
     }
     service.classificacao_servico = classification;
     service.classificacao_origem = importedServiceOrigin(service);
+    refreshNaturezaFromServiceClassifications(item);
     item.pendencias = item.pendencias.filter(value => !value.startsWith('CLASSIFICACAO_SERVICO_PENDENTE'));
     refreshServiceClassificationPending(item.pendencias, item.itens);
     item.statusPreview = item.pendencias.length ? 'REQUER_REVISAO' : 'PRONTA';
@@ -189,11 +190,10 @@ export async function resolve(request: Request, response: Response): Promise<voi
   }
   if (body.status !== undefined && !ordemServicoStatuses.includes(body.status as typeof ordemServicoStatuses[number])) { response.status(400).json({ message: 'status inválido.' }); return; }
   const statusPending = item.pendencias.some(value => value.startsWith('STATUS_PENDENTE'));
-  const obraPending = item.pendencias.some(value => value.startsWith('OBRA_PENDENTE') || value.startsWith('OBRA_AMBIGUA'));
   const fleetPending = item.pendencias.some(value => value.startsWith('FROTA_PENDENTE'));
   const bodyRecord = body as Record<string, unknown>;
   const requestedFleet = bodyRecord.frotaId !== undefined;
-  const requestedObra = bodyRecord.obraId !== undefined;
+  const requestedObra = Object.prototype.hasOwnProperty.call(bodyRecord, 'obraId');
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const selectedFleet = bodyRecord.frotaId;
   const selectedObra = bodyRecord.obraId;
@@ -201,17 +201,20 @@ export async function resolve(request: Request, response: Response): Promise<voi
   const approvedDecision = typeof decision === 'string' && ['APROVAR', 'APROVADA', 'APROVAR CANDIDATO'].includes(decision.trim().toUpperCase());
   if ((requestedFleet || requestedObra) && decision !== undefined && !approvedDecision) { response.status(409).json({ message: 'A resolução manual exige uma decisão aprovada.' }); return; }
   if (requestedFleet && (!fleetPending || typeof selectedFleet !== 'string' || !uuidPattern.test(selectedFleet))) { response.status(409).json({ message: 'A resolucao de frota exige uma pendencia de frota e um UUID valido.' }); return; }
-  if (requestedObra && (!obraPending || typeof selectedObra !== 'string' || !uuidPattern.test(selectedObra))) { response.status(409).json({ message: 'A resolucao de obra exige uma pendencia de obra e um UUID valido.' }); return; }
+  const clearObra = requestedObra && (selectedObra === null || selectedObra === '');
+  if (requestedObra && !clearObra && (typeof selectedObra !== 'string' || !uuidPattern.test(selectedObra))) { response.status(409).json({ message: 'A obra selecionada deve ser um UUID valido ou vazia para limpar a selecao.' }); return; }
   if (requestedFleet && !(await pool.query('SELECT 1 FROM frotas WHERE id=$1 AND status=\'ATIVO\'', [selectedFleet])).rowCount) { response.status(409).json({ message: 'A frota selecionada nao existe ou nao esta ativa.' }); return; }
-  if (requestedObra && !(await pool.query('SELECT 1 FROM obras WHERE id=$1 AND status=\'ATIVA\'', [selectedObra])).rowCount) { response.status(409).json({ message: 'A obra selecionada nao existe ou nao esta ativa.' }); return; }
+  if (requestedObra && !clearObra && !(await pool.query('SELECT 1 FROM obras WHERE id=$1 AND status=\'ATIVA\'', [selectedObra])).rowCount) { response.status(409).json({ message: 'A obra selecionada nao existe ou nao esta ativa.' }); return; }
   const before = resolutionSnapshot(item);
+  const previousObraId = item.obraId ?? null;
   if (body.status !== undefined && !statusPending) { response.status(409).json({ message: 'Somente uma pendencia de status pode ser resolvida manualmente.' }); return; }
-  for (const field of ['obraId', 'frotaId', 'natureza', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
-  const manualResolucoes = [...(item.manualResolucoes ?? [])];
+  for (const field of ['frotaId', 'natureza', 'prestadorTerceiro', 'problema'] as const) if (body[field] !== undefined) (item as unknown as Record<string, unknown>)[field] = body[field];
+  if (requestedObra) (item as unknown as Record<string, unknown>).obraId = clearObra ? undefined : selectedObra;
+  const manualResolucoes = (item.manualResolucoes ?? []).filter(value => !(requestedObra && value.campo === 'obraId') && !(requestedFleet && value.campo === 'frotaId'));
   const decidedEm = new Date().toISOString();
   const decididoPor = request.authUser?.id ?? null;
   if (requestedFleet) manualResolucoes.push({ campo: 'frotaId', valorOrigem: item.frotaId ?? null, identificadorOriginal: item.frotaOriginal, valorSelecionado: selectedFleet as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
-  if (requestedObra) manualResolucoes.push({ campo: 'obraId', valorOrigem: item.obraId ?? null, identificadorOriginal: item.parecerOriginal, valorSelecionado: selectedObra as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
+  if (requestedObra && !clearObra) manualResolucoes.push({ campo: 'obraId', valorOrigem: previousObraId, identificadorOriginal: item.parecerOriginal, valorSelecionado: selectedObra as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
   item.manualResolucoes = manualResolucoes;
   if (body.status !== undefined) resolveManualStatus(item, body.status as string);
   item.pendencias = [];
