@@ -1,5 +1,7 @@
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, assertUuid, abastecimentoStatuses, type AbastecimentoStatus } from './abastecimentos-base.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 type BicoFields = { codigo: string; descricao: string | null; produto_id: string; status: AbastecimentoStatus };
 type RecordValue = Record<string, unknown>;
@@ -47,15 +49,15 @@ export async function listAbastecimentoBicos(pontoId: string, filters: { status?
   return (await pool.query(`SELECT b.* FROM abastecimento_bicos b WHERE ${conditions.join(' AND ')} ORDER BY b.codigo`, values)).rows;
 }
 
-export async function createAbastecimentoBico(pontoId: string, body: unknown) {
+export async function createAbastecimentoBico(pontoId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const id = assertUuid(pontoId, 'ponto_id'); await ensurePoint(id); const fields = parseFields(body, false); await ensureProduct(fields.produto_id);
-  try { return (await pool.query('INSERT INTO abastecimento_bicos(codigo,descricao,produto_id,ponto_id,status) VALUES($1,$2,$3,$4,$5) RETURNING *', [fields.codigo, fields.descricao, fields.produto_id, id, fields.status])).rows[0]; } catch (error) { return mapError(error); }
+  const client = await pool.connect(); try { await client.query('BEGIN'); const row = (await client.query('INSERT INTO abastecimento_bicos(codigo,descricao,produto_id,ponto_id,status) VALUES($1,$2,$3,$4,$5) RETURNING *', [fields.codigo, fields.descricao, fields.produto_id, id, fields.status])).rows[0]; await recordAudit({ actor, acao: 'CRIAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_bicos', entidadeId: row.id, dadosPosteriores: { id: row.id, codigo: row.codigo, descricao: row.descricao, produto_id: row.produto_id, ponto_id: row.ponto_id, status: row.status } }, client); await client.query('COMMIT'); return row; } catch (error) { await client.query('ROLLBACK'); return mapError(error); } finally { client.release(); }
 }
-export async function updateAbastecimentoBico(pontoId: string, bicoId: string, body: unknown) {
+export async function updateAbastecimentoBico(pontoId: string, bicoId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const pointId = assertUuid(pontoId, 'ponto_id'); const id = assertUuid(bicoId); await ensurePoint(pointId); const fields = parseFields(body, true); await ensureProduct(fields.produto_id);
-  try { const result = await pool.query('UPDATE abastecimento_bicos SET codigo=$1,descricao=$2,produto_id=$3,status=$4 WHERE id=$5 AND ponto_id=$6 RETURNING *', [fields.codigo, fields.descricao, fields.produto_id, fields.status, id, pointId]); if (!result.rows[0]) throw new AbastecimentoServiceError(404, 'Bico não encontrado neste ponto.'); return result.rows[0]; } catch (error) { return mapError(error); }
+  const client = await pool.connect(); try { await client.query('BEGIN'); const before = (await client.query('SELECT * FROM abastecimento_bicos WHERE id=$1 AND ponto_id=$2 FOR UPDATE', [id, pointId])).rows[0]; if (!before) throw new AbastecimentoServiceError(404, 'Bico não encontrado neste ponto.'); const row = (await client.query('UPDATE abastecimento_bicos SET codigo=$1,descricao=$2,produto_id=$3,status=$4 WHERE id=$5 AND ponto_id=$6 RETURNING *', [fields.codigo, fields.descricao, fields.produto_id, fields.status, id, pointId])).rows[0]; await recordAudit({ actor, acao: 'EDITAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_bicos', entidadeId: id, dadosAnteriores: { id: before.id, codigo: before.codigo, descricao: before.descricao, produto_id: before.produto_id, ponto_id: before.ponto_id, status: before.status }, dadosPosteriores: { id: row.id, codigo: row.codigo, descricao: row.descricao, produto_id: row.produto_id, ponto_id: row.ponto_id, status: row.status } }, client); await client.query('COMMIT'); return row; } catch (error) { await client.query('ROLLBACK'); return mapError(error); } finally { client.release(); }
 }
-export async function updateAbastecimentoBicoStatus(pontoId: string, bicoId: string, body: unknown) {
+export async function updateAbastecimentoBicoStatus(pontoId: string, bicoId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const pointId = assertUuid(pontoId, 'ponto_id'); const id = assertUuid(bicoId); await ensurePoint(pointId); if (!isRecord(body)) throw new AbastecimentoServiceError(400, 'Informe o status.');
-  const result = await pool.query('UPDATE abastecimento_bicos SET status=$1 WHERE id=$2 AND ponto_id=$3 RETURNING *', [parseStatus(body.status, true), id, pointId]); if (!result.rows[0]) throw new AbastecimentoServiceError(404, 'Bico não encontrado neste ponto.'); return result.rows[0];
+  const client = await pool.connect(); try { await client.query('BEGIN'); const before = (await client.query('SELECT * FROM abastecimento_bicos WHERE id=$1 AND ponto_id=$2 FOR UPDATE', [id, pointId])).rows[0]; if (!before) throw new AbastecimentoServiceError(404, 'Bico não encontrado neste ponto.'); const row = (await client.query('UPDATE abastecimento_bicos SET status=$1 WHERE id=$2 AND ponto_id=$3 RETURNING *', [parseStatus(body.status, true), id, pointId])).rows[0]; if (before.status !== row.status) await recordAudit({ actor, acao: row.status === 'ATIVO' ? 'ATIVAR' : 'DESATIVAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_bicos', entidadeId: id, dadosAnteriores: { id: before.id, status: before.status }, dadosPosteriores: { id: row.id, status: row.status } }, client); await client.query('COMMIT'); return row; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

@@ -1,6 +1,8 @@
 import { pool } from '../config/database.js';
 import { normalizeFleetCode } from '../utils/frotas.js';
 import { upsertOverride } from './ordens-servico-overrides.service.js';
+import { recordAudit } from './audit.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 export const ordemServicoCategorias = [
@@ -336,11 +338,13 @@ export async function getOrdemServico(id: string): Promise<OrdemServicoResumo> {
   return result.rows[0]!;
 }
 
-export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
+export async function createOrdemServico(body: unknown, actor?: AuthenticatedRequestUser): Promise<OrdemServico> {
   const fields = parseFields(body, false);
   await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
+  const client = await pool.connect();
   try {
-    const result = await pool.query<OrdemServico>(
+    await client.query('BEGIN');
+    const result = await client.query<OrdemServico>(
       `INSERT INTO ordens_servico (
          numero_os, obra_id, frota_id, prefixo_frota_id, frota_numero, natureza_os,
          categoria_servico, prestador_terceiro, data_abertura, data_fechamento,
@@ -362,20 +366,33 @@ export async function createOrdemServico(body: unknown): Promise<OrdemServico> {
         fields.observacoes,
       ],
     );
-    return result.rows[0]!;
-  } catch (error) {
-    return handleWriteError(error);
-  }
+    const created = result.rows[0]!;
+    await recordAudit({ actor, acao: 'CRIAR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico', entidadeId: created.id, dadosPosteriores: auditOrdem(created) }, client);
+    await client.query('COMMIT');
+    return created;
+  } catch (error) { await client.query('ROLLBACK'); return handleWriteError(error); }
+  finally { client.release(); }
 }
 
-export async function updateOrdemServico(id: string, body: unknown): Promise<OrdemServico> {
+const auditOrdem = (row: Partial<OrdemServico> | undefined): Record<string, unknown> | undefined => {
+  if (!row) return undefined;
+  return {
+    id: row.id, numero_os: row.numero_os, obra_id: row.obra_id, frota_id: row.frota_id,
+    prefixo_frota_id: row.prefixo_frota_id, frota_numero: row.frota_numero,
+    natureza_os: row.natureza_os, categoria_servico: row.categoria_servico,
+    prestador_terceiro: row.prestador_terceiro, data_abertura: row.data_abertura,
+    data_fechamento: row.data_fechamento, status: row.status, observacoes: row.observacoes,
+  };
+};
+
+export async function updateOrdemServico(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<OrdemServico> {
   const fields = parseFields(body, true);
   await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const currentResult = await client.query<NaturezaChangeResult>(
-      `SELECT natureza_os,obra_id,status,
+    const currentResult = await client.query<OrdemServico & NaturezaChangeResult>(
+      `SELECT *,
          EXISTS (SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1) AS possui_funcionarios,
          EXISTS (SELECT 1 FROM servicos_os WHERE ordem_servico_id = $1) AS possui_servicos
        FROM ordens_servico WHERE id = $1 FOR UPDATE`,
@@ -414,13 +431,15 @@ export async function updateOrdemServico(id: string, body: unknown): Promise<Ord
     if (current.natureza_os !== fields.natureza_os) await upsertOverride(id, 'natureza_os', current.natureza_os, fields.natureza_os, client);
     if (current.obra_id !== fields.obra_id) await upsertOverride(id, 'obra_id', current.obra_id, fields.obra_id, client);
     if (current.status !== fields.status) await upsertOverride(id, 'status', current.status, fields.status, client);
+    const changed = Object.keys(auditOrdem(current) ?? {}).some((key) => JSON.stringify((auditOrdem(current) ?? {})[key]) !== JSON.stringify((auditOrdem(result.rows[0]!) ?? {})[key]));
+    if (changed && actor) await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico', entidadeId: id, dadosAnteriores: auditOrdem(current), dadosPosteriores: auditOrdem(result.rows[0]!) }, client);
     await client.query('COMMIT');
     return result.rows[0]!;
   } catch (error) { await client.query('ROLLBACK'); return handleWriteError(error); }
   finally { client.release(); }
 }
 
-export async function updateOrdemServicoStatus(id: string, body: unknown): Promise<OrdemServico> {
+export async function updateOrdemServicoStatus(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<OrdemServico> {
   if (!isRecord(body) || !isStatus(body.status)) {
     throw new OrdemServicoServiceError(400, 'status inválido.');
   }
@@ -440,18 +459,19 @@ export async function updateOrdemServicoStatus(id: string, body: unknown): Promi
       [body.status, body.status, id],
     );
     if (current.status !== body.status) await upsertOverride(id, 'status', current.status, body.status, client);
+    if (current.status !== body.status && actor) await recordAudit({ actor, acao: current.status === 'FINALIZADA' && body.status !== 'FINALIZADA' ? 'ALTERAR_STATUS' : body.status === 'FINALIZADA' ? 'FINALIZAR' : body.status === 'CANCELADA' ? 'CANCELAR' : 'ALTERAR_STATUS', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico', entidadeId: id, dadosAnteriores: { status: current.status }, dadosPosteriores: { status: body.status } }, client);
     await client.query('COMMIT');
     return result.rows[0]!;
   } catch (error) { await client.query('ROLLBACK'); return handleWriteError(error); }
   finally { client.release(); }
 }
 
-export async function deleteOrdemServico(id: string): Promise<void> {
+export async function deleteOrdemServico(id: string, actor?: AuthenticatedRequestUser): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const ordemResult = await client.query(
-      'SELECT 1 FROM ordens_servico WHERE id = $1 FOR UPDATE',
+    const ordemResult = await client.query<OrdemServico>(
+      'SELECT * FROM ordens_servico WHERE id = $1 FOR UPDATE',
       [id],
     );
     if (ordemResult.rows.length === 0) {
@@ -469,6 +489,7 @@ export async function deleteOrdemServico(id: string): Promise<void> {
     await client.query('DELETE FROM servicos_os WHERE ordem_servico_id = $1', [id]);
     await client.query('DELETE FROM produtos_os WHERE ordem_servico_id = $1', [id]);
     await client.query('DELETE FROM ordens_servico WHERE id = $1', [id]);
+    await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico', entidadeId: id, dadosAnteriores: auditOrdem(ordemResult.rows[0]) }, client);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

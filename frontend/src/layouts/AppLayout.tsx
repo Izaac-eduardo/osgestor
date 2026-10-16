@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
+import { useAuth } from '../auth/AuthContext'
 
 export function AppLayout() {
+  const { user, logout } = useAuth()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -21,8 +23,8 @@ export function AppLayout() {
   }, [open])
 
   return (
-    <div className="app-shell">
-      <Sidebar open={open} onClose={() => setOpen(false)} />
+    <div className="app-shell" data-auth-role={user?.role}>
+      <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => void logout()} />
       <div className="app-shell__main">
         <main className="page-content">
           <Outlet />

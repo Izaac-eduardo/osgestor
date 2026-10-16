@@ -1,4 +1,6 @@
 import { pool } from '../config/database.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export const funcionarioStatuses = ['ATIVO', 'INATIVO'] as const;
 type FuncionarioStatus = (typeof funcionarioStatuses)[number];
@@ -12,6 +14,7 @@ export interface Funcionario {
   created_at: Date;
   updated_at: Date;
 }
+const auditFuncionario = (row: Partial<Funcionario> | undefined): Record<string, unknown> | undefined => row ? Object.fromEntries(['id', 'nome', 'matricula', 'cargo', 'status'].filter((key) => key in row).map((key) => [key, row[key as keyof Funcionario]])) : undefined;
 
 interface FuncionarioFields {
   nome: string;
@@ -107,46 +110,61 @@ export async function getFuncionario(id: string): Promise<Funcionario> {
   return result.rows[0]!;
 }
 
-export async function createFuncionario(body: unknown): Promise<Funcionario> {
+export async function createFuncionario(body: unknown, actor?: AuthenticatedRequestUser): Promise<Funcionario> {
   const fields = parseFields(body, false);
+  const client = await pool.connect();
   try {
-    const result = await pool.query<Funcionario>(
+    await client.query('BEGIN');
+    const result = await client.query<Funcionario>(
       `INSERT INTO funcionarios (nome, matricula, cargo, status)
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [fields.nome, fields.matricula, fields.cargo, fields.status],
     );
-    return result.rows[0]!;
-  } catch (error) { return handleDatabaseError(error); }
+    if (actor) await recordAudit({ actor, acao: 'CRIAR', modulo: 'FUNCIONARIOS', entidade: 'funcionarios', entidadeId: result.rows[0]!.id, dadosPosteriores: auditFuncionario(result.rows[0]) }, client);
+    await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updateFuncionario(id: string, body: unknown): Promise<Funcionario> {
+export async function updateFuncionario(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<Funcionario> {
   const fields = parseFields(body, true);
+  const client = await pool.connect();
   try {
-    const result = await pool.query<Funcionario>(
+    await client.query('BEGIN');
+    const before = await client.query<Funcionario>('SELECT * FROM funcionarios WHERE id=$1 FOR UPDATE', [id]);
+    const result = await client.query<Funcionario>(
       `UPDATE funcionarios SET nome = $1, matricula = $2, cargo = $3, status = $4
        WHERE id = $5 RETURNING *`,
       [fields.nome, fields.matricula, fields.cargo, fields.status, id],
     );
     if (result.rows.length === 0) throw new FuncionarioServiceError(404, 'Funcionário não encontrado.');
-    return result.rows[0]!;
-  } catch (error) { return handleDatabaseError(error); }
+    if (actor && JSON.stringify(auditFuncionario(before.rows[0])) !== JSON.stringify(auditFuncionario(result.rows[0]!))) await recordAudit({ actor, acao: 'EDITAR', modulo: 'FUNCIONARIOS', entidade: 'funcionarios', entidadeId: id, dadosAnteriores: auditFuncionario(before.rows[0]), dadosPosteriores: auditFuncionario(result.rows[0]!) }, client);
+    await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updateFuncionarioStatus(id: string, body: unknown): Promise<Funcionario> {
+export async function updateFuncionarioStatus(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<Funcionario> {
   if (!isRecord(body) || (body.status !== 'ATIVO' && body.status !== 'INATIVO')) {
     throw new FuncionarioServiceError(400, 'status deve ser ATIVO ou INATIVO.');
   }
-  const result = await pool.query<Funcionario>(
+  const client = await pool.connect(); try { await client.query('BEGIN');
+  const before = await client.query<Funcionario>('SELECT * FROM funcionarios WHERE id=$1 FOR UPDATE', [id]);
+  const result = await client.query<Funcionario>(
     'UPDATE funcionarios SET status = $1 WHERE id = $2 RETURNING *',
     [body.status, id],
   );
   if (result.rows.length === 0) throw new FuncionarioServiceError(404, 'Funcionário não encontrado.');
-  return result.rows[0]!;
+  if (actor && before.rows[0]?.status !== body.status) await recordAudit({ actor, acao: body.status === 'ATIVO' ? 'ATIVAR' : 'DESATIVAR', modulo: 'FUNCIONARIOS', entidade: 'funcionarios', entidadeId: id, dadosAnteriores: { status: before.rows[0]?.status }, dadosPosteriores: { status: result.rows[0]?.status } }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function deleteFuncionario(id: string): Promise<void> {
+export async function deleteFuncionario(id: string, actor?: AuthenticatedRequestUser): Promise<void> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM funcionarios WHERE id = $1', [id]);
+    await client.query('BEGIN'); const before = await client.query<Funcionario>('SELECT * FROM funcionarios WHERE id=$1 FOR UPDATE', [id]);
+    const result = await client.query('DELETE FROM funcionarios WHERE id = $1', [id]);
     if (result.rowCount === 0) throw new FuncionarioServiceError(404, 'Funcionário não encontrado.');
-  } catch (error) { return handleDatabaseError(error); }
+    if (actor) await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'FUNCIONARIOS', entidade: 'funcionarios', entidadeId: id, dadosAnteriores: auditFuncionario(before.rows[0]) }, client);
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }

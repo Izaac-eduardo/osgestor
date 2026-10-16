@@ -3,6 +3,7 @@ import type { ServiceOrder } from '../../types/orders'
 import { formatCurrency, formatDate } from '../../utils/formatters'
 import { orderCategoryLabels, orderNatureLabels } from '../../utils/orderLabels'
 import { OrderStatusBadge } from './OrderStatusBadge'
+import { useAuth } from '../../auth/AuthContext'
 
 type Props = {
   orders: ServiceOrder[]
@@ -66,17 +67,18 @@ export function OrdersList(props: Props) {
 
 function Actions({ order, deletingId, onView, onEdit, onDelete }: Props & { order: ServiceOrder }) {
   const busy = deletingId === order.id
+  const { user } = useAuth()
   return (
     <span className="order-actions">
       <button aria-label="Visualizar" title="Visualizar" className="button button--secondary" disabled={busy} type="button" onClick={() => onView(order.id)}>
         <Eye size={16} aria-hidden="true" />
       </button>
-      <button aria-label="Editar" title="Editar" className="button button--edit" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
+      {user?.role !== 'GESTOR' && <button aria-label="Editar" title="Editar" className="button button--edit" disabled={busy} type="button" onClick={() => onEdit(order.id)}>
         <SquarePen size={16} aria-hidden="true" />
-      </button>
-      <button aria-label={busy ? 'Excluindo...' : 'Excluir'} title={busy ? 'Excluindo...' : 'Excluir'} className="button button--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
+      </button>}
+      {user?.role !== 'GESTOR' && <button aria-label={busy ? 'Excluindo...' : 'Excluir'} title={busy ? 'Excluindo...' : 'Excluir'} className="button button--danger" disabled={busy} type="button" onClick={() => onDelete(order)}>
         <Trash size={16} aria-hidden="true" />
-      </button>
+      </button>}
     </span>
   )
 }

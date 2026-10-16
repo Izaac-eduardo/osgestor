@@ -1,6 +1,8 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../config/database.js';
 import { normalizePlate, normalizeModel, normalizeFleetCode, splitFleetCode } from '../utils/frotas.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export class FrotaServiceError extends Error {
   constructor(public readonly statusCode: 400 | 404 | 409, message: string) {
@@ -13,6 +15,7 @@ export interface Frota {
   descricao: string | null; placa: string | null; modelo: string | null; ano: number | null;
   status: 'ATIVO' | 'INATIVO'; created_at: Date; updated_at: Date;
 }
+const auditFrota = (row: Partial<Frota> | undefined): Record<string, unknown> | undefined => row ? Object.fromEntries(['id', 'prefixo_frota_id', 'numero', 'codigo', 'descricao', 'placa', 'modelo', 'ano', 'status'].filter((key) => key in row).map((key) => [key, row[key as keyof Frota]])) : undefined;
 export interface FrotaFields {
   codigo: string; prefixo: string | null; numero: string | null; descricao: string | null;
   placa: string | null; modelo: string | null; ano: number | null; status: 'ATIVO' | 'INATIVO';
@@ -83,17 +86,21 @@ export async function getFrota(id: string): Promise<Frota> {
   if (!result.rows[0]) throw new FrotaServiceError(404, 'Frota não encontrada.');
   return result.rows[0];
 }
-export async function saveFrota(body: unknown, id?: string): Promise<Frota> {
+export async function saveFrota(body: unknown, id?: string, actor?: AuthenticatedRequestUser): Promise<Frota> {
   const fields = parseFrotaFields(body, id !== undefined);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const prefix = fields.prefixo ? await ensureFrotaPrefix(client, fields.prefixo) : null;
+    const before = id ? (await client.query<Frota>('SELECT * FROM frotas WHERE id=$1 FOR UPDATE', [id])).rows[0] : undefined;
     const values = [prefix?.id ?? null, fields.numero, fields.codigo, fields.descricao, fields.placa, fields.modelo, fields.ano, fields.status];
     const result = id
       ? await client.query<Frota>('UPDATE frotas SET prefixo_frota_id=$1, numero=$2, codigo=$3, descricao=$4, placa=$5, modelo=$6, ano=$7, status=$8 WHERE id=$9 RETURNING *', [...values, id])
       : await client.query<Frota>('INSERT INTO frotas (prefixo_frota_id,numero,codigo,descricao,placa,modelo,ano,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', values);
     if (!result.rows[0]) throw new FrotaServiceError(404, 'Frota não encontrada.');
+    if (prefix?.created && actor) await recordAudit({ actor, acao: 'CRIAR', modulo: 'PREFIXOS_FROTA', entidade: 'prefixos_frota', entidadeId: prefix.id, dadosPosteriores: { id: prefix.id, codigo: fields.prefixo, descricao: null, status: 'ATIVO' } }, client);
+    if (actor && id && JSON.stringify(auditFrota(before)) !== JSON.stringify(auditFrota(result.rows[0]))) await recordAudit({ actor, acao: 'EDITAR', modulo: 'FROTAS', entidade: 'frotas', entidadeId: result.rows[0].id, dadosAnteriores: auditFrota(before), dadosPosteriores: auditFrota(result.rows[0]) }, client);
+    if (actor && !id) await recordAudit({ actor, acao: 'CRIAR', modulo: 'FROTAS', entidade: 'frotas', entidadeId: result.rows[0].id, dadosPosteriores: auditFrota(result.rows[0]) }, client);
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -101,15 +108,22 @@ export async function saveFrota(body: unknown, id?: string): Promise<Frota> {
     return handleFrotaDatabaseError(error);
   } finally { client.release(); }
 }
-export async function updateFrotaStatus(id: string, body: unknown): Promise<Frota> {
+export async function updateFrotaStatus(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<Frota> {
   if (!record(body)) throw new FrotaServiceError(400, 'Informe o status.');
-  const result = await pool.query<Frota>('UPDATE frotas SET status=$1 WHERE id=$2 RETURNING *', [parseStatus(body.status), id]);
+  const client = await pool.connect(); try { await client.query('BEGIN'); const before = await client.query<Frota>('SELECT * FROM frotas WHERE id=$1 FOR UPDATE', [id]);
+  const result = await client.query<Frota>('UPDATE frotas SET status=$1 WHERE id=$2 RETURNING *', [parseStatus(body.status), id]);
   if (!result.rows[0]) throw new FrotaServiceError(404, 'Frota não encontrada.');
-  return result.rows[0];
+  if (actor && before.rows[0]?.status !== result.rows[0].status) await recordAudit({ actor, acao: result.rows[0].status === 'ATIVO' ? 'ATIVAR' : 'DESATIVAR', modulo: 'FROTAS', entidade: 'frotas', entidadeId: id, dadosAnteriores: { status: before.rows[0]?.status }, dadosPosteriores: { status: result.rows[0].status } }, client);
+  await client.query('COMMIT'); return result.rows[0];
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
-export async function deleteFrota(id: string): Promise<void> {
+export async function deleteFrota(id: string, actor?: AuthenticatedRequestUser): Promise<void> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM frotas WHERE id=$1', [id]);
+    await client.query('BEGIN'); const before = await client.query<Frota>('SELECT * FROM frotas WHERE id=$1 FOR UPDATE', [id]);
+    const result = await client.query('DELETE FROM frotas WHERE id=$1', [id]);
     if (!result.rowCount) throw new FrotaServiceError(404, 'Frota não encontrada.');
-  } catch (error) { handleFrotaDatabaseError(error); }
+    if (actor) await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'FROTAS', entidade: 'frotas', entidadeId: id, dadosAnteriores: auditFrota(before.rows[0]) }, client);
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); handleFrotaDatabaseError(error); } finally { client.release(); }
 }

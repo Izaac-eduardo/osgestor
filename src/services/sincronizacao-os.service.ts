@@ -1,6 +1,8 @@
 import { pool } from '../config/database.js';
 import { normalizeSearchText } from '../utils/text.js';
 import type { ParsedExecucao, ParsedItem, ParsedOs } from '../imports/poli-os.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export type SyncPreviewState = 'NOVA' | 'ATUALIZACAO_DISPONIVEL' | 'SEM_ALTERACOES' | 'REQUER_REVISAO';
 
@@ -24,6 +26,8 @@ export interface ExistingOsSnapshot {
   status: string;
   problema: string | null;
   dataFechamento: string | null;
+  dataAbertura?: string;
+  updatedAt?: string;
   servicos: Array<{ id: string; descricao: string; valor: number }>;
   produtos: Array<{ id: string; descricao: string; quantidade: number; unidade: string; valorUnitario: number }>;
   execucoes: Array<{ id: string; funcionarioId: string; inicio: string; fim: string; servicoOsId: string | null }>;
@@ -96,7 +100,7 @@ const validProblem = (value: string | null | undefined): boolean => {
   return Boolean(normalized) && !/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+$/.test(normalized);
 };
 
-export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot): OsUpdateDiff {
+export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot, options: { naturezaConfirmada?: boolean } = {}): OsUpdateDiff {
   const divergencias: string[] = [];
   const avisos: string[] = [];
   const status = parsed.status && parsed.status !== current.status ? { atual: current.status, novo: parsed.status } : undefined;
@@ -107,7 +111,7 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot)
   if (categoria && specificCategory(current.categoria) && !specificCategory(incomingCategory)) divergencias.push('CATEGORIA_NAO_REGRESSIVA');
   if (categoria && specificCategory(current.categoria) && specificCategory(incomingCategory)) divergencias.push('CATEGORIA_CONFLITANTE');
 
-  const natureza = parsed.natureza && parsed.natureza !== current.natureza ? { atual: current.natureza, novo: parsed.natureza } : undefined;
+  const natureza = parsed.natureza && parsed.natureza !== current.natureza && !options.naturezaConfirmada ? { atual: current.natureza, novo: parsed.natureza } : undefined;
   if (natureza) {
     const thirdPartyEvidence = parsed.itens.some(item => item.tipo === 'SERVICO' && text(item.tecnicoOriginal) === 'IZAAC EDUARDO');
     const materialEvidence = parsed.status === 'FINALIZADA' && parsed.itens.some(item => item.tipo === 'PRODUTO')
@@ -185,26 +189,49 @@ export async function loadExistingOs(numeroOs: number): Promise<ExistingOsSnapsh
   return loadExistingOsUsing(pool, numeroOs);
 }
 
-async function loadExistingOsUsing(db: { query: typeof pool.query }, numeroOs: number): Promise<ExistingOsSnapshot | undefined> {
-  const order = await db.query<{ id: string; numero_os: string; obra_id: string; obra: string; frota_id: string | null; frota: string | null; natureza_os: string; categoria_servico: string | null; status: string; observacoes: string | null; data_fechamento: string | null }>(
+function auditOrderSnapshot(order: ExistingOsSnapshot): Record<string, unknown> {
+  return {
+    id: order.id,
+    numero_os: order.numeroOs,
+    obra_id: order.obraId,
+    frota_id: order.frotaId,
+    natureza_os: order.natureza,
+    categoria_servico: order.categoria,
+    status: order.status,
+    observacoes: order.problema,
+    data_fechamento: order.dataFechamento,
+    servicos: order.servicos.map(item => ({ id: item.id, descricao: item.descricao, valor: item.valor })),
+    produtos: order.produtos.map(item => ({ id: item.id, descricao: item.descricao, quantidade: item.quantidade, unidade: item.unidade, valor_unitario: item.valorUnitario })),
+    execucoes: order.execucoes.map(item => ({ id: item.id, funcionario_id: item.funcionarioId, inicio: item.inicio, fim: item.fim, servico_os_id: item.servicoOsId })),
+  };
+}
+
+async function importAuditContext(client: { query: typeof pool.query }, importacaoId: string | undefined) {
+  if (!importacaoId) return null;
+  const result = await client.query<{ arquivo_nome: string; origem_sistema: string; hash_arquivo: string }>(
+    'SELECT arquivo_nome,origem_sistema,hash_arquivo FROM importacoes_os WHERE id=$1', [importacaoId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function loadExistingOsUsing(db: { query: typeof pool.query }, numeroOs: number): Promise<ExistingOsSnapshot | undefined> {
+  const order = await db.query<{ id: string; numero_os: string; obra_id: string; obra: string; frota_id: string | null; frota: string | null; natureza_os: string; categoria_servico: string | null; status: string; observacoes: string | null; data_abertura: string; data_fechamento: string | null; updated_at: string }>(
     `SELECT os.id, os.numero_os, os.obra_id, o.nome obra, os.frota_id,
             COALESCE(f.codigo, pf.codigo || os.frota_numero::text) frota,
-            os.natureza_os, os.categoria_servico, os.status, os.observacoes, os.data_fechamento
+            os.natureza_os, os.categoria_servico, os.status, os.observacoes, os.data_abertura, os.data_fechamento, os.updated_at
        FROM ordens_servico os JOIN obras o ON o.id=os.obra_id
        LEFT JOIN frotas f ON f.id=os.frota_id LEFT JOIN prefixos_frota pf ON pf.id=os.prefixo_frota_id
       WHERE os.numero_os=$1 FOR UPDATE OF os`, [numeroOs]);
   if (!order.rows[0]) return undefined;
   const row = order.rows[0];
-  const [services, products, executions, fleetOverride] = await Promise.all([
-    db.query<{ id: string; descricao: string; valor: string }>('SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]),
-    db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>('SELECT id,descricao,quantidade,unidade,valor_unitario FROM produtos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]),
-    db.query<{ id: string; funcionario_id: string; inicio: string; fim: string; servico_os_id: string | null }>('SELECT id,funcionario_id,to_char(inicio,\'YYYY-MM-DD"T"HH24:MI\') inicio,to_char(fim,\'YYYY-MM-DD"T"HH24:MI\') fim,servico_os_id FROM servicos_os_execucoes WHERE ordem_servico_id=$1', [row.id]),
-    db.query<{ frota_id_override: string | null }>(`SELECT frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo='frota_id'`, [row.id]),
-  ]);
-  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataFechamento: row.data_fechamento, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
+  const services = await db.query<{ id: string; descricao: string; valor: string }>('SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
+  const products = await db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>('SELECT id,descricao,quantidade,unidade,valor_unitario FROM produtos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
+  const executions = await db.query<{ id: string; funcionario_id: string; inicio: string; fim: string; servico_os_id: string | null }>('SELECT id,funcionario_id,to_char(inicio,\'YYYY-MM-DD"T"HH24:MI\') inicio,to_char(fim,\'YYYY-MM-DD"T"HH24:MI\') fim,servico_os_id FROM servicos_os_execucoes WHERE ordem_servico_id=$1', [row.id]);
+  const fleetOverride = await db.query<{ frota_id_override: string | null }>(`SELECT frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo='frota_id'`, [row.id]);
+  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataAbertura: row.data_abertura, dataFechamento: row.data_fechamento, updatedAt: row.updated_at, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
 }
 
-export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> {
+export async function synchronizeOrder(parsed: ParsedOs, actor?: AuthenticatedRequestUser | null): Promise<OsUpdateDiff> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -220,13 +247,13 @@ export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> 
     const nextProblem = diff.problema?.novo ?? current.problema;
     await client.query(orderUpdateSql, [nextStatus, nextCategory, nextProblem, current.id]);
     for (const service of diff.novosServicos) await client.query(
-      `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO', parsed.importacaoId ?? null, service.origemLinha ?? null, service.sequenciaImportacao ?? null, service.codigo_poli ?? service.codigo ?? null, service.fingerprintContexto ?? null, service.hashConteudo ?? null],
+      `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,categoria_gerencial,subcategoria_gerencial,origem_classificacao,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [current.id, service.descricao, service.total, service.classificacao_servico ?? 'INDETERMINADO', service.classificacao_servico === (service.classificacao_servico_original ?? service.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO', service.categoria_gerencial ?? null, service.subcategoria_gerencial ?? null, service.origem_classificacao ?? 'CODIGO_NAO_MAPEADO', parsed.importacaoId ?? null, service.origemLinha ?? null, service.sequenciaImportacao ?? null, service.codigo_poli ?? service.codigo ?? null, service.fingerprintContexto ?? null, service.hashConteudo ?? null],
     );
     for (const product of diff.novosProdutos) await client.query(
-      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
-      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario, product.total, parsed.importacaoId ?? null, product.origemLinha ?? null, product.sequenciaImportacao ?? null, product.codigo_poli ?? product.codigo ?? null, product.fingerprintContexto ?? null, product.hashConteudo ?? null],
+      'INSERT INTO produtos_os(ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total_original,categoria_gerencial,subcategoria_gerencial,origem_classificacao,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+      [current.id, product.descricao, product.quantidade, product.unidade, product.valorUnitario, product.total, product.categoria_gerencial ?? null, product.subcategoria_gerencial ?? null, product.origem_classificacao ?? 'CODIGO_NAO_MAPEADO', parsed.importacaoId ?? null, product.origemLinha ?? null, product.sequenciaImportacao ?? null, product.codigo_poli ?? product.codigo ?? null, product.fingerprintContexto ?? null, product.hashConteudo ?? null],
     );
     for (const execution of diff.novasExecucoes) {
       await client.query('INSERT INTO ordens_servico_funcionarios(ordem_servico_id,funcionario_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [current.id, execution.funcionarioId]);
@@ -235,6 +262,36 @@ export async function synchronizeOrder(parsed: ParsedOs): Promise<OsUpdateDiff> 
     const persisted = await loadExistingOsUsing(client, parsed.numeroOs);
     if (!persisted || buildOsUpdateDiff(parsed, persisted).estado !== 'SEM_ALTERACOES') {
       throw new Error('A validação pós-persistência não corresponde ao diff esperado; a O.S. não será confirmada.');
+    }
+    if (parsed.importacaoId) {
+      const importacao = await importAuditContext(client, parsed.importacaoId);
+      await recordAudit({
+        actor,
+        acao: 'IMPORTAR',
+        modulo: 'IMPORTACOES_OS',
+        entidade: 'ordens_servico',
+        entidadeId: persisted.id,
+        dadosAnteriores: auditOrderSnapshot(current),
+        dadosPosteriores: auditOrderSnapshot(persisted),
+        metadata: {
+          operacao: 'ATUALIZACAO',
+          resultado: 'SUCESSO',
+          importacao_id: parsed.importacaoId,
+          numero_os: parsed.numeroOs,
+          origem_sistema: importacao?.origem_sistema ?? parsed.origem,
+          arquivo_nome: importacao?.arquivo_nome ?? null,
+          hash_arquivo: importacao?.hash_arquivo ?? null,
+          campos_alterados: [
+            ...(diff.status ? ['status'] : []),
+            ...(diff.categoria ? ['categoria_servico'] : []),
+            ...(diff.natureza ? ['natureza_os'] : []),
+            ...(diff.problema ? ['observacoes'] : []),
+            ...(diff.novosServicos.length ? ['servicos_os'] : []),
+            ...(diff.novosProdutos.length ? ['produtos_os'] : []),
+            ...(diff.novasExecucoes.length ? ['servicos_os_execucoes'] : []),
+          ],
+        },
+      }, client);
     }
     await client.query('COMMIT');
     return diff;

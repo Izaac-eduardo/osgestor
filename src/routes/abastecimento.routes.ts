@@ -10,8 +10,10 @@ import { exportConsumoFrotaExcelController, exportConsumoFrotaPdfController } fr
 import * as frotasTerceiras from '../controllers/abastecimentos-frotas-terceiras.controller.js';
 import { createAbastecimentoManualController } from '../controllers/abastecimentos-manual.controller.js';
 import * as frotaDireta from '../controllers/abastecimentos-entrada-frota-direta.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
 
 export const abastecimentoRoutes = Router();
+abastecimentoRoutes.use(requireMethodRole());
 abastecimentoRoutes.get('/produtos', controller.listProdutos);
 abastecimentoRoutes.get('/historico', listAbastecimentosHistoricoController);
 abastecimentoRoutes.post('/abastecimentos/manual', createAbastecimentoManualController);

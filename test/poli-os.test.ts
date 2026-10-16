@@ -259,9 +259,13 @@ test('classifica categorias de serviÃ§o por descriÃ§Ã£o normalizada', () =
 });
 
 test('classifica serviços terceiros explícitos sem transformar produtos reais', () => {
-  for (const description of ['FRETE', 'ALINHAR/BALANCEAR', 'ALINHAMENTO DIANTEIRO', 'BALANCEAMENTO', 'SOCORRO PARTE ELETRICA', 'MAO DE OBRA ELETRICISTA', 'MANUTENCAO PREVENTIVA 6000 HOR', 'SERVICO SOLDA TERCEIROS', 'SERVICO DE GUINCHO', 'BORRACHARIA', 'CHAVEIRO', 'AFERICAO TACOGRAFO', 'DESLOCAMENTO', 'INSTALACAO ELETRICA', 'REPARO DE ALTERNADOR']) {
+  for (const description of ['FRETE', 'ALINHAR/BALANCEAR', 'ALINHAMENTO DIANTEIRO', 'BALANCEAMENTO', 'SOCORRO PARTE ELETRICA', 'MAO DE OBRA ELETRICISTA', 'MANUTENCAO PREVENTIVA 6000 HOR', 'SERVICO SOLDA TERCEIROS', 'SERVICO DE GUINCHO', 'BORRACHARIA', 'CHAVEIRO', 'AFERICAO TACOGRAFO', 'DESLOCAMENTO', 'INSTALACAO ELETRICA']) {
     assert.equal(classifyItemType(description), 'SERVICO', description);
   }
+  assert.equal(classifyItemType('REPARO DE ALTERNADOR'), 'PRODUTO');
+  assert.equal(classifyItemType('REPARO DE ALTERNADOR', true), 'SERVICO');
+  assert.equal(classifyItemType('REPARO DA VALVULA PEDAL KNORR'), 'PRODUTO');
+  assert.equal(classifyItemType('REPARO VALVULA RELE KNORR QA-1'), 'PRODUTO');
   assert.equal(classifyItemType('MENSALIDADE / LICENCA DE USO'), 'PRODUTO');
   assert.equal(classifyItemType('KIT DE JUNTAS'), 'PRODUTO');
   assert.equal(classifyItemType('TROCA DA BUCHA LE'), 'PRODUTO');
@@ -287,6 +291,33 @@ test('classifica PASSAGEM PEDAGIO como servico terceiro sem usar o codigo como r
   assert.equal(classifyItemType('OUTRO ITEM VEGA', false), 'PRODUTO');
   assert.equal(classifyImportedService('2034').classificacao_servico, 'TERCEIRO');
   assert.equal(classifyImportedService('1919').classificacao_servico, 'INTERNO');
+});
+
+test('mantém materiais REPARO da OS 47892 como produtos sem alterar valores', () => {
+  const rows: unknown[][] = Array.from({ length: 10 }, () => Array(40).fill(null));
+  rows[0]![0] = 'O. S.'; rows[0]![6] = 'Data O.S';
+  rows[1]![0] = 47892; rows[1]![6] = '02/10/2026';
+  const items = [
+    [885, 'PARAFUSO SEXTAVADO ACO 8.8 MA', 3, 1.83, 5.50],
+    [628, 'FILTRO COMBUSTIVEL WDK11102/25', 1, 177.71, 177.71],
+    [5205, 'PORCA SEXTAVADA MA 16MM', 3, 0.83, 2.49],
+    [16612, 'REPARO DA VALVULA PEDAL KNORR', 1, 133.04, 133.04],
+    [2251, 'FILTRO COMBUSTIVEL RACOR VOLVO', 1, 115.90, 115.90],
+    [2662, 'REPARO VALVULA RELE KNORR QA-1', 1, 47.85, 47.85],
+    [4177, 'OLEO HIDRAULICO ATF DIRECAO -', 1, 43.32, 43.32],
+  ];
+  items.forEach(([code, description, quantity, unit, total], index) => {
+    const row = rows[index + 3]!;
+    row[3] = code; row[5] = description; row[30] = quantity; row[32] = unit; row[38] = total;
+  });
+  const sheet = XLSX.utils.aoa_to_sheet(rows); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'OS');
+  const parsed = parsePoliOs(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), '0210OS.XLS', undefined, { resolveDatabase: false })[0]!;
+  assert.equal(parsed.numeroOs, 47892);
+  assert.equal(parsed.itens.length, 7);
+  assert.equal(parsed.itens.filter(item => item.tipo === 'PRODUTO').length, 7);
+  assert.equal(parsed.itens.find(item => item.codigo_poli === '16612')?.tipo, 'PRODUTO');
+  assert.equal(parsed.itens.find(item => item.codigo_poli === '2662')?.tipo, 'PRODUTO');
+  assert.equal(Number(parsed.itens.reduce((sum, item) => sum + item.total, 0).toFixed(2)), 525.81);
 });
 
 test('parser classifica MENSALIDADE PEDAGIO finalizada sem execucao como TERCEIRO', () => {

@@ -18,6 +18,6 @@ export const list = action(async (request, response) => {
   response.json(await listFrotasTerceiras({ busca: queryText(request.query.busca), tipo: queryText(request.query.tipo), status: queryText(request.query.status), terceiro_id: queryText(request.query.terceiro_id), sem_terceiro: queryBoolean(request.query.sem_terceiro) }));
 });
 export const get = action(async (request, response) => { response.json(await getFrotaTerceira(String(request.params.id))); });
-export const create = action(async (request, response) => { response.status(201).json(await createFrotaTerceira(request.body)); });
-export const update = action(async (request, response) => { response.json(await updateFrotaTerceira(String(request.params.id), request.body)); });
-export const status = action(async (request, response) => { response.json(await updateFrotaTerceiraStatus(String(request.params.id), request.body)); });
+export const create = action(async (request, response) => { response.status(201).json(await createFrotaTerceira(request.body, request.authUser)); });
+export const update = action(async (request, response) => { response.json(await updateFrotaTerceira(String(request.params.id), request.body, request.authUser)); });
+export const status = action(async (request, response) => { response.json(await updateFrotaTerceiraStatus(String(request.params.id), request.body, request.authUser)); });

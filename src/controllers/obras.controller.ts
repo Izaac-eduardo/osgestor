@@ -36,22 +36,22 @@ export async function getObraController(request: Request, response: Response): P
 }
 
 export async function createObraController(request: Request, response: Response): Promise<void> {
-  try { response.status(201).json(await createObra(request.body)); }
+  try { response.status(201).json(await createObra(request.body, request.authUser!)); }
   catch (error) { sendError(response, error); }
 }
 
 export async function updateObraController(request: Request, response: Response): Promise<void> {
-  try { response.status(200).json(await updateObra(routeId(request.params.id), request.body)); }
+  try { response.status(200).json(await updateObra(routeId(request.params.id), request.body, request.authUser!)); }
   catch (error) { sendError(response, error); }
 }
 
 export async function updateObraStatusController(request: Request, response: Response): Promise<void> {
-  try { response.status(200).json(await updateObraStatus(routeId(request.params.id), request.body)); }
+  try { response.status(200).json(await updateObraStatus(routeId(request.params.id), request.body, request.authUser!)); }
   catch (error) { sendError(response, error); }
 }
 
 export async function deleteObraController(request: Request, response: Response): Promise<void> {
-  try { await deleteObra(routeId(request.params.id)); response.status(204).send(); }
+  try { await deleteObra(routeId(request.params.id), request.authUser!); response.status(204).send(); }
   catch (error) { sendError(response, error); }
 }
 

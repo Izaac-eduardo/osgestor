@@ -10,8 +10,24 @@ import { relatoriosRoutes } from './relatorios.routes.js';
 import { dashboardController } from '../controllers/dashboard.controller.js';
 import { abastecimentoRoutes } from './abastecimento.routes.js';
 import { abastecimentosImportRoutes } from './abastecimentos-import.routes.js';
+import { authRoutes } from './auth.routes.js';
+import { requireAuthentication } from '../middleware/authentication.js';
+import { requireMutationOrigin } from '../middleware/origin-protection.js';
+import { requirePasswordChangeComplete } from '../middleware/authorization.js';
+import { adminUsersRoutes } from './admin-users.routes.js';
+import { auditRoutes } from './audit.routes.js';
 
 export const routes = Router();
+routes.use('/auth', authRoutes);
+routes.get('/health', (_request, response) => {
+  response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });
+});
+routes.use(requireAuthentication, requirePasswordChangeComplete, (request, response, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return requireMutationOrigin(request, response, next);
+  next();
+});
+routes.use('/admin/usuarios', adminUsersRoutes);
+routes.use('/auditoria', auditRoutes);
 routes.use('/obras', obrasRoutes);
 routes.use('/funcionarios', funcionariosRoutes);
 routes.use('/ordens-servico', ordensServicoRoutes);

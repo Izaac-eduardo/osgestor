@@ -1,35 +1,788 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, LoaderCircle, Upload } from 'lucide-react'
-import { PageHeader } from '../components/PageHeader'
-import { StatCard } from '../components/StatCard'
-import { analyzeImport, confirmImport, getImportPreview, resolveImportOrder, resolveImportServiceClassification, updateSafeImportOrders } from '../services/imports'
-import { getProjects } from '../services/projects'
-import { getFleets } from '../services/fleets'
-import type { ImportOrder, ImportResult } from '../types/imports'
-import type { ServiceClassification } from '../types/orders'
-import type { Project } from '../types/projects'
-import type { Fleet } from '../types/fleets'
-import '../styles/imports.css'
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  FileSpreadsheet,
+  LoaderCircle,
+  Upload,
+} from "lucide-react";
+import { useAuth } from "../auth/AuthContext";
+import { PageHeader } from "../components/PageHeader";
+import { StatCard } from "../components/StatCard";
+import {
+  analyzeImport,
+  confirmImport,
+  confirmNatureza,
+  getImportPreview,
+  resolveImportOrder,
+  resolveImportServiceClassification,
+  revokeNatureza,
+  updateSafeImportOrders,
+} from "../services/imports";
+import { getProjects } from "../services/projects";
+import { getFleets } from "../services/fleets";
+import type { ImportOrder, ImportResult } from "../types/imports";
+import type { ServiceClassification } from "../types/orders";
+import type { Project } from "../types/projects";
+import type { Fleet } from "../types/fleets";
+import "../styles/imports.css";
 
-const money = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
-const label = (s: string) => s.replaceAll('_', ' ')
-const searchValue = (s: string | null | undefined) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
-const statuses = ['ABERTA', 'EM_ANDAMENTO', 'AGUARDANDO_PECA', 'FINALIZADA', 'CANCELADA'] as const
-const classifications: ServiceClassification[] = ['INTERNO', 'TERCEIRO', 'INDETERMINADO']
-const launcherLabel = (order: ImportOrder) => [order.funcionarioAberturaCodigo, order.funcionarioAberturaNome].filter(Boolean).join(' - ') || order.funcionarioAbertura || '—'
-const servicePendingCount = (order: ImportOrder) => order.itens.filter(item => item.tipo === 'SERVICO' && item.classificacao_servico === 'INDETERMINADO').length
-const serviceEntries = (order: ImportOrder) => order.itens.map((item, index) => ({ item, index })).filter(entry => entry.item.tipo === 'SERVICO')
+const money = (v: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+    v,
+  );
+const label = (s: string) => s.replaceAll("_", " ");
+const searchValue = (s: string | null | undefined) =>
+  String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+const statuses = [
+  "ABERTA",
+  "EM_ANDAMENTO",
+  "AGUARDANDO_PECA",
+  "FINALIZADA",
+  "CANCELADA",
+] as const;
+const classifications: ServiceClassification[] = [
+  "INTERNO",
+  "TERCEIRO",
+  "INDETERMINADO",
+];
+const launcherLabel = (order: ImportOrder) =>
+  [order.funcionarioAberturaCodigo, order.funcionarioAberturaNome]
+    .filter(Boolean)
+    .join(" - ") ||
+  order.funcionarioAbertura ||
+  "—";
+const servicePendingCount = (order: ImportOrder) =>
+  order.itens.filter(
+    (item) =>
+      item.tipo === "SERVICO" && item.classificacao_servico === "INDETERMINADO",
+  ).length;
+const serviceEntries = (order: ImportOrder) =>
+  order.itens
+    .map((item, index) => ({ item, index }))
+    .filter((entry) => entry.item.tipo === "SERVICO");
 
 export function ImportarOsPage() {
-  const [file, setFile] = useState<File | null>(null), [token, setToken] = useState(''), [items, setItems] = useState<ImportOrder[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState(''), [success, setSuccess] = useState(''), [expanded, setExpanded] = useState<number | null>(null), [result, setResult] = useState<ImportResult | null>(null), [projects, setProjects] = useState<Project[]>([]), [fleets, setFleets] = useState<Fleet[]>([]), [fleetSearch, setFleetSearch] = useState<Record<number, string>>({}), [projectSearch, setProjectSearch] = useState<Record<number, string>>({})
-  const counts = useMemo(() => ({ all: items.length, newReady: items.filter(x => x.statusPreview === 'NOVA').length, updates: items.filter(x => x.statusPreview === 'ATUALIZACAO_DISPONIVEL' && x.diff?.podeAtualizarAutomaticamente).length, review: items.filter(x => x.statusPreview === 'REQUER_REVISAO').length, exists: items.filter(x => x.statusPreview === 'JA_CADASTRADA' || x.statusPreview === 'SEM_ALTERACOES').length, error: items.filter(x => x.statusPreview === 'ERRO').length, servicePending: items.reduce((total, order) => total + servicePendingCount(order), 0) }), [items])
-  useEffect(() => { if (!success) return; const timer = window.setTimeout(() => { setSuccess(''); setResult(null) }, 5000); return () => window.clearTimeout(timer) }, [success])
-  const analyze = async () => { if (!file || busy) return; setBusy(true); setError(''); setSuccess(''); try { const [analysis, loadedProjects, loadedFleets] = await Promise.all([analyzeImport(file), getProjects(), getFleets()]); setToken(analysis.token); setItems(analysis.items); setProjects(loadedProjects); setFleets(loadedFleets) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível analisar o arquivo.') } finally { setBusy(false) } }
-  const patch = async (order: ImportOrder, payload: Partial<ImportOrder>) => { setBusy(true); try { const next = await resolveImportOrder(token, order.numeroOs, payload); setItems(current => current.map(item => item.numeroOs === order.numeroOs ? next : item)) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar a correção.') } finally { setBusy(false) } }
-  const patchService = async (order: ImportOrder, servicoIndex: number, classification: ServiceClassification) => { setBusy(true); setError(''); try { const next = await resolveImportServiceClassification(token, order.numeroOs, servicoIndex, classification); setItems(current => current.map(item => item.numeroOs === order.numeroOs ? next : item)) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar a classificação.') } finally { setBusy(false) } }
-  const confirm = async () => { if (!token || busy) return; setBusy(true); setError(''); try { const imported = await confirmImport(token); setResult(imported); setSuccess(imported.falhas.length ? `${imported.importadas} O.S. importadas com sucesso. ${imported.falhas.length} não foram importadas.` : `${imported.importadas} O.S. importadas com sucesso.`); setItems([]); setToken(''); setFile(null); setExpanded(null); setFleetSearch({}) } catch (e) { const message = e instanceof Error ? e.message : 'Não foi possível confirmar a importação.'; setError(message); if (message.toLowerCase().includes('prévia')) { setItems([]); setToken(''); setExpanded(null); setFleetSearch({}) } } finally { setBusy(false) } }
-  const updateAll = async () => { if (busy || !counts.updates) return; setBusy(true); setError(''); try { const updated = await updateSafeImportOrders(token); setItems((await getImportPreview(token)).items); setSuccess(`${updated.atualizadas} O.S. atualizadas. ${updated.conflitos ?? 0} conflitos. ${updated.falhas} falhas.`) } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível atualizar as O.S. seguras.') } finally { setBusy(false) } }
-  const options = (order: ImportOrder) => { const query = searchValue(fleetSearch[order.numeroOs]); return fleets.filter(fleet => !query || [fleet.codigo, fleet.placa, fleet.modelo, fleet.descricao].some(value => searchValue(value).includes(query))) }
-  return <><PageHeader title="Importar Ordens de Serviço" subtitle="Importe relatórios exportados do Poli OS para análise antes da gravação." /><section className="import-upload"><label><Upload size={20} /> Selecionar arquivo<input type="file" accept=".xls,.xlsx" onChange={event => setFile(event.target.files?.[0] ?? null)} /></label><span>{file?.name ?? 'Nenhum arquivo selecionado'}</span><button className="button button--primary" disabled={!file || busy} onClick={() => void analyze()}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileSpreadsheet size={17} />} Analisar arquivo</button>{error && <p className="form-api-error">{error}</p>}</section>
-    {items.length > 0 && <><div className="stats-grid"><StatCard label="O.S. encontradas" value={String(counts.all)} icon={FileSpreadsheet} /><StatCard label="Prontas para importar" value={String(counts.newReady)} icon={CheckCircle2} tone="green" /><StatCard label="Requerem revisão" value={String(counts.review)} icon={AlertTriangle} tone="amber" /><StatCard label="Já cadastradas" value={String(counts.exists)} icon={FileSpreadsheet} /><StatCard label="Erros" value={String(counts.error)} icon={AlertTriangle} tone="slate" /></div><section className="import-list"><header><div><h2>Prévia das ordens</h2><p>O backend determina a situação de cada O.S.; somente as prontas podem ser importadas.</p>{counts.servicePending > 0 && <p className="import-classification-warning" role="status"><AlertTriangle size={15} /> {counts.servicePending} serviço(s) aguardando classificação.</p>}</div><button className="button button--secondary" disabled={!counts.updates || busy} onClick={() => { if (window.confirm(`Serão atualizadas ${counts.updates} O.S. seguras.\n\nO.S. que exigem revisão não serão alteradas.`)) void updateAll() }}>Atualizar todas as O.S. seguras ({counts.updates})</button>{counts.newReady > 0 && <button className="button button--primary" disabled={busy} onClick={() => { if (window.confirm(`Serão importadas ${counts.newReady} Ordens de Serviço prontas.`)) void confirm() }}>Importar O.S. prontas</button>}</header>{items.map(order => <article key={order.numeroOs} className="import-order"><button className="import-order__head" onClick={() => setExpanded(expanded === order.numeroOs ? null : order.numeroOs)}><span><strong>O.S. {order.numeroOs}</strong><small>{order.frotaOriginal ?? 'Frota não informada'} · {order.parecerOriginal ?? 'Obra pendente'}</small></span><span className={`import-badge import-badge--${order.statusPreview.toLowerCase()}`}>{label(order.statusPreview)} <ChevronDown size={16} /></span></button>{expanded === order.numeroOs && <div className="import-order__body"><dl><div><dt>Data</dt><dd>{order.data}</dd></div><div><dt>Natureza</dt><dd>{order.natureza ?? 'Pendente'}</dd></div><div><dt>Status</dt><dd>{order.status ?? 'Pendente'}</dd>{order.pendencias.some(value => value.startsWith('STATUS_PENDENTE')) && order.statusOriginal && <span className="import-status-original">Status informado no Vega: {order.statusOriginal}</span>}</div><div><dt>Funcionário que abriu</dt><dd>{launcherLabel(order)}</dd></div></dl><div className="import-diff">{order.diff && order.statusPreview !== 'NOVA' && <><b>Diferenças:</b> {order.diff.status && <>status {order.diff.status.atual} → {order.diff.status.novo}; </>}{order.diff.categoria && <>categoria {order.diff.categoria.atual ?? '—'} → {order.diff.categoria.novo ?? '—'}; </>}{order.diff.novosServicos.length + order.diff.novosProdutos.length + order.diff.novasExecucoes.length} item(ns) novo(s). {order.diff.divergencias.length ? <>Revisão: {order.diff.divergencias.join(', ')}</> : <>Atualização segura disponível.</>}</>}</div><p><b>Problema:</b> {order.problema ?? '—'}</p><div className="import-pending"><b>Pendências:</b> {order.pendencias.length ? order.pendencias.map(label).join(', ') : 'Nenhuma pendência específica informada.'}<div className="import-corrections"><><input list={`import-obras-${order.numeroOs}`} placeholder="Buscar obra por nome..." value={projectSearch[order.numeroOs] ?? projects.find(project => project.id === order.obraId)?.nome ?? ''} onChange={event => { const value = event.target.value; setProjectSearch(current => ({ ...current, [order.numeroOs]: value })); const found = projects.find(project => searchValue(project.nome) === searchValue(value)); if (found) void patch(order, { obraId: found.id }) }} /><datalist id={`import-obras-${order.numeroOs}`}>{projects.map(project => <option key={project.id} value={project.nome} />)}</datalist></><div className="import-fleet-picker"><input placeholder="Buscar frota por código, placa ou modelo" value={fleetSearch[order.numeroOs] ?? ''} onChange={event => setFleetSearch(current => ({ ...current, [order.numeroOs]: event.target.value }))} /><select value={order.frotaId ?? ''} onChange={event => void patch(order, { frotaId: event.target.value || undefined })}><option value="">Selecionar frota</option>{options(order).map(fleet => <option key={fleet.id} value={fleet.id}>{fleet.codigo} — {fleet.placa ?? 'sem placa'} — {fleet.modelo ?? fleet.descricao ?? fleet.numero}</option>)}</select></div><select value={order.natureza ?? ''} onChange={event => void patch(order, { natureza: event.target.value as ImportOrder['natureza'] })}><option value="">Selecionar natureza</option><option>INTERNA</option><option>MATERIAL</option><option>TERCEIRO</option></select>{order.pendencias.some(value => value.startsWith('STATUS_PENDENTE')) && <select value={order.status ?? ''} onChange={event => void patch(order, { status: event.target.value || undefined })}><option value="">Selecionar status</option>{statuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select>}{order.natureza === 'TERCEIRO' && <input placeholder="Fornecedor" defaultValue={order.prestadorTerceiro ?? ''} onBlur={event => void patch(order, { prestadorTerceiro: event.target.value })} />}</div></div>{serviceEntries(order).length > 0 && <section><h3>Serviços e execuções</h3>{serviceEntries(order).map(({ item, index }) => <div className="import-line" key={index}><span>{item.descricao}<small>{item.tecnicoOriginal ?? 'Técnico não informado'}</small></span><span className="import-service-decision"><select aria-label={`Classificação do serviço ${item.descricao}`} value={item.classificacao_servico ?? 'INDETERMINADO'} disabled={busy} onChange={event => void patchService(order, index, event.target.value as ServiceClassification)}>{classifications.map(classification => <option key={classification} value={classification}>{classification}</option>)}</select><small>{item.classificacao_origem === 'REVISAO' ? 'Revisado manualmente' : 'Classificação automática'}</small></span><b>{money(item.total)}</b></div>)}{order.execucoes.map((execution, index) => <div className="import-exec" key={index}>{execution.funcionarioOriginal} · {execution.inicio.replace('T', ' ')} → {execution.fim.replace('T', ' ')}</div>)}</section>}{order.itens.filter(item => item.tipo === 'PRODUTO').length > 0 && <section><h3>Produtos</h3>{order.itens.filter(item => item.tipo === 'PRODUTO').map((item, index) => <div className="import-line" key={index}><span>{item.descricao}<small>{item.quantidade} {item.unidade} · {money(item.valorUnitario)}</small></span><b>{money(item.total)}</b></div>)}</section>}</div>}</article>)}</section></>}{result && <section className="success-banner">Importadas: {result.importadas} · Já cadastradas: {result.jaCadastradas} · Pendentes: {result.pendentes} · Falhas: {result.falhas.length}{result.falhas.map(item => <div key={item.numeroOs}>O.S. {item.numeroOs}: {item.motivo}</div>)}</section>}</>
+  const { isAdmin } = useAuth();
+  const [file, setFile] = useState<File | null>(null),
+    [token, setToken] = useState(""),
+    [items, setItems] = useState<ImportOrder[]>([]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [success, setSuccess] = useState(""),
+    [expanded, setExpanded] = useState<number | null>(null),
+    [result, setResult] = useState<ImportResult | null>(null),
+    [projects, setProjects] = useState<Project[]>([]),
+    [fleets, setFleets] = useState<Fleet[]>([]),
+    [fleetSearch, setFleetSearch] = useState<Record<number, string>>({}),
+    [projectSearch, setProjectSearch] = useState<Record<number, string>>({}),
+    [naturezaMotivos, setNaturezaMotivos] = useState<Record<number, string>>(
+      {},
+    );
+  const counts = useMemo(
+    () => ({
+      all: items.length,
+      newReady: items.filter((x) => x.statusPreview === "NOVA").length,
+      updates: items.filter(
+        (x) =>
+          x.statusPreview === "ATUALIZACAO_DISPONIVEL" &&
+          x.diff?.podeAtualizarAutomaticamente,
+      ).length,
+      review: items.filter((x) => x.statusPreview === "REQUER_REVISAO").length,
+      exists: items.filter(
+        (x) =>
+          x.statusPreview === "JA_CADASTRADA" ||
+          x.statusPreview === "SEM_ALTERACOES",
+      ).length,
+      error: items.filter((x) => x.statusPreview === "ERRO").length,
+      servicePending: items.reduce(
+        (total, order) => total + servicePendingCount(order),
+        0,
+      ),
+    }),
+    [items],
+  );
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => {
+      setSuccess("");
+      setResult(null);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [success]);
+  const analyze = async () => {
+    if (!file || busy) return;
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const [analysis, loadedProjects, loadedFleets] = await Promise.all([
+        analyzeImport(file),
+        getProjects(),
+        getFleets(),
+      ]);
+      setToken(analysis.token);
+      setItems(analysis.items);
+      setProjects(loadedProjects);
+      setFleets(loadedFleets);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Não foi possível analisar o arquivo.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const patch = async (order: ImportOrder, payload: Partial<ImportOrder>) => {
+    setBusy(true);
+    try {
+      const next = await resolveImportOrder(token, order.numeroOs, payload);
+      setItems((current) =>
+        current.map((item) => (item.numeroOs === order.numeroOs ? next : item)),
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Não foi possível salvar a correção.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const patchService = async (
+    order: ImportOrder,
+    servicoIndex: number,
+    classification: ServiceClassification,
+  ) => {
+    setBusy(true);
+    setError("");
+    try {
+      const next = await resolveImportServiceClassification(
+        token,
+        order.numeroOs,
+        servicoIndex,
+        classification,
+      );
+      setItems((current) =>
+        current.map((item) => (item.numeroOs === order.numeroOs ? next : item)),
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível salvar a classificação.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirm = async () => {
+    if (!token || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const imported = await confirmImport(token);
+      setResult(imported);
+      setSuccess(
+        imported.falhas.length
+          ? `${imported.importadas} O.S. importadas com sucesso. ${imported.falhas.length} não foram importadas.`
+          : `${imported.importadas} O.S. importadas com sucesso.`,
+      );
+      setItems([]);
+      setToken("");
+      setFile(null);
+      setExpanded(null);
+      setFleetSearch({});
+    } catch (e) {
+      const message =
+        e instanceof Error
+          ? e.message
+          : "Não foi possível confirmar a importação.";
+      setError(message);
+      if (message.toLowerCase().includes("prévia")) {
+        setItems([]);
+        setToken("");
+        setExpanded(null);
+        setFleetSearch({});
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const updateAll = async () => {
+    if (busy || !counts.updates) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await updateSafeImportOrders(token);
+      setItems((await getImportPreview(token)).items);
+      setSuccess(
+        `${updated.atualizadas} O.S. atualizadas. ${updated.conflitos ?? 0} conflitos. ${updated.falhas} falhas.`,
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível atualizar as O.S. seguras.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const refreshPreviewOrder = async (numeroOs: number) => {
+    const preview = await getImportPreview(token);
+    setItems(preview.items);
+    setExpanded(numeroOs);
+  };
+  const confirmNaturezaOrder = async (order: ImportOrder) => {
+    if (!isAdmin || busy || !token) return;
+    if (
+      !window.confirm(
+        `Confirmar que a natureza atual da O.S. ${order.numeroOs} deve ser preservada?\n\nA natureza não será alterada e outras pendências permanecerão.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await confirmNatureza(
+        token,
+        order.numeroOs,
+        naturezaMotivos[order.numeroOs],
+      );
+      await refreshPreviewOrder(order.numeroOs);
+      setNaturezaMotivos((current) => ({ ...current, [order.numeroOs]: "" }));
+      setSuccess(
+        `Confirmação de natureza da O.S. ${order.numeroOs} registrada.`,
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível registrar a confirmação de natureza.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revokeNaturezaOrder = async (order: ImportOrder) => {
+    const confirmation = order.confirmacaoNatureza;
+    if (!isAdmin || busy || !confirmation) return;
+    if (
+      !window.confirm(
+        `Revogar a confirmação de natureza da O.S. ${order.numeroOs}?\n\nA divergência voltará a exigir revisão.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await revokeNatureza(
+        confirmation.id,
+        `Revogada pela prévia da O.S. ${order.numeroOs}`,
+        token,
+      );
+      await refreshPreviewOrder(order.numeroOs);
+      setSuccess(`Confirmação da O.S. ${order.numeroOs} revogada.`);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível revogar a confirmação de natureza.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const options = (order: ImportOrder) => {
+    const query = searchValue(fleetSearch[order.numeroOs]);
+    return fleets.filter(
+      (fleet) =>
+        !query ||
+        [fleet.codigo, fleet.placa, fleet.modelo, fleet.descricao].some(
+          (value) => searchValue(value).includes(query),
+        ),
+    );
+  };
+  return (
+    <>
+      <PageHeader
+        title="Importar Ordens de Serviço"
+        subtitle="Importe relatórios exportados do Poli OS para análise antes da gravação."
+      />
+      <section className="import-upload">
+        <label>
+          <Upload size={20} /> Selecionar arquivo
+          <input
+            type="file"
+            accept=".xls,.xlsx"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <span>{file?.name ?? "Nenhum arquivo selecionado"}</span>
+        <button
+          className="button button--primary"
+          disabled={!file || busy}
+          onClick={() => void analyze()}
+        >
+          {busy ? (
+            <LoaderCircle className="spin" size={17} />
+          ) : (
+            <FileSpreadsheet size={17} />
+          )}{" "}
+          Analisar arquivo
+        </button>
+        {error && <p className="form-api-error">{error}</p>}
+      </section>
+      {items.length > 0 && (
+        <>
+          <div className="stats-grid">
+            <StatCard
+              label="O.S. encontradas"
+              value={String(counts.all)}
+              icon={FileSpreadsheet}
+            />
+            <StatCard
+              label="Prontas para importar"
+              value={String(counts.newReady)}
+              icon={CheckCircle2}
+              tone="green"
+            />
+            <StatCard
+              label="Requerem revisão"
+              value={String(counts.review)}
+              icon={AlertTriangle}
+              tone="amber"
+            />
+            <StatCard
+              label="Já cadastradas"
+              value={String(counts.exists)}
+              icon={FileSpreadsheet}
+            />
+            <StatCard
+              label="Erros"
+              value={String(counts.error)}
+              icon={AlertTriangle}
+              tone="slate"
+            />
+          </div>
+          <section className="import-list">
+            <header>
+              <div>
+                <h2>Prévia das ordens</h2>
+                <p>
+                  O backend determina a situação de cada O.S.; somente as
+                  prontas podem ser importadas.
+                </p>
+                {counts.servicePending > 0 && (
+                  <p className="import-classification-warning" role="status">
+                    <AlertTriangle size={15} /> {counts.servicePending}{" "}
+                    serviço(s) aguardando classificação.
+                  </p>
+                )}
+              </div>
+              <button
+                className="button button--secondary"
+                disabled={!counts.updates || busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Serão atualizadas ${counts.updates} O.S. seguras.\n\nO.S. que exigem revisão não serão alteradas.`,
+                    )
+                  )
+                    void updateAll();
+                }}
+              >
+                Atualizar todas as O.S. seguras ({counts.updates})
+              </button>
+              {counts.newReady > 0 && (
+                <button
+                  className="button button--primary"
+                  disabled={busy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Serão importadas ${counts.newReady} Ordens de Serviço prontas.`,
+                      )
+                    )
+                      void confirm();
+                  }}
+                >
+                  Importar O.S. prontas
+                </button>
+              )}
+            </header>
+            {items.map((order) => (
+              <article key={order.numeroOs} className="import-order">
+                <button
+                  className="import-order__head"
+                  onClick={() =>
+                    setExpanded(
+                      expanded === order.numeroOs ? null : order.numeroOs,
+                    )
+                  }
+                >
+                  <span>
+                    <strong>O.S. {order.numeroOs}</strong>
+                    <small>
+                      {order.frotaOriginal ?? "Frota não informada"} ·{" "}
+                      {order.parecerOriginal ?? "Obra pendente"}
+                    </small>
+                  </span>
+                  <span
+                    className={`import-badge import-badge--${order.statusPreview.toLowerCase()}`}
+                  >
+                    {label(order.statusPreview)} <ChevronDown size={16} />
+                  </span>
+                </button>
+                {expanded === order.numeroOs && (
+                  <div className="import-order__body">
+                    <dl>
+                      <div>
+                        <dt>Data</dt>
+                        <dd>{order.data}</dd>
+                      </div>
+                      <div>
+                        <dt>Natureza</dt>
+                        <dd>{order.natureza ?? "Pendente"}</dd>
+                      </div>
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{order.status ?? "Pendente"}</dd>
+                        {order.pendencias.some((value) =>
+                          value.startsWith("STATUS_PENDENTE"),
+                        ) &&
+                          order.statusOriginal && (
+                            <span className="import-status-original">
+                              Status informado no Vega: {order.statusOriginal}
+                            </span>
+                          )}
+                      </div>
+                      <div>
+                        <dt>Funcionário que abriu</dt>
+                        <dd>{launcherLabel(order)}</dd>
+                      </div>
+                    </dl>
+                    <div className="import-diff">
+                      {order.diff && order.statusPreview !== "NOVA" && (
+                        <>
+                          <b>Diferenças:</b>{" "}
+                          {order.diff.status && (
+                            <>
+                              status {order.diff.status.atual} →{" "}
+                              {order.diff.status.novo};{" "}
+                            </>
+                          )}
+                          {order.diff.categoria && (
+                            <>
+                              categoria {order.diff.categoria.atual ?? "—"} →{" "}
+                              {order.diff.categoria.novo ?? "—"};{" "}
+                            </>
+                          )}
+                          {order.diff.novosServicos.length +
+                            order.diff.novosProdutos.length +
+                            order.diff.novasExecucoes.length}{" "}
+                          item(ns) novo(s).{" "}
+                          {order.diff.divergencias.length ? (
+                            <>Revisão: {order.diff.divergencias.join(", ")}</>
+                          ) : (
+                            <>Atualização segura disponível.</>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {order.diff?.divergencias.includes(
+                      "NATUREZA_SEM_EVIDENCIA_FORTE",
+                    ) && (
+                      <section className="import-natureza-confirmation">
+                        <strong>Revisão de natureza</strong>
+                        <p>
+                          A O.S. está como{" "}
+                          <b>{order.diff.natureza?.atual ?? "MATERIAL"}</b> no
+                          banco, enquanto o XLS indica{" "}
+                          <b>{order.diff.natureza?.novo ?? order.natureza ?? "INTERNA"}</b>.
+                        </p>
+                        <dl>
+                          <div>
+                            <dt>Frota</dt>
+                            <dd>{order.frotaOriginal ?? "Não informada"}</dd>
+                          </div>
+                          <div>
+                            <dt>Descrição relevante</dt>
+                            <dd>
+                              {order.problema ?? order.itens[0]?.descricao ?? "Não informada"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Motivo</dt>
+                            <dd>
+                              Ausência de evidência forte para alterar a natureza automaticamente.
+                            </dd>
+                          </div>
+                        </dl>
+                        {isAdmin ? (
+                          <>
+                            <label className="form-field">
+                              <span>Motivo da confirmação (opcional)</span>
+                              <textarea
+                                rows={2}
+                                value={naturezaMotivos[order.numeroOs] ?? ""}
+                                onChange={(event) =>
+                                  setNaturezaMotivos((current) => ({
+                                    ...current,
+                                    [order.numeroOs]: event.target.value,
+                                  }))
+                                }
+                                disabled={busy}
+                              />
+                            </label>
+                            <button
+                              className="button button--primary"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void confirmNaturezaOrder(order)}
+                            >
+                              Confirmar natureza atual
+                            </button>
+                          </>
+                        ) : (
+                          <p className="import-natureza-readonly">
+                            Sua permissão permite visualizar a pendência, mas não confirmá-la.
+                          </p>
+                        )}
+                      </section>
+                    )}
+                    {order.confirmacaoNatureza?.estado === "ATIVA" && (
+                      <section className="import-natureza-confirmed">
+                        <strong>Confirmação registrada</strong>
+                        <p>
+                          A natureza atual foi confirmada para este contexto da O.S. e do arquivo XLS. Outras pendências continuam independentes.
+                        </p>
+                        {isAdmin && (
+                          <button
+                            className="button button--secondary"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void revokeNaturezaOrder(order)}
+                          >
+                            Revogar confirmação
+                          </button>
+                        )}
+                      </section>
+                    )}
+                    <p>
+                      <b>Problema:</b> {order.problema ?? "—"}
+                    </p>
+                    <div className="import-pending">
+                      <b>Pendências:</b>{" "}
+                      {order.pendencias.length
+                        ? order.pendencias.map(label).join(", ")
+                        : "Nenhuma pendência específica informada."}
+                      <div className="import-corrections">
+                        <>
+                          <input
+                            list={`import-obras-${order.numeroOs}`}
+                            placeholder="Buscar obra por nome..."
+                            value={
+                              projectSearch[order.numeroOs] ??
+                              projects.find(
+                                (project) => project.id === order.obraId,
+                              )?.nome ??
+                              ""
+                            }
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setProjectSearch((current) => ({
+                                ...current,
+                                [order.numeroOs]: value,
+                              }));
+                              const found = projects.find(
+                                (project) =>
+                                  searchValue(project.nome) ===
+                                  searchValue(value),
+                              );
+                              if (found)
+                                void patch(order, { obraId: found.id });
+                            }}
+                          />
+                          <datalist id={`import-obras-${order.numeroOs}`}>
+                            {projects.map((project) => (
+                              <option key={project.id} value={project.nome} />
+                            ))}
+                          </datalist>
+                        </>
+                        <div className="import-fleet-picker">
+                          <input
+                            placeholder="Buscar frota por código, placa ou modelo"
+                            value={fleetSearch[order.numeroOs] ?? ""}
+                            onChange={(event) =>
+                              setFleetSearch((current) => ({
+                                ...current,
+                                [order.numeroOs]: event.target.value,
+                              }))
+                            }
+                          />
+                          <select
+                            value={order.frotaId ?? ""}
+                            onChange={(event) =>
+                              void patch(order, {
+                                frotaId: event.target.value || undefined,
+                              })
+                            }
+                          >
+                            <option value="">Selecionar frota</option>
+                            {options(order).map((fleet) => (
+                              <option key={fleet.id} value={fleet.id}>
+                                {fleet.codigo} — {fleet.placa ?? "sem placa"} —{" "}
+                                {fleet.modelo ??
+                                  fleet.descricao ??
+                                  fleet.numero}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <select
+                          value={order.natureza ?? ""}
+                          onChange={(event) =>
+                            void patch(order, {
+                              natureza: event.target
+                                .value as ImportOrder["natureza"],
+                            })
+                          }
+                        >
+                          <option value="">Selecionar natureza</option>
+                          <option>INTERNA</option>
+                          <option>MATERIAL</option>
+                          <option>TERCEIRO</option>
+                        </select>
+                        {order.pendencias.some((value) =>
+                          value.startsWith("STATUS_PENDENTE"),
+                        ) && (
+                          <select
+                            value={order.status ?? ""}
+                            onChange={(event) =>
+                              void patch(order, {
+                                status: event.target.value || undefined,
+                              })
+                            }
+                          >
+                            <option value="">Selecionar status</option>
+                            {statuses.map((status) => (
+                              <option key={status} value={status}>
+                                {label(status)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {order.natureza === "TERCEIRO" && (
+                          <input
+                            placeholder="Fornecedor"
+                            defaultValue={order.prestadorTerceiro ?? ""}
+                            onBlur={(event) =>
+                              void patch(order, {
+                                prestadorTerceiro: event.target.value,
+                              })
+                            }
+                          />
+                        )}
+                      </div>
+                    </div>
+                    {serviceEntries(order).length > 0 && (
+                      <section>
+                        <h3>Serviços e execuções</h3>
+                        {serviceEntries(order).map(({ item, index }) => (
+                          <div className="import-line" key={index}>
+                            <span>
+                              {item.descricao}
+                              <small>
+                                {item.tecnicoOriginal ??
+                                  "Técnico não informado"}
+                              </small>
+                            </span>
+                            <span className="import-service-decision">
+                              <select
+                                aria-label={`Classificação do serviço ${item.descricao}`}
+                                value={
+                                  item.classificacao_servico ?? "INDETERMINADO"
+                                }
+                                disabled={busy}
+                                onChange={(event) =>
+                                  void patchService(
+                                    order,
+                                    index,
+                                    event.target.value as ServiceClassification,
+                                  )
+                                }
+                              >
+                                {classifications.map((classification) => (
+                                  <option
+                                    key={classification}
+                                    value={classification}
+                                  >
+                                    {classification}
+                                  </option>
+                                ))}
+                              </select>
+                              <small>
+                                {item.classificacao_origem === "REVISAO"
+                                  ? "Revisado manualmente"
+                                  : "Classificação automática"}
+                              </small>
+                            </span>
+                            <b>{money(item.total)}</b>
+                          </div>
+                        ))}
+                        {order.execucoes.map((execution, index) => (
+                          <div className="import-exec" key={index}>
+                            {execution.funcionarioOriginal} ·{" "}
+                            {execution.inicio.replace("T", " ")} →{" "}
+                            {execution.fim.replace("T", " ")}
+                          </div>
+                        ))}
+                      </section>
+                    )}
+                    {order.itens.filter((item) => item.tipo === "PRODUTO")
+                      .length > 0 && (
+                      <section>
+                        <h3>Produtos</h3>
+                        {order.itens
+                          .filter((item) => item.tipo === "PRODUTO")
+                          .map((item, index) => (
+                            <div className="import-line" key={index}>
+                              <span>
+                                {item.descricao}
+                                <small>
+                                  {item.quantidade} {item.unidade} ·{" "}
+                                  {money(item.valorUnitario)}
+                                </small>
+                              </span>
+                              <b>{money(item.total)}</b>
+                            </div>
+                          ))}
+                      </section>
+                    )}
+                  </div>
+                )}
+              </article>
+            ))}
+          </section>
+        </>
+      )}
+      {result && (
+        <section className="success-banner">
+          Importadas: {result.importadas} · Já cadastradas:{" "}
+          {result.jaCadastradas} · Pendentes: {result.pendentes} · Falhas:{" "}
+          {result.falhas.length}
+          {result.falhas.map((item) => (
+            <div key={item.numeroOs}>
+              O.S. {item.numeroOs}: {item.motivo}
+            </div>
+          ))}
+        </section>
+      )}
+    </>
+  );
 }

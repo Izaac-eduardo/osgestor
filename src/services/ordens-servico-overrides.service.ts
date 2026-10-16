@@ -1,4 +1,7 @@
 import { pool } from '../config/database.js';
+import type { Pool, PoolClient } from 'pg';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 const ordemServicoStatuses = ['ABERTA', 'EM_ANDAMENTO', 'AGUARDANDO_PECA', 'FINALIZADA', 'CANCELADA'] as const;
@@ -18,7 +21,7 @@ export interface OrdemServicoOverride {
   updated_at: Date;
 }
 
-type OverrideDb = { query: typeof pool.query };
+type OverrideDb = Pool | PoolClient;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isField = (value: unknown): value is OrdemServicoOverrideField => typeof value === 'string' && (ordemServicoOverrideFields as readonly string[]).includes(value);
@@ -82,8 +85,10 @@ export async function upsertOverride(ordemServicoId: string, campo: OrdemServico
   return rowOf(result.rows[0]!);
 }
 
-export async function removeOverride(ordemServicoId: string, campo: OrdemServicoOverrideField, db: OverrideDb = pool): Promise<boolean> {
+export async function removeOverride(ordemServicoId: string, campo: OrdemServicoOverrideField, actor?: AuthenticatedRequestUser, db: OverrideDb = pool): Promise<boolean> {
   if (!isField(campo)) throw new Error('Campo de override inválido.');
+  const before = await db.query<Record<string, unknown>>('SELECT * FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo=$2 FOR UPDATE', [ordemServicoId, campo]);
   const result = await db.query('DELETE FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo=$2', [ordemServicoId, campo]);
+  if (result.rowCount && actor) await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico_overrides', entidadeId: `${ordemServicoId}:${campo}`, dadosAnteriores: { ordem_servico_id: ordemServicoId, campo, valor_origem: before.rows[0]?.valor_origem, valor_override: before.rows[0]?.valor_override } }, db);
   return Boolean(result.rowCount);
 }

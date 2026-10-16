@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { Pool } from 'pg';
 import { findFleetIdWithAliasPrecedence, findFleetIdWithAliases } from '../src/imports/poli-os.js';
-import { normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, VEGA_ORIGIN } from '../src/services/frota-identificadores.service.js';
+import { normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, POLI_ORIGIN, VEGA_ORIGIN } from '../src/services/frota-identificadores.service.js';
 
 assert.equal(process.env.DB_NAME, 'oficina_test', 'estes testes exigem DB_NAME=oficina_test');
 
@@ -63,8 +63,16 @@ test('matching por precedência usa VEGA, fallback POLIFROTA e bloqueia ausênci
   assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, poli]), 'a');
   assert.equal(findFleetIdWithAliasPrecedence('OUTRO', fleets, [poli]), 'b');
   assert.equal(findFleetIdWithAliasPrecedence('NENHUM', fleets, [vega, poli]), undefined);
-  assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, { ...poli, identificador_normalizado: 'MESMO' }]), 'a');
+  assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, { ...poli, identificador_normalizado: 'MESMO' }]), undefined);
   assert.equal(findFleetIdWithAliasPrecedence('MESMO', fleets, [vega, { frota_id: 'b', origem: VEGA_ORIGIN, identificador_normalizado: 'MESMO' }]), undefined);
+});
+
+test('matching Poli usa somente aliases POLI quando a origem e explicita', () => {
+  const fleets = [{ id: 'mc06', codigo: 'MC06', placa: null }];
+  const poli = { frota_id: 'mc06', origem: POLI_ORIGIN, identificador_normalizado: '242D3' };
+  assert.equal(findFleetIdWithAliasPrecedence('242D3', fleets, [poli], [POLI_ORIGIN]), 'mc06');
+  assert.equal(findFleetIdWithAliasPrecedence('242D3', fleets, [poli]), undefined);
+  assert.equal(findFleetIdWithAliasPrecedence('242D3', fleets, [{ ...poli, origem: VEGA_ORIGIN }]), 'mc06');
 });
 
 test('migration 019 aplica unicidade por origem e permite a mesma chave em origens diferentes', async () => {

@@ -1,5 +1,7 @@
 import { pool } from '../config/database.js';
 import { OrdemServicoServiceError } from './ordens-servico.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export interface ExecucaoServico {
   id: string;
@@ -127,36 +129,51 @@ async function validate(ordemId: string, servicoId: string, body: unknown) {
   return parsed;
 }
 
-export async function createExecucao(ordemId: string, servicoId: string, body: unknown) {
+export async function createExecucao(ordemId: string, servicoId: string, body: unknown, actor?: AuthenticatedRequestUser) {
   const value = await validate(ordemId, servicoId, body);
-  const inserted = await pool.query<{ id: string }>(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const inserted = await client.query<{ id: string }>(
     `INSERT INTO servicos_os_execucoes(ordem_servico_id, servico_os_id, funcionario_id, inicio, fim)
      VALUES($1, $2, $3, $4, $5) RETURNING id`,
     [ordemId, servicoId, value.funcionarioId, value.inicio, value.fim],
   );
-  const result = await pool.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [inserted.rows[0]!.id]);
-  return map(result.rows[0]!);
+  const result = await client.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [inserted.rows[0]!.id]);
+  await recordAudit({ actor, acao: 'CRIAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os_execucoes', entidadeId: result.rows[0]!.id, dadosPosteriores: { id: result.rows[0]!.id, ordem_servico_id: ordemId, servico_os_id: servicoId, funcionario_id: result.rows[0]!.funcionario_id, inicio: result.rows[0]!.inicio, fim: result.rows[0]!.fim } }, client);
+  await client.query('COMMIT'); return map(result.rows[0]!);
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function updateExecucao(
-  ordemId: string, servicoId: string, execucaoId: string, body: unknown,
+  ordemId: string, servicoId: string, execucaoId: string, body: unknown, actor?: AuthenticatedRequestUser,
 ) {
   const value = await validate(ordemId, servicoId, body);
-  const updated = await pool.query<{ id: string }>(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1 AND e.servico_os_id = $2 FOR UPDATE`, [execucaoId, servicoId]);
+  const updated = await client.query<{ id: string }>(
     `UPDATE servicos_os_execucoes SET funcionario_id=$1, inicio=$2, fim=$3
      WHERE id=$4 AND servico_os_id=$5 RETURNING id`,
     [value.funcionarioId, value.inicio, value.fim, execucaoId, servicoId],
   );
   if (!updated.rows[0]) throw new OrdemServicoServiceError(404, 'Execução não encontrada neste serviço.');
-  const result = await pool.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [execucaoId]);
-  return map(result.rows[0]!);
+  const result = await client.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1`, [execucaoId]);
+  await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os_execucoes', entidadeId: execucaoId, dadosAnteriores: { id: before.rows[0]?.id, ordem_servico_id: ordemId, servico_os_id: servicoId, funcionario_id: before.rows[0]?.funcionario_id, inicio: before.rows[0]?.inicio, fim: before.rows[0]?.fim }, dadosPosteriores: { id: result.rows[0]?.id, ordem_servico_id: ordemId, servico_os_id: servicoId, funcionario_id: result.rows[0]?.funcionario_id, inicio: result.rows[0]?.inicio, fim: result.rows[0]?.fim } }, client);
+  await client.query('COMMIT'); return map(result.rows[0]!);
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function deleteExecucao(ordemId: string, servicoId: string, execucaoId: string) {
+export async function deleteExecucao(ordemId: string, servicoId: string, execucaoId: string, actor?: AuthenticatedRequestUser) {
   await context(ordemId, servicoId);
-  const result = await pool.query(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ExecucaoRow>(`${selectSql} WHERE e.id = $1 AND e.servico_os_id = $2 FOR UPDATE`, [execucaoId, servicoId]);
+  const result = await client.query(
     'DELETE FROM servicos_os_execucoes WHERE id=$1 AND servico_os_id=$2',
     [execucaoId, servicoId],
   );
   if (!result.rowCount) throw new OrdemServicoServiceError(404, 'Execução não encontrada neste serviço.');
+  await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os_execucoes', entidadeId: execucaoId, dadosAnteriores: { id: before.rows[0]?.id, ordem_servico_id: ordemId, servico_os_id: servicoId, funcionario_id: before.rows[0]?.funcionario_id, inicio: before.rows[0]?.inicio, fim: before.rows[0]?.fim } }, client);
+  await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }

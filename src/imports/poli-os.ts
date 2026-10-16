@@ -2,9 +2,10 @@ import * as XLSX from 'xlsx';
 import { pool } from '../config/database.js';
 import { normalizeFleetCode } from '../utils/frotas.js';
 import { normalizeSearchText } from '../utils/text.js';
-import { listExternalFleetIdentifiers, normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, VEGA_ORIGIN, type ExternalFleetIdentifier } from '../services/frota-identificadores.service.js';
+import { listExternalFleetIdentifiers, normalizeExternalFleetIdentifier, POLIFROTA_ORIGIN, POLI_ORIGIN, VEGA_ORIGIN, type ExternalFleetIdentifier } from '../services/frota-identificadores.service.js';
 import { buildOsUpdateDiff, loadExistingOs } from '../services/sincronizacao-os.service.js';
 import type { OsUpdateDiff } from '../services/sincronizacao-os.service.js';
+import { findValidNaturezaConfirmation } from '../services/natureza-confirmacoes.service.js';
 import type { ClassificacaoOrigem, ClassificacaoServico } from '../types/servicos-os.js';
 import { listExternalObraIdentifiers, resolveExternalObraIdentifier, VEGA_OBRA_ORIGIN, type ExternalObraIdentifier } from '../services/obra-identificadores.service.js';
 import {
@@ -15,13 +16,15 @@ import {
   buildPoliImport,
   type PoliImport,
 } from './poli-canonical.js';
+import { resolvePoliItemCategory, type PoliItemCategoryResolution } from '../services/poli-item-categorization.service.js';
 
 export type PreviewStatus = 'PRONTA' | 'REQUER_REVISAO' | 'JA_CADASTRADA' | 'ATUALIZACAO_DISPONIVEL' | 'SEM_ALTERACOES' | 'NOVA' | 'ERRO';
 export type Natureza = 'INTERNA' | 'MATERIAL' | 'TERCEIRO';
 export type StatusOrigem = 'AUTOMATICO' | 'MANUAL';
-export interface ParsedItem { codigo?: string; codigo_poli?: string; descricao: string; quantidade: number; valorUnitario: number; desconto?: number; total: number; unidade: string; tipo: 'SERVICO' | 'PRODUTO'; tecnicoOriginal?: string; tecnicoCodigoOriginal?: string; funcionarioId?: string; classificacao_servico?: ClassificacaoServico; classificacao_servico_original?: ClassificacaoServico; classificacao_origem?: ClassificacaoOrigem; origemLinha?: number; sequenciaImportacao?: number; fingerprintContexto?: string; hashConteudo?: string; }
+export interface ParsedItem { codigo?: string; codigo_poli?: string; descricao: string; quantidade: number; valorUnitario: number; desconto?: number; total: number; unidade: string; tipo: 'SERVICO' | 'PRODUTO'; tecnicoOriginal?: string; tecnicoCodigoOriginal?: string; funcionarioId?: string; classificacao_servico?: ClassificacaoServico; classificacao_servico_original?: ClassificacaoServico; classificacao_origem?: ClassificacaoOrigem; categoria_gerencial?: string | null; subcategoria_gerencial?: string | null; origem_classificacao?: string; origemLinha?: number; sequenciaImportacao?: number; fingerprintContexto?: string; hashConteudo?: string; }
 export interface ParsedExecucao { funcionarioOriginal: string; inicio: string; fim: string; funcionarioId?: string; serviceItemIndex?: number; origemLinha?: number; sequenciaImportacao?: number; servicoSequenciaImportacao?: number; fingerprintContexto?: string; hashConteudo?: string; }
-export interface ParsedOs { numeroOs:number; data:string; cliente:string|null; frotaOriginal:string|null; frotaId?:string; parecerOriginal:string|null; obraId?:string; funcionarioAbertura:string|null; funcionarioAberturaCodigo?:string|null; funcionarioAberturaNome?:string|null; problema:string|null; natureza?:Natureza; categoriaServico?:string|null; status?:string; statusOriginal:string|null; statusOrigem:StatusOrigem|null; prestadorTerceiro?:string; itens:ParsedItem[]; execucoes:ParsedExecucao[]; totalOrigem?:number; statusPreview:PreviewStatus; pendencias:string[]; origem:string; importacaoId?:string; diff?:OsUpdateDiff; }
+export interface ManualResolution { campo:'frotaId'|'obraId'; valorOrigem:string|null; identificadorOriginal:string|null; valorSelecionado:string; arquivoOrigem:string; importacaoId:string; numeroOs:number; decisao:'APROVAR'; decididoEm:string; decididoPor:string|null; }
+export interface ParsedOs { numeroOs:number; data:string; cliente:string|null; frotaOriginal:string|null; frotaId?:string; frotaAliasOrigem?:string|null; parecerOriginal:string|null; obraId?:string; funcionarioAbertura:string|null; funcionarioAberturaCodigo?:string|null; funcionarioAberturaNome?:string|null; problema:string|null; natureza?:Natureza; categoriaServico?:string|null; status?:string; statusOriginal:string|null; statusOrigem:StatusOrigem|null; prestadorTerceiro?:string; itens:ParsedItem[]; execucoes:ParsedExecucao[]; totalOrigem?:number; statusPreview:PreviewStatus; pendencias:string[]; origem:string; importacaoId?:string; manualResolucoes?:ManualResolution[]; diff?:OsUpdateDiff; confirmacaoNatureza?: { id:string; estado:'ATIVA'; confirmadoEm:string; reutilizada:true }; }
 const norm=normalizeSearchText;
 const num=(v:unknown)=>{if(typeof v==='number')return Number.isFinite(v)?v:0;const n=Number(String(v??'').trim().replace(/\./g,'').replace(',','.'));return Number.isFinite(n)?n:0};
 const dateOnly=(v:unknown)=>{const m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(String(v??''));return m?`${m[3]}-${m[2]}-${m[1]}`:String(v??'').trim()};
@@ -52,22 +55,40 @@ export function findFleetIdWithAliases(original:string|null,fleets:Array<{id:str
  for(const alias of aliases) if(alias.origem===origem&&alias.identificador_normalizado===externalKey)candidates.add(alias.frota_id);
  return candidates.size===1?[...candidates][0]:undefined;
 }
-export function findFleetIdWithAliasPrecedence(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>,aliases:ExternalFleetIdentifier[],origins=[VEGA_ORIGIN,POLIFROTA_ORIGIN]){
+type FleetMatchCandidate = { id:string; aliasOrigin?:string };
+type FleetForMatching = { id:string; codigo:string; placa:string|null; status?:string };
+const isActiveFleet = (fleet:FleetForMatching) => fleet.status === undefined || fleet.status === 'ATIVO';
+export function findFleetMatchWithAliasPrecedence(original:string|null,fleets:FleetForMatching[],aliases:ExternalFleetIdentifier[],origins=[VEGA_ORIGIN,POLIFROTA_ORIGIN]):FleetMatchCandidate|undefined{
  if(!original)return undefined;
  const directKey=normalizeFleetCode(original),externalKey=normalizeExternalFleetIdentifier(original);
  const direct=new Set<string>();
- for(const fleet of fleets) if(normalizeFleetCode(fleet.codigo)===directKey||normalizeFleetCode(fleet.placa??'')===directKey)direct.add(fleet.id);
- for(const origem of origins){
-  const matches=aliases.filter(alias=>alias.origem===origem&&alias.identificador_normalizado===externalKey);
-  if(!matches.length)continue;
-  const candidates=new Set([...direct,...matches.map(alias=>alias.frota_id)]);
-  return candidates.size===1?[...candidates][0]:undefined;
- }
- return direct.size===1?[...direct][0]:undefined;
+ const activeFleetIds=new Set(fleets.filter(isActiveFleet).map(fleet=>fleet.id));
+ for(const fleet of fleets) if(isActiveFleet(fleet)&&(normalizeFleetCode(fleet.codigo)===directKey||normalizeFleetCode(fleet.placa??'')===directKey))direct.add(fleet.id);
+ const matches=origins.flatMap(origem=>aliases.filter(alias=>alias.origem===origem&&alias.identificador_normalizado===externalKey));
+ if(matches.some(alias=>!activeFleetIds.has(alias.frota_id)))return undefined;
+ const candidates=new Set([...direct,...matches.map(alias=>alias.frota_id)]);
+ if(candidates.size>1)return undefined;
+ if(candidates.size===1)return { id:[...candidates][0]!, aliasOrigin:matches[0]?.origem };
+ return direct.size===1?{ id:[...direct][0]! }:undefined;
+}
+export function findFleetIdWithAliasPrecedence(original:string|null,fleets:FleetForMatching[],aliases:ExternalFleetIdentifier[],origins=[VEGA_ORIGIN,POLIFROTA_ORIGIN]){
+ return findFleetMatchWithAliasPrecedence(original,fleets,aliases,origins)?.id;
+}
+export function compatibleFleetAliasOrigins(origemSistema?:string):string[]{
+ if(origemSistema===POLI_ORIGIN)return [POLI_ORIGIN,POLIFROTA_ORIGIN];
+ if(origemSistema===VEGA_ORIGIN)return [VEGA_ORIGIN];
+ if(origemSistema===POLIFROTA_ORIGIN)return [POLIFROTA_ORIGIN];
+ return [VEGA_ORIGIN,POLIFROTA_ORIGIN];
 }
 export function productUnit(description:string){ return /^OLEO(\s|$)/i.test(norm(description))?'L':'UN'; }
-const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|BALANCEAMENTO|SOCORRO|MAO DE OBRA|MANUTENCAO|SERVICO|GUINCHO|SOLDA|BORRACHARIA|CHAVEIRO|AFERICAO|DESLOCAMENTO|INSTALACAO|REPARO)\b/;
-export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' { return hasExecution || isMensalidadePedagio(description) || isPassagemPedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO'; }
+const serviceDescriptionRules = /^(?:FRETE|ALINHAR(?:\/BALANCEAR)?|ALINHAMENTO|BALANCEAMENTO|SOCORRO|MAO DE OBRA|MANUTENCAO|SERVICO|GUINCHO|SOLDA|BORRACHARIA|CHAVEIRO|AFERICAO|DESLOCAMENTO|INSTALACAO)\b/;
+/**
+ * A planilha não traz uma coluna de tipo. Sem execução ou regra explícita de
+ * serviço, o item permanece produto; o catálogo gerencial não é sobrescrito.
+ */
+export function classifyItemType(description:string, hasExecution=false):'SERVICO'|'PRODUTO' {
+  return hasExecution || isMensalidadePedagio(description) || isPassagemPedagio(description) || serviceDescriptionRules.test(norm(description)) ? 'SERVICO' : 'PRODUTO';
+}
 export const CODIGOS_SERVICOS_INTERNOS = new Set(['1919', '1916', '2654', '1902', '2257', '1943']);
 const normalizeServiceCode = (value: unknown): string | undefined => {
   const code = String(value ?? '').trim();
@@ -81,6 +102,7 @@ export function classifyImportedService(code: unknown): Pick<ParsedItem, 'classi
     classificacao_origem: 'IMPORTACAO',
   };
 }
+export function classifyPoliItem(item: Pick<ParsedItem, 'codigo_poli' | 'codigo' | 'tipo'>): PoliItemCategoryResolution { return resolvePoliItemCategory(item); }
 export function importedServiceOrigin(item: Pick<ParsedItem, 'classificacao_servico' | 'classificacao_servico_original'>): 'IMPORTACAO' | 'REVISAO' {
   return item.classificacao_servico === (item.classificacao_servico_original ?? item.classificacao_servico) ? 'IMPORTACAO' : 'REVISAO';
 }
@@ -112,13 +134,14 @@ const executionTextFromRow=(row:unknown[])=>row.map(value=>String(value??'').rep
 const isOsRow=(row:unknown[])=>num(row[0])>0&&textAt(row,6)!=='';
 export interface PoliParserOptions {
   resolveDatabase?: boolean;
+  origemSistema?: string;
 }
 
 export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliImport = buildPoliImport(buffer, filename), options: PoliParserOptions = {}):ParsedOs[]{
   const wb=XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true}),out:ParsedOs[]=[];
  for(const sn of wb.SheetNames){const sheet=wb.Sheets[sn]!,rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:null}) as unknown[][],layout=detectVegaLayout(rows);let o:ParsedOs|null=null,last:ParsedItem|undefined;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){const row=rows[rowIndex]!;if(isOsRow(row)){if(o)out.push(o);const launcherCode=textAt(row,layout.launcherCodeColumn)||null,launcherName=textAt(row,layout.launcherNameColumn)||null;o={numeroOs:num(row[0]),data:dateOnly(row[6]),cliente:textAt(row,layout.clienteColumn)||null,frotaOriginal:textAt(row,layout.placaColumn)||textAt(row,layout.veiculoColumn)||null,parecerOriginal:null,funcionarioAbertura:launcherCode,funcionarioAberturaCodigo:launcherCode,funcionarioAberturaNome:launcherName,problema:null,status:undefined,statusOriginal:null,statusOrigem:null,itens:[],execucoes:[],statusPreview:'REQUER_REVISAO',pendencias:[],origem:filename};last=undefined;continue}if(!o)continue;
-   const statusOriginal=String(row[8]??'');if(statusOriginal.trim()){o.statusOriginal=statusOriginal.trim();const mappedStatus=mapStatus(statusOriginal);o.status=mappedStatus;o.statusOrigem=mappedStatus?'AUTOMATICO':null;}const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedService(code):undefined;const sequenciaImportacao=o.itens.length+1;last={codigo:code||undefined,codigo_poli:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,origemLinha:rowIndex+1,sequenciaImportacao,...classification,classificacao_servico_original:classification?.classificacao_servico};last.fingerprintContexto=buildItemContextFingerprint(importMetadata,o.numeroOs,tipo,sequenciaImportacao);last.hashConteudo=buildItemContentHash(last);o.itens.push(last);}
+   const statusOriginal=String(row[8]??'');if(statusOriginal.trim()){o.statusOriginal=statusOriginal.trim();const mappedStatus=mapStatus(statusOriginal);o.status=mappedStatus;o.statusOrigem=mappedStatus?'AUTOMATICO':null;}const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedService(code):undefined;const managerCategory=classifyPoliItem({ codigo_poli: code||undefined, tipo });const sequenciaImportacao=o.itens.length+1;last={codigo:code||undefined,codigo_poli:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,origemLinha:rowIndex+1,sequenciaImportacao,...classification,classificacao_servico_original:classification?.classificacao_servico,categoria_gerencial:managerCategory.categoria_gerencial,subcategoria_gerencial:managerCategory.subcategoria_gerencial,origem_classificacao:managerCategory.origem_classificacao};last.fingerprintContexto=buildItemContextFingerprint(importMetadata,o.numeroOs,tipo,sequenciaImportacao);last.hashConteudo=buildItemContentHash(last);o.itens.push(last);}
    const match=/Inicio em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) Termino em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2})/i.exec(norm(executionText));if(match&&last?.tipo==='SERVICO'){const classification=classifyImportedService(last.codigo);last.classificacao_servico=classification.classificacao_servico;last.classificacao_servico_original=classification.classificacao_servico;last.classificacao_origem=classification.classificacao_origem;const serviceItemIndex=o.itens.length-1;if(last.tecnicoOriginal&&norm(last.tecnicoOriginal)!=='IZAAC EDUARDO'){const sequenciaImportacao=o.execucoes.length+1;const servicoSequenciaImportacao=last.sequenciaImportacao ?? serviceItemIndex+1;const execution:ParsedExecucao={funcionarioOriginal:last.tecnicoOriginal,inicio:localDateTime(match[1]!,match[2]!),fim:localDateTime(match[3]!,match[4]!),serviceItemIndex,origemLinha:rowIndex+1,sequenciaImportacao,servicoSequenciaImportacao};execution.fingerprintContexto=buildExecutionContextFingerprint(importMetadata,o.numeroOs,sequenciaImportacao,servicoSequenciaImportacao);execution.hashConteudo=buildExecutionContentHash(execution);o.execucoes.push(execution);}}
    const annotation=textAt(row,0);if(/^PROBLEMA\s*:/i.test(annotation)){const problem=annotation.replace(/^PROBLEMA\s*:/i,'').trim();if(!/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+(?:\s+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+)?$/.test(problem))o.problema=o.problema?o.problema+'\n'+problem:problem;}else if(/^PARECER/i.test(annotation))o.parecerOriginal=annotation.replace(/^PARECER[^:]*:/i,'').trim();if(/^TOTAL ORDEM/i.test(norm(row.map(value=>String(value??'')).join(' '))))o.totalOrigem=num(row[layout.totalColumn]);
   }if(o)out.push(o);
@@ -126,10 +149,13 @@ export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliIm
  for(const item of out){item.categoriaServico=classifyCategory(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao));item.natureza=classifyNatureza(item.problema,item.execucoes[0]?.funcionarioOriginal??null,item.itens.map(x=>x.descricao).join(' '),item.itens.some(x=>x.tipo==='SERVICO'),item.itens.some(x=>x.tipo==='PRODUTO'),item.status,item.execucoes.length>0,item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));const electricianCategory=classifyCategoryWithNatureza(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao),item.natureza);if(electricianCategory==='ELETRICA')item.categoriaServico=electricianCategory;}return out;
 }
 export async function matchPreview(items:ParsedOs[], options: PoliParserOptions = {}){
- let fleets:{id:string;codigo:string;placa:string|null}[]=[];
- try{fleets=(await pool.query<{id:string;codigo:string;placa:string|null}>('SELECT id,codigo,placa FROM frotas')).rows;}catch{}
+ let fleets:{id:string;codigo:string;placa:string|null;status:string}[]=[];
+ try{fleets=(await pool.query<{id:string;codigo:string;placa:string|null;status:string}>('SELECT id,codigo,placa,status FROM frotas')).rows;}catch{}
  let externalFleetIdentifiers:ExternalFleetIdentifier[]=[];
- try{externalFleetIdentifiers=(await Promise.all([VEGA_ORIGIN,POLIFROTA_ORIGIN].map(origem=>listExternalFleetIdentifiers(origem)))).flat();}catch{}
+ const aliasOrigins = compatibleFleetAliasOrigins(options.origemSistema);
+ try {
+  externalFleetIdentifiers=(await Promise.all(aliasOrigins.map(origem=>listExternalFleetIdentifiers(origem)))).flat();
+ }catch{}
  let employees:{id:string;nome:string}[]=[];
  try{employees=(await pool.query<{id:string;nome:string}>('SELECT id,nome FROM funcionarios')).rows;}catch{}
  let obraAliases:ExternalObraIdentifier[]=[];
@@ -143,14 +169,14 @@ export async function matchPreview(items:ParsedOs[], options: PoliParserOptions 
   const obra=norm(o.parecerOriginal);
   if(obra){try{const direct=obras.filter(x=>norm(x.codigo)===obra||norm(x.nome)===obra);const resolved=await resolveExternalObraIdentifier(o.parecerOriginal,obras,obraAliases,VEGA_OBRA_ORIGIN);if(resolved)o.obraId=o.obraId??resolved;else addPending(o.pendencias,direct.length>1?'OBRA_AMBIGUA':'OBRA_PENDENTE');}catch{addPending(o.pendencias,'OBRA_PENDENTE');}}
   else addPending(o.pendencias,'OBRA_PENDENTE');
-  if(!o.frotaId)o.frotaId=findFleetIdWithAliasPrecedence(o.frotaOriginal,fleets,externalFleetIdentifiers);
+  if(!o.frotaId){const fleetMatch=findFleetMatchWithAliasPrecedence(o.frotaOriginal,fleets,externalFleetIdentifiers,aliasOrigins);if(fleetMatch){o.frotaId=fleetMatch.id;o.frotaAliasOrigem=fleetMatch.aliasOrigin??null;}}
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');
   for(const e of o.execucoes){const h=employees.filter(x=>norm(x.nome)===norm(e.funcionarioOriginal));if(h.length===1)e.funcionarioId=e.funcionarioId??h[0]!.id;else addPending(o.pendencias,h.length?'FUNCIONARIO_AMBIGUO':'FUNCIONARIO_PENDENTE');}
   o.natureza=o.natureza??classifyNatureza(o.problema,o.execucoes[0]?.funcionarioOriginal??null,o.itens.map(x=>x.descricao).join(' '),o.itens.some(x=>x.tipo==='SERVICO'),o.itens.some(x=>x.tipo==='PRODUTO'),o.status,o.execucoes.length>0,o.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));
   if(!o.natureza)addPending(o.pendencias,'NATUREZA_PENDENTE');
   if(!o.problema&&!o.itens.length)addPending(o.pendencias,'DADOS_INCOMPLETOS');
   if (options.resolveDatabase !== false) {
-   try{const existing=await loadExistingOs(o.numeroOs);if(existing){o.diff=buildOsUpdateDiff(o,existing);const blockingPendencias=o.pendencias.filter(value=>!((value.startsWith('FROTA_PENDENTE')&&existing.frotaId)||(value.startsWith('OBRA_PENDENTE')&&existing.obraId)));o.statusPreview=blockingPendencias.length?'REQUER_REVISAO':o.diff.estado;}else o.statusPreview=o.pendencias.length?'REQUER_REVISAO':'NOVA';}catch{o.statusPreview='REQUER_REVISAO';}
+   try{const existing=await loadExistingOs(o.numeroOs);if(existing){let diff=buildOsUpdateDiff(o,existing);const naturezaConfirmation=diff.divergencias.includes('NATUREZA_SEM_EVIDENCIA_FORTE')?await findValidNaturezaConfirmation(o,existing,options.origemSistema ?? 'POLI'):null;if(naturezaConfirmation){diff=buildOsUpdateDiff(o,existing,{naturezaConfirmada:true});o.confirmacaoNatureza={id:naturezaConfirmation.id,estado:'ATIVA',confirmadoEm:naturezaConfirmation.confirmadoEm,reutilizada:true};}o.diff=diff;const blockingPendencias=o.pendencias.filter(value=>!((value.startsWith('FROTA_PENDENTE')&&existing.frotaId)||(value.startsWith('OBRA_PENDENTE')&&existing.obraId)));o.statusPreview=blockingPendencias.length?'REQUER_REVISAO':o.diff.estado;}else o.statusPreview=o.pendencias.length?'REQUER_REVISAO':'NOVA';}catch{o.statusPreview='REQUER_REVISAO';}
   }
  }
  return items;

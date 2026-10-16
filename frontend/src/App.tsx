@@ -15,7 +15,37 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { ObrasPage } from './pages/ObrasPage'
 import { OrdensServicoPage } from './pages/OrdensServicoPage'
 import { RelatoriosPage } from './pages/RelatoriosPage'
+import { ChangePasswordPage } from './pages/ChangePasswordPage'
+import { LoginPage } from './pages/LoginPage'
+import { PasswordChangeRoute, ProtectedRoute, PublicRoute } from './components/RouteGuards'
+import { AdminUsersPage } from './pages/AdminUsersPage'
+import { AdminRoute } from './components/AdminRoute'
 
 export default function App() {
-  return <Routes><Route element={<AppLayout />}><Route index element={<DashboardPage />} /><Route path="ordens-servico" element={<OrdensServicoPage />} /><Route path="obras" element={<ObrasPage />} /><Route path="funcionarios" element={<FuncionariosPage />} /><Route path="frotas" element={<FrotasPage />} /><Route path="relatorios" element={<RelatoriosPage />} /><Route path="importar-os" element={<ImportarOsPage />} /><Route path="abastecimentos/historico" element={<AbastecimentosHistoricoPage />} /><Route path="abastecimentos/relatorios" element={<AbastecimentosRelatoriosPage />} /><Route path="abastecimentos/relatorios/consumo-frota" element={<AbastecimentosConsumoFrotaPage />} /><Route path="abastecimentos/relatorios/entradas" element={<AbastecimentosEntradasRelatorioPage />} /><Route path="abastecimentos/entradas" element={<AbastecimentosEntradasPage />} /><Route path="abastecimentos/pontos" element={<AbastecimentosPontosPage />} /><Route path="abastecimentos/terceiros" element={<AbastecimentosTerceirosPage />} /><Route path="abastecimentos/destinacoes-especiais" element={<AbastecimentosEspeciaisPage />} /><Route path="abastecimentos/importar-polifrota" element={<AbastecimentosImportarPoliFrotaPage />} /><Route path="*" element={<NotFoundPage />} /></Route></Routes>
+  return <Routes>
+    <Route element={<PublicRoute />}><Route path="/login" element={<LoginPage />} /></Route>
+    <Route element={<PasswordChangeRoute />}><Route path="/alterar-senha" element={<ChangePasswordPage />} /></Route>
+    <Route element={<ProtectedRoute />}>
+      <Route element={<AppLayout />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="ordens-servico" element={<OrdensServicoPage />} />
+        <Route path="obras" element={<ObrasPage />} />
+        <Route path="funcionarios" element={<FuncionariosPage />} />
+        <Route path="frotas" element={<FrotasPage />} />
+        <Route path="relatorios" element={<RelatoriosPage />} />
+        <Route path="importar-os" element={<ImportarOsPage />} />
+        <Route path="abastecimentos/historico" element={<AbastecimentosHistoricoPage />} />
+        <Route path="abastecimentos/relatorios" element={<AbastecimentosRelatoriosPage />} />
+        <Route path="abastecimentos/relatorios/consumo-frota" element={<AbastecimentosConsumoFrotaPage />} />
+        <Route path="abastecimentos/relatorios/entradas" element={<AbastecimentosEntradasRelatorioPage />} />
+        <Route path="abastecimentos/entradas" element={<AbastecimentosEntradasPage />} />
+        <Route path="abastecimentos/pontos" element={<AbastecimentosPontosPage />} />
+        <Route path="abastecimentos/terceiros" element={<AbastecimentosTerceirosPage />} />
+        <Route path="abastecimentos/destinacoes-especiais" element={<AbastecimentosEspeciaisPage />} />
+        <Route path="abastecimentos/importar-polifrota" element={<AbastecimentosImportarPoliFrotaPage />} />
+        <Route element={<AdminRoute />}><Route path="admin/usuarios" element={<AdminUsersPage />} /></Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Route>
+  </Routes>
 }

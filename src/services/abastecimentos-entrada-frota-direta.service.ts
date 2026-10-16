@@ -2,6 +2,8 @@ import type { PoolClient } from 'pg';
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.service.js';
 import { createManualAbastecimentoWithClient } from './abastecimentos-manual.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 type RecordValue = Record<string, unknown>;
 const isRecord = (value: unknown): value is RecordValue => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -17,7 +19,7 @@ const destination = async (client: PoolClient, id: string) => {
   return row;
 };
 
-export async function registerFrotaDiretaAbastecimento(destinationId: string, body: unknown) {
+export async function registerFrotaDiretaAbastecimento(destinationId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const id = assertUuid(destinationId, 'destinoId');
   if (!isRecord(body)) throw new AbastecimentoServiceError(400, 'O corpo da requisição deve ser um objeto.');
   const client = await pool.connect();
@@ -31,7 +33,7 @@ export async function registerFrotaDiretaAbastecimento(destinationId: string, bo
     const result = await createManualAbastecimentoWithClient(client, {
       ...body, data, hora, obra_id: obraId, produto_id: row.produto_id, frota_id: row.frota_id,
       tipo_destinatario: 'FROTA', litros: String(row.litros), valor_total: valor,
-    }, id, { contexto: 'FROTA_DIRETA', entrada_destino_id: id });
+    }, id, { contexto: 'FROTA_DIRETA', entrada_destino_id: id }, actor);
     await client.query('COMMIT');
     return result;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
@@ -43,7 +45,7 @@ export async function listFrotaDiretaAbastecimentoCandidates(destinationId: stri
   return result.rows;
 }
 
-export async function linkExistingFrotaDiretaAbastecimento(destinationId: string, abastecimentoId: string) {
+export async function linkExistingFrotaDiretaAbastecimento(destinationId: string, abastecimentoId: string, actor?: AuthenticatedRequestUser | null) {
   const destinationIdValue = assertUuid(destinationId, 'destinoId'); const abastecimentoIdValue = assertUuid(abastecimentoId, 'abastecimentoId'); const client = await pool.connect();
   try {
     await client.query('BEGIN'); const row = await destination(client, destinationIdValue);
@@ -53,7 +55,7 @@ export async function linkExistingFrotaDiretaAbastecimento(destinationId: string
     if (candidate.tipo_destinatario !== 'FROTA' || candidate.frota_id !== row.frota_id) throw new AbastecimentoServiceError(400, 'O abastecimento pertence a outra frota.');
     if (candidate.produto_id !== row.produto_id) throw new AbastecimentoServiceError(400, 'O produto do abastecimento é incompatível.');
     if (String(candidate.litros) !== String(row.litros)) throw new AbastecimentoServiceError(400, 'Os litros do abastecimento são incompatíveis.');
-    try { await client.query('UPDATE abastecimentos SET entrada_destino_id=$1,payload_original=payload_original || $2::jsonb WHERE id=$3', [destinationIdValue, JSON.stringify({ contexto: 'FROTA_DIRETA', entrada_destino_id: destinationIdValue }), abastecimentoIdValue]); }
+    try { await client.query('UPDATE abastecimentos SET entrada_destino_id=$1,payload_original=payload_original || $2::jsonb WHERE id=$3', [destinationIdValue, JSON.stringify({ contexto: 'FROTA_DIRETA', entrada_destino_id: destinationIdValue }), abastecimentoIdValue]); await recordAudit({ actor, acao: 'EDITAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimentos', entidadeId: abastecimentoIdValue, dadosAnteriores: { id: candidate.id, entrada_destino_id: candidate.entrada_destino_id }, dadosPosteriores: { id: candidate.id, entrada_destino_id: destinationIdValue } }, client); }
     catch (error) { if ((error as { code?: string }).code === '23505') throw new AbastecimentoServiceError(409, 'Este destino já possui um abastecimento registrado.'); throw error; }
     await client.query('COMMIT'); return { id: abastecimentoIdValue, entrada_destino_id: destinationIdValue };
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }

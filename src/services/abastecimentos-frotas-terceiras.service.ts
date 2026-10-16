@@ -1,5 +1,7 @@
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, abastecimentoStatuses, assertUuid } from './abastecimentos-base.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export const frotaTerceiraTipos = ['PLACA', 'EQUIPAMENTO', 'OUTRO'] as const;
 export type FrotaTerceiraTipo = (typeof frotaTerceiraTipos)[number];
@@ -78,31 +80,29 @@ export async function getFrotaTerceira(id: string) {
   return result.rows[0];
 }
 
-export async function createFrotaTerceira(body: unknown) {
+export async function createFrotaTerceira(body: unknown, actor?: AuthenticatedRequestUser | null) {
   const fields = await parseFields(body);
-  try {
-    const result = await pool.query<{ id: string }>(`INSERT INTO abastecimento_frotas_terceiras(identificacao,identificacao_normalizada,tipo,terceiro_id,status,observacoes)
-      VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, Object.values(fields));
-    return getFrotaTerceira(result.rows[0]!.id);
-  } catch (error) { return mapDatabaseError(error); }
+  const client = await pool.connect();
+  try { await client.query('BEGIN'); const result = await client.query<{ id: string }>(`INSERT INTO abastecimento_frotas_terceiras(identificacao,identificacao_normalizada,tipo,terceiro_id,status,observacoes) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, Object.values(fields)); const created = (await client.query(`${select} WHERE f.id=$1`, [result.rows[0]!.id])).rows[0]; await recordAudit({ actor, acao: 'CRIAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_frotas_terceiras', entidadeId: created.id, dadosPosteriores: { id: created.id, identificacao: created.identificacao, tipo: created.tipo, terceiro_id: created.terceiro_id, status: created.status } }, client); await client.query('COMMIT'); return created; } catch (error) { await client.query('ROLLBACK'); return mapDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updateFrotaTerceira(id: string, body: unknown) {
+export async function updateFrotaTerceira(id: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const frotaId = assertUuid(id);
   const fields = await parseFields(body, true);
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`UPDATE abastecimento_frotas_terceiras SET identificacao=$1,identificacao_normalizada=$2,tipo=$3,terceiro_id=$4,status=$5,observacoes=$6 WHERE id=$7 RETURNING id`, [...Object.values(fields), frotaId]);
+    await client.query('BEGIN'); const before = (await client.query(`${select} WHERE f.id=$1 FOR UPDATE OF f`, [frotaId])).rows[0]; if (!before) throw new AbastecimentoServiceError(404, 'Frota terceira não encontrada.'); const result = await client.query(`UPDATE abastecimento_frotas_terceiras SET identificacao=$1,identificacao_normalizada=$2,tipo=$3,terceiro_id=$4,status=$5,observacoes=$6 WHERE id=$7 RETURNING id`, [...Object.values(fields), frotaId]);
     if (!result.rows[0]) throw new AbastecimentoServiceError(404, 'Frota terceira não encontrada.');
-    return getFrotaTerceira(frotaId);
-  } catch (error) { if (error instanceof AbastecimentoServiceError) throw error; return mapDatabaseError(error); }
+    const updated = (await client.query(`${select} WHERE f.id=$1`, [frotaId])).rows[0]; const previousSnapshot={ id: before.id, identificacao: before.identificacao, tipo: before.tipo, terceiro_id: before.terceiro_id, status: before.status }; const nextSnapshot={ id: updated.id, identificacao: updated.identificacao, tipo: updated.tipo, terceiro_id: updated.terceiro_id, status: updated.status }; if(JSON.stringify(previousSnapshot)!==JSON.stringify(nextSnapshot)) await recordAudit({ actor, acao: 'EDITAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_frotas_terceiras', entidadeId: frotaId, dadosAnteriores: previousSnapshot, dadosPosteriores: nextSnapshot }, client); await client.query('COMMIT'); return updated;
+  } catch (error) { await client.query('ROLLBACK'); if (error instanceof AbastecimentoServiceError) throw error; return mapDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updateFrotaTerceiraStatus(id: string, body: unknown) {
+export async function updateFrotaTerceiraStatus(id: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   if (!record(body)) throw new AbastecimentoServiceError(400, 'Informe o status.');
   const status = body.status;
   if (!abastecimentoStatuses.includes(status as 'ATIVO' | 'INATIVO')) throw new AbastecimentoServiceError(400, 'status deve ser ATIVO ou INATIVO.');
   const frotaId = assertUuid(id);
-  const result = await pool.query('UPDATE abastecimento_frotas_terceiras SET status=$1 WHERE id=$2 RETURNING id', [status, frotaId]);
+  const client = await pool.connect(); try { await client.query('BEGIN'); const before = (await client.query(`${select} WHERE f.id=$1 FOR UPDATE OF f`, [frotaId])).rows[0]; const result = await client.query('UPDATE abastecimento_frotas_terceiras SET status=$1 WHERE id=$2 RETURNING id', [status, frotaId]);
   if (!result.rows[0]) throw new AbastecimentoServiceError(404, 'Frota terceira não encontrada.');
-  return getFrotaTerceira(frotaId);
+  const updated = (await client.query(`${select} WHERE f.id=$1`, [frotaId])).rows[0]; if (before.status !== updated.status) await recordAudit({ actor, acao: updated.status === 'ATIVO' ? 'ATIVAR' : 'DESATIVAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimento_frotas_terceiras', entidadeId: frotaId, dadosAnteriores: { id: before.id, status: before.status }, dadosPosteriores: { id: updated.id, status: updated.status } }, client); await client.query('COMMIT'); return updated; } finally { client.release(); }
 }

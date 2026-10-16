@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { normalizeFleetCode, normalizePlate } from '../utils/frotas.js';
 import { parsePoliFrotaAbastecimentos, type PoliFrotaAbastecimentoNormalizado, type PoliFrotaProduto } from '../imports/polifrota.js';
 import { pool } from '../config/database.js';
+import { recordAudit } from './audit.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
 
 export type PreviewStatus = 'PRONTO' | 'PENDENTE_OBRA' | 'PENDENTE_DESTINATARIO' | 'FORA_ESCOPO' | 'JA_IMPORTADO' | 'SUBSTITUICAO' | 'SUBSTITUICAO_JA_REGISTRADA' | 'ERRO' | 'IMPORTADO';
 export type DestinatarioTipo = 'FROTA' | 'TERCEIRO' | 'EXTERNA' | 'ESPECIAL';
@@ -84,13 +86,41 @@ const itemFromDb = (row: Record<string, any>): PreviewItem => ({ ...(row.payload
 const substitutionStatuses = ['SUBSTITUICAO', 'SUBSTITUICAO_JA_REGISTRADA'];
 const counts = (items: PreviewItem[]) => ({ total: items.length, prontos: items.filter(item => item.status_preview === 'PRONTO').length, pendentesObra: items.filter(item => item.status_preview === 'PENDENTE_OBRA' && item.pendencias.destinatario === false).length, pendentesDestinatario: items.filter(item => item.status_preview === 'PENDENTE_DESTINATARIO' || item.pendencias.destinatario).length, foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length, erros: items.filter(item => item.status_preview === 'ERRO').length, jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length, substituicoes: items.filter(item => item.status_preview === 'SUBSTITUICAO').length, substituicoesJaRegistradas: items.filter(item => item.status_preview === 'SUBSTITUICAO_JA_REGISTRADA').length, importados: items.filter(item => item.status_preview === 'IMPORTADO').length, pendentes: items.filter(item => !['PRONTO', 'IMPORTADO', 'JA_IMPORTADO', ...substitutionStatuses].includes(item.status_preview)).length });
 
-export async function analyzePoliFrota(buffer: Buffer, filename: string, allowDuplicate = false) {
+type ImportAuditContext = { id: string; arquivo_nome: string; arquivo_sha256: string; origem_sistema: string };
+const itemAuditSnapshot = (item: PreviewItem): Record<string, unknown> => ({
+  id: item.id ?? null,
+  identificador_externo: item.identificador_externo,
+  linha_original: item.linha_original,
+  obra_id: item.obra_id,
+  tipo_destinatario: item.tipo_destinatario,
+  frota_id: item.frota_id,
+  terceiro_id: item.terceiro_id,
+  destinacao_especial_id: item.destinacao_especial_id,
+  status_preview: item.status_preview,
+  substituicao_abastecimento_id: item.substituicao_abastecimento_id,
+});
+const importAuditMetadata = (context: ImportAuditContext, item?: PreviewItem): Record<string, unknown> => ({
+  importacao_id: context.id,
+  item_id: item?.id ?? null,
+  identificador_externo: item?.identificador_externo ?? null,
+  arquivo_nome: context.arquivo_nome,
+  hash_arquivo: context.arquivo_sha256,
+  origem_sistema: context.origem_sistema,
+  linha_original: item?.linha_original ?? null,
+});
+async function loadImportAuditContext(executor: { query: typeof pool.query }, importId: string): Promise<ImportAuditContext> {
+  const result = await executor.query<ImportAuditContext>('SELECT id,arquivo_nome,arquivo_sha256,origem_sistema FROM abastecimento_importacoes WHERE id=$1', [importId]);
+  if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
+  return result.rows[0];
+}
+
+export async function analyzePoliFrota(buffer: Buffer, filename: string, allowDuplicate = false, actor?: AuthenticatedRequestUser | null) {
   const arquivoSha256 = hash(buffer); const existing = await pool.query<{ id: string; arquivo_nome: string; status: string; created_at: string }>("SELECT id,arquivo_nome,status,created_at FROM abastecimento_importacoes WHERE arquivo_sha256=$1 AND status IN ('ANALISANDO','PREVIA','ERRO') ORDER BY created_at DESC LIMIT 1", [arquivoSha256]);
   if (existing.rows[0] && !allowDuplicate) throw new AbastecimentoImportError(409, JSON.stringify({ code: 'IMPORTACAO_EM_ANDAMENTO', preview: existing.rows[0] }));
   const rows = parsePoliFrotaAbastecimentos(buffer, filename); const ids = new Map<string, number>(); for (const row of rows) ids.set(row.identificadorExterno, (ids.get(row.identificadorExterno) ?? 0) + 1);
   const context = await importContext(); context.duplicateIds = new Set([...ids.entries()].filter(([, count]) => count > 1).map(([id]) => id));
   const items = rows.map(row => buildPreviewItem(row, context)); const client = await pool.connect(); const importId = randomUUID();
-  try { await client.query('BEGIN'); await client.query("INSERT INTO abastecimento_importacoes(id,arquivo_nome,arquivo_sha256,origem_sistema,status,parser_versao) VALUES($1,$2,$3,'POLIFROTA','ANALISANDO',$4)", [importId, filename, hash(buffer), 'fase-6-polifrota-1']); for (const item of items) await client.query('INSERT INTO abastecimento_importacao_itens(importacao_id,identificador_externo,linha_original,planilha,payload_original,payload_normalizado,status_preview,pendencias) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [importId, item.identificador_externo, item.linha_original, item.planilha_original, item.payload_original, JSON.stringify(rowFromItem(item)), item.status_preview, JSON.stringify(item.pendencias)]); await client.query("UPDATE abastecimento_importacoes SET status='PREVIA' WHERE id=$1", [importId]); await client.query('COMMIT'); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  try { await client.query('BEGIN'); await client.query("INSERT INTO abastecimento_importacoes(id,arquivo_nome,arquivo_sha256,origem_sistema,status,parser_versao) VALUES($1,$2,$3,'POLIFROTA','ANALISANDO',$4)", [importId, filename, hash(buffer), 'fase-6-polifrota-1']); for (const item of items) await client.query('INSERT INTO abastecimento_importacao_itens(importacao_id,identificador_externo,linha_original,planilha,payload_original,payload_normalizado,status_preview,pendencias) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [importId, item.identificador_externo, item.linha_original, item.planilha_original, item.payload_original, JSON.stringify(rowFromItem(item)), item.status_preview, JSON.stringify(item.pendencias)]); await client.query("UPDATE abastecimento_importacoes SET status='PREVIA' WHERE id=$1", [importId]); await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacoes', entidadeId: importId, dadosPosteriores: { id: importId, arquivo_nome: filename, arquivo_sha256: hash(buffer), origem_sistema: 'POLIFROTA', status: 'PREVIA', itens: items.length }, metadata: { importacao_id: importId, arquivo_nome: filename, hash_arquivo: hash(buffer), origem_sistema: 'POLIFROTA', operacao: 'PREVIA_GERADA', resultado: 'SUCESSO' } }, client); await client.query('COMMIT'); } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   const stored = await pool.query<{ id: string; identificador_externo: string }>('SELECT id,identificador_externo FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original,id', [importId]);
   const itemIds = new Map(stored.rows.map(item => [item.identificador_externo, item.id]));
   return { id: importId, arquivo_nome: filename, arquivo_sha256: hash(buffer), status: 'PREVIA', counts: counts(items), items: items.map(item => ({ ...item, id: itemIds.get(item.identificador_externo) })) };
@@ -108,13 +138,20 @@ export async function listImportacoesEmAndamento(): Promise<ImportacaoEmAndament
   return headers.rows.map(header => ({ ...header, counts: counts(grouped.get(header.id) ?? []) }));
 }
 
-export async function cancelImportacao(id: string) {
+export async function cancelImportacao(id: string, actor?: AuthenticatedRequestUser | null) {
   const importId = uuid(id, 'importacao_id');
-  const canceled = await pool.query<{ id: string; arquivo_nome: string; status: string; finalizada_at: string }>("UPDATE abastecimento_importacoes SET status='CANCELADA',finalizada_at=now(),updated_at=now() WHERE id=$1 AND origem_sistema='POLIFROTA' AND status IN ('ANALISANDO','PREVIA','ERRO') RETURNING id,arquivo_nome,status,finalizada_at", [importId]);
-  if (canceled.rows[0]) return canceled.rows[0];
-  const current = await pool.query<{ status: string }>("SELECT status FROM abastecimento_importacoes WHERE id=$1 AND origem_sistema='POLIFROTA'", [importId]);
-  if (!current.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
-  throw new AbastecimentoImportError(409, current.rows[0].status === 'CANCELADA' ? 'Esta importação já foi cancelada.' : 'Somente importações não concluídas podem ser canceladas.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const context = await loadImportAuditContext(client, importId);
+    const current = await client.query<{ status: string }>('SELECT status FROM abastecimento_importacoes WHERE id=$1 AND origem_sistema=\'POLIFROTA\' FOR UPDATE', [importId]);
+    if (!current.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
+    if (!['ANALISANDO', 'PREVIA', 'ERRO'].includes(current.rows[0].status)) throw new AbastecimentoImportError(409, current.rows[0].status === 'CANCELADA' ? 'Esta importação já foi cancelada.' : 'Somente importações não concluídas podem ser canceladas.');
+    const canceled = (await client.query<{ id: string; arquivo_nome: string; status: string; finalizada_at: string }>("UPDATE abastecimento_importacoes SET status='CANCELADA',finalizada_at=now(),updated_at=now() WHERE id=$1 RETURNING id,arquivo_nome,status,finalizada_at", [importId])).rows[0]!;
+    await recordAudit({ actor, acao: 'CANCELAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacoes', entidadeId: importId, dadosAnteriores: { id: importId, status: current.rows[0].status }, dadosPosteriores: { id: importId, status: 'CANCELADA' }, metadata: { ...importAuditMetadata(context), operacao: 'CANCELAMENTO', resultado: 'SUCESSO' } }, client);
+    await client.query('COMMIT');
+    return canceled;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 async function validateResolution(client: PoolClient, body: Record<string, unknown>, current: PreviewItem): Promise<PreviewResolution> {
@@ -135,9 +172,28 @@ async function validateResolution(client: PoolClient, body: Record<string, unkno
 }
 const recompute = (item: PreviewItem): PreviewItem => { const pendencias = { ...item.pendencias, obra: !item.obra_id, destinatario: !item.tipo_destinatario, motivos: item.pendencias.motivos.filter(m => !['OBRA_PENDENTE', 'DESTINATARIO_PENDENTE'].includes(m)) }; if (pendencias.obra) pendencias.motivos.push('OBRA_PENDENTE'); if (pendencias.destinatario) pendencias.motivos.push('DESTINATARIO_PENDENTE'); return { ...item, pendencias, status_preview: ['JA_IMPORTADO', 'FORA_ESCOPO', 'ERRO', ...substitutionStatuses].includes(item.status_preview) ? item.status_preview : pendencias.obra || pendencias.destinatario ? pendencias.obra ? 'PENDENTE_OBRA' : 'PENDENTE_DESTINATARIO' : 'PRONTO' }; };
 
-export async function resolveItem(importId: string, itemId: string, body: unknown) { if (!isRecord(body)) throw new AbastecimentoImportError(400, 'Informe a resolução do item.'); const client = await pool.connect(); try { await client.query('BEGIN'); const result = await client.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE id=$1 AND importacao_id=$2 FOR UPDATE', [uuid(itemId, 'item_id'), uuid(importId, 'importacao_id')]); if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Item de preview não encontrado.'); const item = itemFromDb(result.rows[0]); if (substitutionStatuses.includes(item.status_preview)) throw new AbastecimentoImportError(409, 'Remova a substituição antes de alterar a resolução do item.'); const resolution = await validateResolution(client, body, item); const next = recompute({ ...item, ...resolution }); await client.query('UPDATE abastecimento_importacao_itens SET payload_normalizado=$1,status_preview=$2,pendencias=$3 WHERE id=$4', [JSON.stringify(rowFromItem(next)), next.status_preview, JSON.stringify(next.pendencias), item.id]); await client.query('UPDATE abastecimento_importacoes SET status=CASE WHEN $2::int=0 THEN status ELSE \'PREVIA\' END WHERE id=$1', [importId, 1]); await client.query('COMMIT'); return next; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); } }
+export async function resolveItem(importId: string, itemId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
+  if (!isRecord(body)) throw new AbastecimentoImportError(400, 'Informe a resolução do item.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const id = uuid(importId, 'importacao_id');
+    const result = await client.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE id=$1 AND importacao_id=$2 FOR UPDATE', [uuid(itemId, 'item_id'), id]);
+    if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Item de preview não encontrado.');
+    const item = itemFromDb(result.rows[0]);
+    if (substitutionStatuses.includes(item.status_preview)) throw new AbastecimentoImportError(409, 'Remova a substituição antes de alterar a resolução do item.');
+    const context = await loadImportAuditContext(client, id);
+    const resolution = await validateResolution(client, body, item);
+    const next = recompute({ ...item, ...resolution });
+    await client.query('UPDATE abastecimento_importacao_itens SET payload_normalizado=$1,status_preview=$2,pendencias=$3 WHERE id=$4', [JSON.stringify(rowFromItem(next)), next.status_preview, JSON.stringify(next.pendencias), item.id]);
+    await client.query("UPDATE abastecimento_importacoes SET status='PREVIA' WHERE id=$1", [id]);
+    await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacao_itens', entidadeId: item.id, dadosAnteriores: itemAuditSnapshot(item), dadosPosteriores: itemAuditSnapshot(next), metadata: { ...importAuditMetadata(context, next), operacao: 'RESOLUCAO_PENDENCIA', resultado: 'SUCESSO', campos_allowlist: ['obra_id', 'tipo_destinatario', 'frota_id', 'terceiro_id', 'destinacao_especial_id'] } }, client);
+    await client.query('COMMIT');
+    return next;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+}
 
-export async function resolveBatch(importId: string, body: unknown) { if (!isRecord(body) || !Array.isArray(body.item_ids) || !body.item_ids.length) throw new AbastecimentoImportError(400, 'Selecione ao menos um item.'); const results: PreviewItem[] = []; for (const itemId of body.item_ids) results.push(await resolveItem(importId, uuid(itemId, 'item_id'), body)); return results; }
+export async function resolveBatch(importId: string, body: unknown, actor?: AuthenticatedRequestUser | null) { if (!isRecord(body) || !Array.isArray(body.item_ids) || !body.item_ids.length) throw new AbastecimentoImportError(400, 'Selecione ao menos um item.'); const results: PreviewItem[] = []; for (const itemId of body.item_ids) results.push(await resolveItem(importId, uuid(itemId, 'item_id'), body, actor)); return results; }
 
 export async function confirmImport(importId: string, body: unknown) { const id = uuid(importId, 'importacao_id'); const requested = isRecord(body) && Array.isArray(body.item_ids) ? body.item_ids.map(value => uuid(value, 'item_id')) : null; const rows = await pool.query('SELECT id,status_preview,pendencias,payload_normalizado,payload_original,identificador_externo,linha_original,planilha FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original', [id]); const selected = rows.rows.filter(row => (!requested || requested.includes(row.id)) && row.status_preview === 'PRONTO'); const result = { importadas: 0, ja_importados: 0, pendentes: rows.rows.filter(row => row.status_preview !== 'PRONTO' && row.status_preview !== 'IMPORTADO').length, falhas: [] as Array<{ item_id: string; identificador_externo: string; motivo: string }> }; for (const row of selected) { const item = itemFromDb(row); const client = await pool.connect(); try { await client.query('BEGIN'); const existing = await client.query('SELECT 1 FROM abastecimentos WHERE origem_sistema=\'POLIFROTA\' AND identificador_externo=$1', [item.identificador_externo]); if (existing.rowCount) { await client.query("UPDATE abastecimento_importacao_itens SET status_preview='JA_IMPORTADO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.ja_importados++; continue; } if (!item.obra_id || !item.produto_id || !item.data_hora || !item.litros || item.valor_total === null || !item.tipo_destinatario) throw new Error('Dados obrigatórios ausentes no preview.'); await client.query('INSERT INTO abastecimentos(origem_sistema,identificador_externo,data_hora,produto_id,obra_id,tipo_destinatario,frota_id,terceiro_id,destinacao_especial_id,identificacao_original,placa_original,frota_original,litros,valor_total,km_hr,horimetro,bico_codigo_original,bico_descricao_original,frentista_original,arquivo_nome_original,planilha_original,linha_original,payload_original,importacao_id) VALUES(\'POLIFROTA\',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)', [item.identificador_externo, item.data_hora, item.produto_id, item.obra_id, item.tipo_destinatario, item.frota_id, item.terceiro_id, item.destinacao_especial_id, item.identificacao_original, item.placa_original, item.frota_original, item.litros, item.valor_total, item.km_hr, item.horimetro, item.bico_codigo_original, item.bico_descricao_original, item.frentista_original, (await pool.query<{arquivo_nome:string}>('SELECT arquivo_nome FROM abastecimento_importacoes WHERE id=$1',[id])).rows[0]?.arquivo_nome ?? 'upload', item.planilha_original, item.linha_original, item.payload_original, id]); await client.query("UPDATE abastecimento_importacao_itens SET status_preview='IMPORTADO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.importadas++; } catch (error) { await client.query('ROLLBACK'); result.falhas.push({ item_id: row.id, identificador_externo: item.identificador_externo, motivo: error instanceof Error ? error.message : 'Falha ao confirmar.' }); } finally { client.release(); } } const remaining = await pool.query<{ status_preview: PreviewStatus }>('SELECT status_preview FROM abastecimento_importacao_itens WHERE importacao_id=$1', [id]); const finished = remaining.rows.every(row => row.status_preview === 'IMPORTADO' || row.status_preview === 'JA_IMPORTADO'); await pool.query('UPDATE abastecimento_importacoes SET status=$2,finalizada_at=CASE WHEN $2=\'CONCLUIDA\' THEN now() ELSE finalizada_at END WHERE id=$1', [id, finished ? 'CONCLUIDA' : result.falhas.length && !result.importadas ? 'ERRO' : 'PREVIA']); return { ...result, status: finished ? 'CONCLUIDA' : 'PREVIA' }; }
 
@@ -167,28 +223,49 @@ async function confirmImportSafeLegacy(importId: string, body: unknown) {
   return { ...result, status };
 }
 
-export async function confirmImportSafe(importId: string, body: unknown) {
-  const id = uuid(importId, 'importacao_id'); const requested = isRecord(body) && Array.isArray(body.item_ids) ? body.item_ids.map(value => uuid(value, 'item_id')) : null;
-  const header = await pool.query<{ arquivo_nome: string }>('SELECT arquivo_nome FROM abastecimento_importacoes WHERE id=$1', [id]); if (!header.rows[0]) throw new AbastecimentoImportError(404, 'Importação não encontrada.');
+export async function confirmImportSafe(importId: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
+  const id = uuid(importId, 'importacao_id');
+  const requested = isRecord(body) && Array.isArray(body.item_ids) ? body.item_ids.map(value => uuid(value, 'item_id')) : null;
+  const header = await loadImportAuditContext(pool, id);
   const rows = await pool.query('SELECT id,status_preview,pendencias,payload_normalizado,payload_original,identificador_externo,linha_original,planilha,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE importacao_id=$1 ORDER BY linha_original', [id]);
-  const selected = rows.rows.filter(row => (!requested || requested.includes(row.id)) && ['PRONTO','SUBSTITUICAO'].includes(row.status_preview)); const result = { importadas: 0, ja_importados: 0, substituicoes: 0, pendentes: rows.rows.filter(row => !['PRONTO','IMPORTADO','JA_IMPORTADO','SUBSTITUICAO','SUBSTITUICAO_JA_REGISTRADA'].includes(row.status_preview)).length, falhas: [] as Array<{ item_id: string; identificador_externo: string; motivo: string }> };
+  const selected = rows.rows.filter(row => (!requested || requested.includes(row.id)) && ['PRONTO', 'SUBSTITUICAO'].includes(row.status_preview));
+  const result = { importadas: 0, ja_importados: 0, substituicoes: 0, pendentes: rows.rows.filter(row => !['PRONTO', 'IMPORTADO', 'JA_IMPORTADO', 'SUBSTITUICAO', 'SUBSTITUICAO_JA_REGISTRADA'].includes(row.status_preview)).length, falhas: [] as Array<{ item_id: string; identificador_externo: string; motivo: string }> };
   for (const row of selected) {
     const item = itemFromDb(row); const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const context = await loadImportAuditContext(client, id);
       if (row.status_preview === 'SUBSTITUICAO') {
         if (!item.substituicao_abastecimento_id || !item.substituicao_identificador_principal) throw new Error('Substituição sem abastecimento alvo.');
         await client.query(`INSERT INTO abastecimento_substituicoes(abastecimento_id,origem_sistema,identificador_externo,identificador_principal) VALUES($1,'POLIFROTA',$2,$3) ON CONFLICT (origem_sistema,identificador_externo) DO NOTHING`, [item.substituicao_abastecimento_id, item.identificador_externo, item.substituicao_identificador_principal]);
-        const alias = await client.query<{ abastecimento_id: string }>('SELECT abastecimento_id FROM abastecimento_substituicoes WHERE origem_sistema=$1 AND identificador_externo=$2', ['POLIFROTA', item.identificador_externo]); if (alias.rows[0]?.abastecimento_id !== item.substituicao_abastecimento_id) throw new Error('Identificador já vinculado a outro abastecimento.');
-        await client.query("UPDATE abastecimento_importacao_itens SET status_preview='SUBSTITUICAO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.substituicoes++; continue;
+        const alias = await client.query<{ abastecimento_id: string }>('SELECT abastecimento_id FROM abastecimento_substituicoes WHERE origem_sistema=$1 AND identificador_externo=$2', ['POLIFROTA', item.identificador_externo]);
+        if (alias.rows[0]?.abastecimento_id !== item.substituicao_abastecimento_id) throw new Error('Identificador já vinculado a outro abastecimento.');
+        await client.query("UPDATE abastecimento_importacao_itens SET status_preview='SUBSTITUICAO' WHERE id=$1", [row.id]);
+        await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_substituicoes', entidadeId: item.substituicao_abastecimento_id, dadosPosteriores: { abastecimento_id: item.substituicao_abastecimento_id, identificador_externo: item.identificador_externo, identificador_principal: item.substituicao_identificador_principal }, metadata: { ...importAuditMetadata(context, item), operacao: 'SUBSTITUICAO_CONFIRMADA', resultado: 'SUCESSO', abastecimento_id: item.substituicao_abastecimento_id } }, client);
+        await client.query('COMMIT'); result.substituicoes++; continue;
       }
-      const existing = await client.query("SELECT 1 FROM abastecimentos WHERE origem_sistema='POLIFROTA' AND identificador_externo=$1", [item.identificador_externo]); if (existing.rowCount) { await client.query("UPDATE abastecimento_importacao_itens SET status_preview='JA_IMPORTADO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.ja_importados++; continue; }
-      const alias = await client.query<{ abastecimento_id: string; identificador_principal: string }>("SELECT abastecimento_id,identificador_principal FROM abastecimento_substituicoes WHERE origem_sistema='POLIFROTA' AND identificador_externo=$1", [item.identificador_externo]); if (alias.rows[0]) { await client.query('UPDATE abastecimento_importacao_itens SET status_preview=\'SUBSTITUICAO_JA_REGISTRADA\',substituicao_abastecimento_id=$2,substituicao_origem_sistema=\'POLIFROTA\',substituicao_identificador_principal=$3 WHERE id=$1', [row.id, alias.rows[0].abastecimento_id, alias.rows[0].identificador_principal]); await client.query('COMMIT'); result.substituicoes++; continue; }
+      const existing = await client.query("SELECT 1 FROM abastecimentos WHERE origem_sistema='POLIFROTA' AND identificador_externo=$1", [item.identificador_externo]);
+      if (existing.rowCount) { await client.query("UPDATE abastecimento_importacao_itens SET status_preview='JA_IMPORTADO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.ja_importados++; continue; }
+      const alias = await client.query<{ abastecimento_id: string; identificador_principal: string }>("SELECT abastecimento_id,identificador_principal FROM abastecimento_substituicoes WHERE origem_sistema='POLIFROTA' AND identificador_externo=$1", [item.identificador_externo]);
+      if (alias.rows[0]) { await client.query('UPDATE abastecimento_importacao_itens SET status_preview=\'SUBSTITUICAO_JA_REGISTRADA\',substituicao_abastecimento_id=$2,substituicao_origem_sistema=\'POLIFROTA\',substituicao_identificador_principal=$3 WHERE id=$1', [row.id, alias.rows[0].abastecimento_id, alias.rows[0].identificador_principal]); await client.query('COMMIT'); result.substituicoes++; continue; }
       if (!item.obra_id || !item.produto_id || !item.data_hora || item.litros === null || item.valor_total === null || !item.tipo_destinatario) throw new Error('Dados obrigatórios ausentes no preview.');
-      await client.query('INSERT INTO abastecimentos(origem_sistema,identificador_externo,data_hora,produto_id,obra_id,tipo_destinatario,frota_id,terceiro_id,destinacao_especial_id,identificacao_original,placa_original,frota_original,litros,valor_total,km_hr,horimetro,bico_codigo_original,bico_descricao_original,frentista_original,arquivo_nome_original,planilha_original,linha_original,payload_original,importacao_id) VALUES(\'POLIFROTA\',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)', [item.identificador_externo,item.data_hora,item.produto_id,item.obra_id,item.tipo_destinatario,item.frota_id,item.terceiro_id,item.destinacao_especial_id,item.identificacao_original,item.placa_original,item.frota_original,item.litros,item.valor_total,item.km_hr,item.horimetro,item.bico_codigo_original,item.bico_descricao_original,item.frentista_original,header.rows[0].arquivo_nome,item.planilha_original,item.linha_original,item.payload_original,id]); await client.query("UPDATE abastecimento_importacao_itens SET status_preview='IMPORTADO' WHERE id=$1", [row.id]); await client.query('COMMIT'); result.importadas++;
+      const inserted = await client.query<{ id: string }>('INSERT INTO abastecimentos(origem_sistema,identificador_externo,data_hora,produto_id,obra_id,tipo_destinatario,frota_id,terceiro_id,destinacao_especial_id,identificacao_original,placa_original,frota_original,litros,valor_total,km_hr,horimetro,bico_codigo_original,bico_descricao_original,frentista_original,arquivo_nome_original,planilha_original,linha_original,payload_original,importacao_id) VALUES(\'POLIFROTA\',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING id', [item.identificador_externo,item.data_hora,item.produto_id,item.obra_id,item.tipo_destinatario,item.frota_id,item.terceiro_id,item.destinacao_especial_id,item.identificacao_original,item.placa_original,item.frota_original,item.litros,item.valor_total,item.km_hr,item.horimetro,item.bico_codigo_original,item.bico_descricao_original,item.frentista_original,context.arquivo_nome,item.planilha_original,item.linha_original,item.payload_original,id]);
+      await client.query("UPDATE abastecimento_importacao_itens SET status_preview='IMPORTADO' WHERE id=$1", [row.id]);
+      await recordAudit({ actor, acao: 'IMPORTAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimentos', entidadeId: inserted.rows[0]!.id, dadosPosteriores: { id: inserted.rows[0]!.id, origem_sistema: 'POLIFROTA', identificador_externo: item.identificador_externo, data_hora: item.data_hora, produto_id: item.produto_id, obra_id: item.obra_id, tipo_destinatario: item.tipo_destinatario, frota_id: item.frota_id, terceiro_id: item.terceiro_id, destinacao_especial_id: item.destinacao_especial_id, litros: item.litros, valor_total: item.valor_total }, metadata: { ...importAuditMetadata(context, item), operacao: 'CRIACAO', resultado: 'SUCESSO', abastecimento_id: inserted.rows[0]!.id } }, client);
+      await client.query('COMMIT'); result.importadas++;
     } catch (error) { await client.query('ROLLBACK'); result.falhas.push({ item_id: item.id!, identificador_externo: item.identificador_externo, motivo: error instanceof Error ? error.message : 'Falha ao confirmar.' }); } finally { client.release(); }
   }
-  const remaining = await pool.query<{ status_preview: PreviewStatus }>('SELECT status_preview FROM abastecimento_importacao_itens WHERE importacao_id=$1', [id]); const finished = remaining.rows.every(row => ['IMPORTADO','JA_IMPORTADO','SUBSTITUICAO','SUBSTITUICAO_JA_REGISTRADA'].includes(row.status_preview)); const status = finished ? 'CONCLUIDA' : result.falhas.length && !result.importadas && !result.substituicoes ? 'ERRO' : 'PREVIA'; await pool.query('UPDATE abastecimento_importacoes SET status=$2::varchar,finalizada_at=CASE WHEN $2::varchar=\'CONCLUIDA\' THEN now() ELSE finalizada_at END WHERE id=$1', [id,status]); return { ...result, status };
+  const finalizationClient = await pool.connect();
+  try {
+    await finalizationClient.query('BEGIN');
+    const remaining = await finalizationClient.query<{ status_preview: PreviewStatus }>('SELECT status_preview FROM abastecimento_importacao_itens WHERE importacao_id=$1 FOR UPDATE', [id]);
+    const finished = remaining.rows.length > 0 && remaining.rows.every(row => ['IMPORTADO', 'JA_IMPORTADO', 'SUBSTITUICAO', 'SUBSTITUICAO_JA_REGISTRADA'].includes(row.status_preview));
+    const status = finished ? 'CONCLUIDA' : result.falhas.length && !result.importadas && !result.substituicoes ? 'ERRO' : 'PREVIA';
+    await finalizationClient.query('UPDATE abastecimento_importacoes SET status=$2::varchar,finalizada_at=CASE WHEN $2::varchar=\'CONCLUIDA\' THEN now() ELSE finalizada_at END,updated_at=now() WHERE id=$1', [id, status]);
+    await recordAudit({ actor, acao: status === 'CONCLUIDA' ? 'EDITAR' : 'ALTERAR_STATUS', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacoes', entidadeId: id, metadata: { ...importAuditMetadata(header), operacao: status === 'CONCLUIDA' ? 'LOTE_FINALIZADO' : 'LOTE_NAO_CONCLUIDO', resultado: status, importadas: result.importadas, substituicoes: result.substituicoes, ja_importados: result.ja_importados, pendentes: result.pendentes, falhas: result.falhas.length } }, finalizationClient);
+    await finalizationClient.query('COMMIT');
+  } catch (error) { await finalizationClient.query('ROLLBACK'); throw error; } finally { finalizationClient.release(); }
+  return { ...result, status: (await pool.query<{ status: string }>('SELECT status FROM abastecimento_importacoes WHERE id=$1', [id])).rows[0]?.status ?? 'PREVIA' };
 }
 
 export interface SubstituicaoAlvo { id: string; identificador_externo: string; origem_sistema: string; data_hora: string; frota: string | null; placa: string | null; produto: string; litros: number; valor_total: number; km_hr: number | null; horimetro: number | null; bico: string | null; obra: string; destinatario: string; }
@@ -203,7 +280,7 @@ export async function searchSubstitutionTargets(query: { busca?: string; data_in
   return result.rows;
 }
 
-export async function markSubstitution(importId: string, itemId: string, targetId: string) {
+export async function markSubstitution(importId: string, itemId: string, targetId: string, actor?: AuthenticatedRequestUser | null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN'); const id = uuid(importId, 'importacao_id'); const itemUuid = uuid(itemId, 'item_id'); const targetUuid = uuid(targetId, 'abastecimento_id');
@@ -213,12 +290,15 @@ export async function markSubstitution(importId: string, itemId: string, targetI
     const principal = await client.query('SELECT 1 FROM abastecimentos WHERE origem_sistema=$1 AND identificador_externo=$2', ['POLIFROTA', item.identificador_externo]); if (principal.rowCount) throw new AbastecimentoImportError(409, 'Este identificador já é uma identidade principal importada.');
     const alias = await client.query<{ abastecimento_id: string }>('SELECT abastecimento_id FROM abastecimento_substituicoes WHERE origem_sistema=$1 AND identificador_externo=$2 FOR UPDATE', ['POLIFROTA', item.identificador_externo]); if (alias.rows[0] && alias.rows[0].abastecimento_id !== targetUuid) throw new AbastecimentoImportError(409, 'Este identificador já está vinculado a outro abastecimento.');
     const next = { ...item, status_preview: 'SUBSTITUICAO' as PreviewStatus, substituicao_abastecimento_id: targetUuid, substituicao_origem_sistema: 'POLIFROTA', substituicao_identificador_principal: target.rows[0].identificador_externo, pendencias: { ...item.pendencias, obra: false, destinatario: false, motivos: item.pendencias.motivos.filter(reason => !['OBRA_PENDENTE', 'DESTINATARIO_PENDENTE'].includes(reason)) } };
-    await client.query('UPDATE abastecimento_importacao_itens SET status_preview=$1,substituicao_abastecimento_id=$2,substituicao_origem_sistema=$3,substituicao_identificador_principal=$4,payload_normalizado=$5 WHERE id=$6', ['SUBSTITUICAO', targetUuid, 'POLIFROTA', target.rows[0].identificador_externo, JSON.stringify(rowFromItem(next)), itemUuid]); await client.query('COMMIT'); return next;
+    const context = await loadImportAuditContext(client, id);
+    await client.query('UPDATE abastecimento_importacao_itens SET status_preview=$1,substituicao_abastecimento_id=$2,substituicao_origem_sistema=$3,substituicao_identificador_principal=$4,payload_normalizado=$5 WHERE id=$6', ['SUBSTITUICAO', targetUuid, 'POLIFROTA', target.rows[0].identificador_externo, JSON.stringify(rowFromItem(next)), itemUuid]);
+    await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacao_itens', entidadeId: itemUuid, dadosAnteriores: itemAuditSnapshot(item), dadosPosteriores: itemAuditSnapshot(next), metadata: { ...importAuditMetadata(context, next), operacao: 'SUBSTITUICAO_MARCADA', resultado: 'SUCESSO', abastecimento_alvo_id: targetUuid, identificador_principal_alvo: target.rows[0].identificador_externo } }, client);
+    await client.query('COMMIT'); return next;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function removeSubstitution(importId: string, itemId: string) {
-  const client = await pool.connect(); try { await client.query('BEGIN'); const itemUuid = uuid(itemId, 'item_id'); const result = await client.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE id=$1 AND importacao_id=$2 FOR UPDATE', [itemUuid, uuid(importId, 'importacao_id')]); if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Item de preview não encontrado.'); const item = itemFromDb(result.rows[0]); if (item.status_preview !== 'SUBSTITUICAO') throw new AbastecimentoImportError(409, 'Só é possível remover uma substituição antes da confirmação.'); const next = recompute({ ...item, status_preview: 'PRONTO', substituicao_abastecimento_id: null, substituicao_origem_sistema: null, substituicao_identificador_principal: null }); await client.query('UPDATE abastecimento_importacao_itens SET status_preview=$1,substituicao_abastecimento_id=NULL,substituicao_origem_sistema=NULL,substituicao_identificador_principal=NULL,payload_normalizado=$2 WHERE id=$3', [next.status_preview, JSON.stringify(rowFromItem(next)), itemUuid]); await client.query('COMMIT'); return next; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+export async function removeSubstitution(importId: string, itemId: string, actor?: AuthenticatedRequestUser | null) {
+  const client = await pool.connect(); try { await client.query('BEGIN'); const id = uuid(importId, 'importacao_id'); const itemUuid = uuid(itemId, 'item_id'); const result = await client.query('SELECT id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE id=$1 AND importacao_id=$2 FOR UPDATE', [itemUuid, id]); if (!result.rows[0]) throw new AbastecimentoImportError(404, 'Item de preview não encontrado.'); const item = itemFromDb(result.rows[0]); if (item.status_preview !== 'SUBSTITUICAO') throw new AbastecimentoImportError(409, 'Só é possível remover uma substituição antes da confirmação.'); const context = await loadImportAuditContext(client, id); const next = recompute({ ...item, status_preview: 'PRONTO', substituicao_abastecimento_id: null, substituicao_origem_sistema: null, substituicao_identificador_principal: null }); await client.query('UPDATE abastecimento_importacao_itens SET status_preview=$1,substituicao_abastecimento_id=NULL,substituicao_origem_sistema=NULL,substituicao_identificador_principal=NULL,payload_normalizado=$2 WHERE id=$3', [next.status_preview, JSON.stringify(rowFromItem(next)), itemUuid]); await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_POLIFROTA', entidade: 'abastecimento_importacao_itens', entidadeId: itemUuid, dadosAnteriores: itemAuditSnapshot(item), dadosPosteriores: itemAuditSnapshot(next), metadata: { ...importAuditMetadata(context, next), operacao: 'SUBSTITUICAO_REMOVIDA', resultado: 'SUCESSO' } }, client); await client.query('COMMIT'); return next; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export { hash as sha256Arquivo };

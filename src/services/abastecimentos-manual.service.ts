@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 type RecordValue = Record<string, unknown>;
 const isRecord = (value: unknown): value is RecordValue => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -47,7 +49,7 @@ const databaseError = (error: unknown): never => {
   throw error;
 };
 
-export async function createManualAbastecimentoWithClient(client: PoolClient, body: unknown, entradaDestinoId: string | null = null, contexto: Record<string, unknown> | null = null) {
+export async function createManualAbastecimentoWithClient(client: PoolClient, body: unknown, entradaDestinoId: string | null = null, contexto: Record<string, unknown> | null = null, actor?: AuthenticatedRequestUser | null) {
   if (!isRecord(body)) throw new AbastecimentoServiceError(400, 'O corpo da requisição deve ser um objeto.');
   const dataHora = dateTime(body.data, body.hora);
   const obraId = assertUuid(body.obra_id, 'obra_id');
@@ -108,13 +110,15 @@ export async function createManualAbastecimentoWithClient(client: PoolClient, bo
     const identifier = `MANUAL-${randomUUID()}`;
     const payload = JSON.stringify({ origem: 'MANUAL', ...(contexto || {}), dados_informados: { data: body.data, hora: body.hora, obra_id: obraId, tipo_destinatario: tipo, produto_id: produtoId, frota_id: frotaId, terceiro_id: terceiroId, destinacao_especial_id: especialId, identificacao: identificacaoOriginal, ponto_id: pontoId, bico_id: bicoId, litros, valor_total: valor, km_hr: kmHr, horimetro, frentista } });
     const result = await client.query(`INSERT INTO abastecimentos(origem_sistema,identificador_externo,data_hora,produto_id,obra_id,tipo_destinatario,frota_id,terceiro_id,destinacao_especial_id,identificacao_original,placa_original,frota_original,litros,valor_total,km_hr,horimetro,bico_codigo_original,bico_descricao_original,frentista_original,arquivo_nome_original,planilha_original,linha_original,payload_original,importacao_id,entrada_destino_id) VALUES('MANUAL',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'MANUAL',NULL,NULL,$19,NULL,$20) RETURNING id`, [identifier, dataHora, produtoId, obraId, tipo, frotaId, terceiroId, especialId, identificacaoOriginal, placa, frotaOriginal, litros, valor, kmHr, horimetro, bicoCodigo, bicoDescricao, frentista, payload, entradaDestinoId]);
-    return { id: result.rows[0].id, origem_sistema: 'MANUAL', identificador_externo: identifier };
+    const inserted = result.rows[0];
+    await recordAudit({ actor, acao: 'CRIAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimentos', entidadeId: inserted.id, dadosPosteriores: { id: inserted.id, origem_sistema: 'MANUAL', identificador_externo: identifier, data_hora: dataHora, produto_id: produtoId, obra_id: obraId, tipo_destinatario: tipo, frota_id: frotaId, terceiro_id: terceiroId, destinacao_especial_id: especialId, litros, valor_total: valor, entrada_destino_id: entradaDestinoId } }, client);
+    return { id: inserted.id, origem_sistema: 'MANUAL', identificador_externo: identifier };
   } catch (error) { if (error instanceof AbastecimentoServiceError) throw error; return databaseError(error); }
 }
 
-export async function createAbastecimentoManual(body: unknown) {
+export async function createAbastecimentoManual(body: unknown, actor?: AuthenticatedRequestUser | null) {
   const client = await pool.connect();
-  try { await client.query('BEGIN'); const result = await createManualAbastecimentoWithClient(client, body); await client.query('COMMIT'); return result; }
+  try { await client.query('BEGIN'); const result = await createManualAbastecimentoWithClient(client, body, null, null, actor); await client.query('COMMIT'); return result; }
   catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }

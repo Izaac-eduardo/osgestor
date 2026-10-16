@@ -6,6 +6,7 @@ import { app } from '../src/app.js';
 import { pool } from '../src/config/database.js';
 import { buildPreviewItem, type ImportacaoContext } from '../src/services/abastecimentos-import.service.js';
 import type { PoliFrotaAbastecimentoNormalizado } from '../src/imports/polifrota.js';
+import { authenticateHttpFixture, httpHeaders } from './helpers/http-auth.js';
 
 const row = (overrides: Partial<PoliFrotaAbastecimentoNormalizado> = {}): PoliFrotaAbastecimentoNormalizado => ({
   origemSistema: 'POLIFROTA', identificadorExterno: '900001', dataHora: '2026-09-21T07:00:00', dataHoraOriginal: '21/09/2026 07:00', placaOriginal: 'ABC1D23', placaNormalizada: 'ABC1D23', frotaOriginal: 'EH16', frotaNormalizada: 'EH16', litros: 10, litrosOriginal: '10', valorTotal: 123.4567, valorTotalOriginal: '123.4567', kmHr: 0, kmHrOriginal: '0', kmHrStatus: 'ZERO_INFORMADO', horimetro: null, horimetroOriginal: null, horimetroStatus: 'AUSENTE', bicoCodigoOriginal: '9', bicoDescricaoOriginal: 'OLEO DIESEL S500 - COMUM', produtoDetectado: 'DIESEL_S500', frentistaOriginal: 'Teste', linhaOriginal: 2, planilhaOriginal: 'Relatorio', payloadOriginal: { original: true }, diagnosticos: [], ...overrides,
@@ -44,6 +45,8 @@ test('preview e confirmação sintética não duplicam e não confirmam dados re
   const address = server.address();
   assert.ok(address && typeof address === 'object');
   const base = `http://127.0.0.1:${address.port}`;
+  const auth = await authenticateHttpFixture(base);
+  const request = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, { ...init, headers: { ...httpHeaders(auth.cookie), ...(init.headers ?? {}) } });
   const identifier = `990${Date.now()}`;
   let importId: string | undefined;
   let itemId: string | undefined;
@@ -54,21 +57,22 @@ test('preview e confirmação sintética não duplicam e não confirmam dados re
     const sheet = XLSX.utils.aoa_to_sheet([['Nro. Abast.', 'Data', 'Placa', 'Frota', 'Abastecida', 'Valor Total($)', 'Km/Hr.', 'Horímetro', 'Bico', 'Frentista'], [identifier, '21/09/2026 07:00', fleetResult.rows[0].placa || 'SEMPLACA', fleetResult.rows[0].codigo, '10', '123.4567', '0', '', '9 - OLEO DIESEL S500 - COMUM', 'Teste']]);
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Relatorio');
     const form = new FormData(); form.append('arquivo', new Blob([XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'fase6-sintetico.xlsx');
-    const analyzed = await fetch(`${base}/abastecimento/importacoes/polifrota/analisar`, { method: 'POST', body: form });
+    const analyzed = await request('/abastecimento/importacoes/polifrota/analisar', { method: 'POST', body: form });
     assert.equal(analyzed.status, 201); const analyzedBody = await analyzed.json() as { id: string; counts: Record<string, number>; items: Array<{ id: string; status_preview: string }> }; importId = analyzedBody.id; itemId = analyzedBody.items[0]?.id; assert.ok(importId && itemId); assert.equal(analyzedBody.counts.total, 1); assert.equal(analyzedBody.items[0]?.status_preview, 'PENDENTE_OBRA');
 
-    const resolved = await fetch(`${base}/abastecimento/importacoes/${importId}/itens/${itemId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ obra_id: obraResult.rows[0].id }) });
+    const resolved = await request(`/abastecimento/importacoes/${importId}/itens/${itemId}`, { method: 'PATCH', headers: httpHeaders(auth.cookie, 'application/json'), body: JSON.stringify({ obra_id: obraResult.rows[0].id }) });
     assert.equal(resolved.status, 200); const resolvedBody = await resolved.json() as { status_preview: string; pendencias: { destinatario: boolean } }; assert.equal(resolvedBody.status_preview, 'PRONTO'); assert.equal(resolvedBody.pendencias.destinatario, false);
 
-    const confirmed = await fetch(`${base}/abastecimento/importacoes/${importId}/confirmar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const confirmed = await request(`/abastecimento/importacoes/${importId}/confirmar`, { method: 'POST', headers: httpHeaders(auth.cookie, 'application/json'), body: '{}' });
     assert.equal(confirmed.status, 200); const confirmedBody = await confirmed.json() as { importadas: number; falhas: unknown[] }; assert.equal(confirmedBody.importadas, 1, JSON.stringify(confirmedBody)); inserted = true;
-    const second = await fetch(`${base}/abastecimento/importacoes/${importId}/confirmar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const second = await request(`/abastecimento/importacoes/${importId}/confirmar`, { method: 'POST', headers: httpHeaders(auth.cookie, 'application/json'), body: '{}' });
     assert.equal(second.status, 200); const secondBody = await second.json() as { importadas: number }; assert.equal(secondBody.importadas, 0);
     const count = await pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM abastecimentos WHERE origem_sistema='POLIFROTA' AND identificador_externo=$1", [identifier]); assert.equal(count.rows[0]?.count, '1');
   } finally {
     if (inserted) await pool.query('DELETE FROM abastecimentos WHERE origem_sistema=\'POLIFROTA\' AND identificador_externo=$1', [identifier]);
     if (importId) await pool.query('DELETE FROM abastecimento_importacoes WHERE id=$1', [importId]);
     await new Promise<void>(resolve => server.close(() => resolve()));
+    await auth.cleanup();
     await pool.end();
   }
 });

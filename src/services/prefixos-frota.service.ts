@@ -1,4 +1,6 @@
 import { pool } from '../config/database.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 export const prefixoFrotaStatuses = ['ATIVO', 'INATIVO'] as const;
 type PrefixoFrotaStatus = (typeof prefixoFrotaStatuses)[number];
@@ -11,6 +13,7 @@ export interface PrefixoFrota {
   created_at: Date;
   updated_at: Date;
 }
+const auditPrefixo = (row: Partial<PrefixoFrota> | undefined): Record<string, unknown> | undefined => row ? Object.fromEntries(['id', 'codigo', 'descricao', 'status'].filter((key) => key in row).map((key) => [key, row[key as keyof PrefixoFrota]])) : undefined;
 
 interface PrefixoFrotaFields {
   codigo: string;
@@ -137,24 +140,27 @@ export async function getPrefixoFrota(id: string): Promise<PrefixoFrota> {
   return result.rows[0]!;
 }
 
-export async function createPrefixoFrota(body: unknown): Promise<PrefixoFrota> {
+export async function createPrefixoFrota(body: unknown, actor?: AuthenticatedRequestUser): Promise<PrefixoFrota> {
   const fields = parseFields(body, false);
+  const client = await pool.connect();
   try {
-    const result = await pool.query<PrefixoFrota>(
+    await client.query('BEGIN');
+    const result = await client.query<PrefixoFrota>(
       `INSERT INTO prefixos_frota (codigo, descricao, status)
        VALUES ($1, $2, $3) RETURNING *`,
       [fields.codigo, fields.descricao, fields.status],
     );
-    return result.rows[0]!;
-  } catch (error) {
-    return handleDatabaseError(error);
-  }
+    if (actor) await recordAudit({ actor, acao: 'CRIAR', modulo: 'PREFIXOS_FROTA', entidade: 'prefixos_frota', entidadeId: result.rows[0]!.id, dadosPosteriores: auditPrefixo(result.rows[0]) }, client);
+    await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updatePrefixoFrota(id: string, body: unknown): Promise<PrefixoFrota> {
+export async function updatePrefixoFrota(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<PrefixoFrota> {
   const fields = parseFields(body, true);
+  const client = await pool.connect();
   try {
-    const result = await pool.query<PrefixoFrota>(
+    await client.query('BEGIN'); const before = await client.query<PrefixoFrota>('SELECT * FROM prefixos_frota WHERE id=$1 FOR UPDATE', [id]);
+    const result = await client.query<PrefixoFrota>(
       `UPDATE prefixos_frota SET codigo = $1, descricao = $2, status = $3
        WHERE id = $4 RETURNING *`,
       [fields.codigo, fields.descricao, fields.status, id],
@@ -162,33 +168,37 @@ export async function updatePrefixoFrota(id: string, body: unknown): Promise<Pre
     if (result.rows.length === 0) {
       throw new PrefixoFrotaServiceError(404, 'Prefixo de frota não encontrado.');
     }
-    return result.rows[0]!;
-  } catch (error) {
-    return handleDatabaseError(error);
-  }
+    if (actor && JSON.stringify(auditPrefixo(before.rows[0])) !== JSON.stringify(auditPrefixo(result.rows[0]!))) await recordAudit({ actor, acao: 'EDITAR', modulo: 'PREFIXOS_FROTA', entidade: 'prefixos_frota', entidadeId: id, dadosAnteriores: auditPrefixo(before.rows[0]), dadosPosteriores: auditPrefixo(result.rows[0]!) }, client);
+    await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }
 
-export async function updatePrefixoFrotaStatus(id: string, body: unknown): Promise<PrefixoFrota> {
+export async function updatePrefixoFrotaStatus(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<PrefixoFrota> {
   if (!isRecord(body) || (body.status !== 'ATIVO' && body.status !== 'INATIVO')) {
     throw new PrefixoFrotaServiceError(400, 'status deve ser ATIVO ou INATIVO.');
   }
-  const result = await pool.query<PrefixoFrota>(
+  const client = await pool.connect(); try { await client.query('BEGIN'); const before = await client.query<PrefixoFrota>('SELECT * FROM prefixos_frota WHERE id=$1 FOR UPDATE', [id]);
+  const result = await client.query<PrefixoFrota>(
     'UPDATE prefixos_frota SET status = $1 WHERE id = $2 RETURNING *',
     [body.status, id],
   );
   if (result.rows.length === 0) {
     throw new PrefixoFrotaServiceError(404, 'Prefixo de frota não encontrado.');
   }
-  return result.rows[0]!;
+  if (actor && before.rows[0]?.status !== result.rows[0]!.status) await recordAudit({ actor, acao: result.rows[0]!.status === 'ATIVO' ? 'ATIVAR' : 'DESATIVAR', modulo: 'PREFIXOS_FROTA', entidade: 'prefixos_frota', entidadeId: id, dadosAnteriores: { status: before.rows[0]?.status }, dadosPosteriores: { status: result.rows[0]!.status } }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function deletePrefixoFrota(id: string): Promise<void> {
+export async function deletePrefixoFrota(id: string, actor?: AuthenticatedRequestUser): Promise<void> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM prefixos_frota WHERE id = $1', [id]);
+    await client.query('BEGIN'); const before = await client.query<PrefixoFrota>('SELECT * FROM prefixos_frota WHERE id=$1 FOR UPDATE', [id]);
+    const result = await client.query('DELETE FROM prefixos_frota WHERE id = $1', [id]);
     if (result.rowCount === 0) {
       throw new PrefixoFrotaServiceError(404, 'Prefixo de frota não encontrado.');
     }
-  } catch (error) {
-    return handleDatabaseError(error);
-  }
+    if (actor) await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'PREFIXOS_FROTA', entidade: 'prefixos_frota', entidadeId: id, dadosAnteriores: auditPrefixo(before.rows[0]) }, client);
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); return handleDatabaseError(error); } finally { client.release(); }
 }

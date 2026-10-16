@@ -7,8 +7,10 @@ import {
   updateFuncionarioController,
   updateFuncionarioStatusController,
 } from '../controllers/funcionarios.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
 
 export const funcionariosRoutes = Router();
+funcionariosRoutes.use(requireMethodRole());
 
 funcionariosRoutes.get('/', listFuncionariosController);
 funcionariosRoutes.get('/:id', getFuncionarioController);

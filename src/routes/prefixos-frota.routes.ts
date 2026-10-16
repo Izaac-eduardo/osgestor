@@ -7,8 +7,10 @@ import {
   updatePrefixoFrotaController,
   updatePrefixoFrotaStatusController,
 } from '../controllers/prefixos-frota.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
 
 export const prefixosFrotaRoutes = Router();
+prefixosFrotaRoutes.use(requireMethodRole());
 
 prefixosFrotaRoutes.get('/', listPrefixosFrotaController);
 prefixosFrotaRoutes.get('/:id', getPrefixoFrotaController);

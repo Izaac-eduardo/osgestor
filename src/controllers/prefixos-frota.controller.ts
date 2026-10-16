@@ -54,7 +54,7 @@ export async function getPrefixoFrotaController(request: Request, response: Resp
 
 export async function createPrefixoFrotaController(request: Request, response: Response): Promise<void> {
   try {
-    response.status(201).json(await createPrefixoFrota(request.body));
+    response.status(201).json(await createPrefixoFrota(request.body, request.authUser!));
   } catch (error) {
     sendError(response, error);
   }
@@ -62,7 +62,7 @@ export async function createPrefixoFrotaController(request: Request, response: R
 
 export async function updatePrefixoFrotaController(request: Request, response: Response): Promise<void> {
   try {
-    response.status(200).json(await updatePrefixoFrota(routeId(request.params.id), request.body));
+    response.status(200).json(await updatePrefixoFrota(routeId(request.params.id), request.body, request.authUser!));
   } catch (error) {
     sendError(response, error);
   }
@@ -73,7 +73,7 @@ export async function updatePrefixoFrotaStatusController(
   response: Response,
 ): Promise<void> {
   try {
-    response.status(200).json(await updatePrefixoFrotaStatus(routeId(request.params.id), request.body));
+    response.status(200).json(await updatePrefixoFrotaStatus(routeId(request.params.id), request.body, request.authUser!));
   } catch (error) {
     sendError(response, error);
   }
@@ -81,7 +81,7 @@ export async function updatePrefixoFrotaStatusController(
 
 export async function deletePrefixoFrotaController(request: Request, response: Response): Promise<void> {
   try {
-    await deletePrefixoFrota(routeId(request.params.id));
+    await deletePrefixoFrota(routeId(request.params.id), request.authUser!);
     response.status(204).send();
   } catch (error) {
     sendError(response, error);

@@ -8,8 +8,10 @@ import {
   updateObraController,
   updateObraStatusController,
 } from '../controllers/obras.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
 
 export const obrasRoutes = Router();
+obrasRoutes.use(requireMethodRole());
 
 obrasRoutes.get('/', listObrasController);
 obrasRoutes.get('/proximo-codigo', getNextObraCodigoController);

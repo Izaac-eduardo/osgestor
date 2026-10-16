@@ -1,0 +1,7 @@
+import type { Request, Response } from 'express';
+import { getTerceirosCategoriaItens, getTerceirosCategorias, type TerceirosCategoriasFilters } from '../services/terceiros-categorias.service.js';
+
+const text = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
+const filters = (request: Request): TerceirosCategoriasFilters => ({ data_inicio: text(request.query.data_inicio) ?? '', data_fim: text(request.query.data_fim) ?? '', obra_id: text(request.query.obra_id), frota_codigo: text(request.query.frota_codigo), status: text(request.query.status), categoria_servico: text(request.query.categoria_servico) });
+export async function terceirosCategoriasController(request: Request, response: Response): Promise<void> { try { response.json(await getTerceirosCategorias(filters(request))); } catch (error) { response.status(500).json({ message: error instanceof Error ? error.message : 'Não foi possível carregar o detalhamento.' }); } }
+export async function terceirosCategoriaItensController(request: Request, response: Response): Promise<void> { try { const page = Number(request.query.page ?? 1); const pageSize = Number(request.query.page_size ?? 20); response.json(await getTerceirosCategoriaItens(filters(request), String(request.params.categoria), page, pageSize)); } catch (error) { response.status(500).json({ message: error instanceof Error ? error.message : 'Não foi possível carregar os itens.' }); } }

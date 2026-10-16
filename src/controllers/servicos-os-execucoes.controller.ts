@@ -28,14 +28,14 @@ export async function listExecucoesController(request: Request, response: Respon
   catch(caught){ error(response,caught); }
 }
 export async function createExecucaoController(request: Request, response: Response) {
-  try { const x=ids(request); response.status(201).json(await createExecucao(x.ordem,x.servico,request.body)); }
+  try { const x=ids(request); response.status(201).json(await createExecucao(x.ordem,x.servico,request.body,request.authUser!)); }
   catch(caught){ error(response,caught); }
 }
 export async function updateExecucaoController(request: Request, response: Response) {
-  try { const x=ids(request); response.json(await updateExecucao(x.ordem,x.servico,uuid(request.params.execucaoId,'execucaoId'),request.body)); }
+  try { const x=ids(request); response.json(await updateExecucao(x.ordem,x.servico,uuid(request.params.execucaoId,'execucaoId'),request.body,request.authUser!)); }
   catch(caught){ error(response,caught); }
 }
 export async function deleteExecucaoController(request: Request, response: Response) {
-  try { const x=ids(request); await deleteExecucao(x.ordem,x.servico,uuid(request.params.execucaoId,'execucaoId')); response.status(204).send(); }
+  try { const x=ids(request); await deleteExecucao(x.ordem,x.servico,uuid(request.params.execucaoId,'execucaoId'),request.authUser!); response.status(204).send(); }
   catch(caught){ error(response,caught); }
 }

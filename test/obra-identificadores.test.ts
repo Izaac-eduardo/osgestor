@@ -52,7 +52,7 @@ test('aliases de obra normalizam, respeitam origem, unicidade e não fazem fuzzy
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM obra_identificadores_externos WHERE origem=$1 AND identificador_normalizado=$2', [VEGA_OBRA_ORIGIN, 'L4 ALIAS TESTE'])).rows[0].count, 1);
 });
 
-test('resolução explícita da prévia cria alias e a próxima prévia reutiliza', async () => {
+test('resolução explícita da prévia não cria alias global e permanece limitada ao lote', async () => {
   const obra = (await pool.query<{ id: string; codigo: string; nome: string }>(
     `SELECT id,codigo,nome FROM obras WHERE codigo=$1`, [obraCodes[0]],
   )).rows[0]!;
@@ -79,15 +79,15 @@ test('resolução explícita da prévia cria alias e a próxima prévia reutiliz
     await pool.query('INSERT INTO importacoes_os(id,arquivo_nome,expires_at) VALUES($1,$2,now()+interval \'1 hour\')', [token, 'l4-alias-test.xlsx']);
     await pool.query('INSERT INTO importacoes_os_itens(importacao_id,numero_os,payload_json,status_preview,pendencias_json) VALUES($1,$2,$3,$4,$5)', [token, numeroOs, JSON.stringify(item), item.statusPreview, JSON.stringify(item.pendencias)]);
     const response = responseCapture();
-    await resolvePreview({ params: { token, numeroOs: String(numeroOs) }, body: { obraId: obra.id } } as never, response as never);
+    await resolvePreview({ params: { token, numeroOs: String(numeroOs) }, body: { obraId: obra.id, decisao: 'APROVAR' } } as never, response as never);
     assert.equal(response.statusCode, 200);
     const alias = (await pool.query<{ obra_id: string }>('SELECT obra_id FROM obra_identificadores_externos WHERE origem=$1 AND identificador_normalizado=$2', [VEGA_OBRA_ORIGIN, 'L4 ORIGEM TESTE'])).rows[0];
-    assert.equal(alias.obra_id, obra.id);
+    assert.equal(alias, undefined);
 
     const next: ParsedOs = { ...item, pendencias: [], statusPreview: 'REQUER_REVISAO' };
     await matchPreview([next]);
-    assert.equal(next.obraId, obra.id);
-    assert.equal(next.pendencias.includes('OBRA_PENDENTE'), false);
+    assert.equal(next.obraId, undefined);
+    assert.equal(next.pendencias.includes('OBRA_PENDENTE'), true);
   } finally {
     await pool.query('DELETE FROM importacoes_os WHERE id=$1', [token]);
     await pool.query('DELETE FROM obra_identificadores_externos WHERE identificador_normalizado = ANY($1::text[])', [identifiers.map(normalizeExternalObraIdentifier)]);

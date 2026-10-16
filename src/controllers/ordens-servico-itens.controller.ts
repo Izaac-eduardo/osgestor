@@ -44,7 +44,7 @@ export async function listFuncionariosOsController(request: Request, response: R
 
 export async function addFuncionarioOsController(request: Request, response: Response): Promise<void> {
   try {
-    response.status(201).json(await addFuncionarioOs(routeUuid(request.params.id, 'id'), request.body));
+    response.status(201).json(await addFuncionarioOs(routeUuid(request.params.id, 'id'), request.body, request.authUser!));
   } catch (error) { sendError(response, error); }
 }
 
@@ -53,6 +53,7 @@ export async function removeFuncionarioOsController(request: Request, response: 
     await removeFuncionarioOs(
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.funcionarioId, 'funcionarioId'),
+      request.authUser!,
     );
     response.status(204).send();
   } catch (error) { sendError(response, error); }
@@ -66,7 +67,7 @@ export async function listServicosOsController(request: Request, response: Respo
 
 export async function createServicoOsController(request: Request, response: Response): Promise<void> {
   try {
-    response.status(201).json(await createServicoOs(routeUuid(request.params.id, 'id'), request.body));
+    response.status(201).json(await createServicoOs(routeUuid(request.params.id, 'id'), request.body, request.authUser!));
   } catch (error) { sendError(response, error); }
 }
 
@@ -76,6 +77,7 @@ export async function updateServicoOsController(request: Request, response: Resp
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.servicoId, 'servicoId'),
       request.body,
+      request.authUser!,
     ));
   } catch (error) { sendError(response, error); }
 }
@@ -85,6 +87,7 @@ export async function deleteServicoOsController(request: Request, response: Resp
     await deleteServicoOs(
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.servicoId, 'servicoId'),
+      request.authUser!,
     );
     response.status(204).send();
   } catch (error) { sendError(response, error); }
@@ -98,7 +101,7 @@ export async function listProdutosOsController(request: Request, response: Respo
 
 export async function createProdutoOsController(request: Request, response: Response): Promise<void> {
   try {
-    response.status(201).json(await createProdutoOs(routeUuid(request.params.id, 'id'), request.body));
+    response.status(201).json(await createProdutoOs(routeUuid(request.params.id, 'id'), request.body, request.authUser!));
   } catch (error) { sendError(response, error); }
 }
 
@@ -108,6 +111,7 @@ export async function updateProdutoOsController(request: Request, response: Resp
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.produtoId, 'produtoId'),
       request.body,
+      request.authUser!,
     ));
   } catch (error) { sendError(response, error); }
 }
@@ -117,6 +121,7 @@ export async function deleteProdutoOsController(request: Request, response: Resp
     await deleteProdutoOs(
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.produtoId, 'produtoId'),
+      request.authUser!,
     );
     response.status(204).send();
   } catch (error) { sendError(response, error); }

@@ -26,7 +26,7 @@ export const list = action(async (req, res) => {
     placa: queryText(req.query.placa), modelo: queryText(req.query.modelo) }));
 });
 export const get = action(async (req, res) => { res.json(await getFrota(routeId(req))); });
-export const create = action(async (req, res) => { res.status(201).json(await saveFrota(req.body)); });
-export const update = action(async (req, res) => { res.json(await saveFrota(req.body, routeId(req))); });
-export const status = action(async (req, res) => { res.json(await updateFrotaStatus(routeId(req), req.body)); });
-export const remove = action(async (req, res) => { await deleteFrota(routeId(req)); res.status(204).send(); });
+export const create = action(async (req, res) => { res.status(201).json(await saveFrota(req.body, undefined, req.authUser!)); });
+export const update = action(async (req, res) => { res.json(await saveFrota(req.body, routeId(req), req.authUser!)); });
+export const status = action(async (req, res) => { res.json(await updateFrotaStatus(routeId(req), req.body, req.authUser!)); });
+export const remove = action(async (req, res) => { await deleteFrota(routeId(req), req.authUser!); res.status(204).send(); });

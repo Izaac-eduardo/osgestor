@@ -1,4 +1,6 @@
 import type { Request, Response } from 'express';
+import type { PoolClient } from 'pg';
+import { pool } from '../config/database.js';
 import {
   listOverrides,
   removeOverride,
@@ -28,9 +30,14 @@ export async function listOrdemServicoOverridesController(request: Request, resp
 }
 
 export async function removeOrdemServicoOverrideController(request: Request, response: Response): Promise<void> {
+  let client: PoolClient | undefined;
   try {
-    const removed = await removeOverride(routeUuid(request.params.id, 'id'), routeField(request.params.campo));
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const removed = await removeOverride(routeUuid(request.params.id, 'id'), routeField(request.params.campo), request.authUser!, client);
+    if (removed) await client.query('COMMIT'); else await client.query('ROLLBACK');
+    client.release();
     if (!removed) { response.status(404).json({ message: 'Override não encontrado.' }); return; }
     response.status(204).send();
-  } catch (error) { sendError(response, error); }
+  } catch (error) { if (client) { await client.query('ROLLBACK').catch(() => undefined); client.release(); } sendError(response, error); }
 }

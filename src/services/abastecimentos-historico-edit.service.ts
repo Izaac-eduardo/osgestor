@@ -1,6 +1,8 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../config/database.js';
 import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.service.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 
 type Body = Record<string, unknown>;
 const isRecord = (value: unknown): value is Body => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -11,7 +13,7 @@ const recipientTypes = ['FROTA', 'TERCEIRO', 'ESPECIAL', 'EXTERNA'] as const;
 const dateTime = (value: unknown): string => { if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value) || Number.isNaN(new Date(value).getTime())) throw new AbastecimentoServiceError(400, 'data_hora inválida.'); return value; };
 const get = async (client: PoolClient, sql: string, params: unknown[]) => (await client.query(sql, params)).rows[0];
 
-export async function updateAbastecimentoHistorico(id: string, body: unknown) {
+export async function updateAbastecimentoHistorico(id: string, body: unknown, actor?: AuthenticatedRequestUser | null) {
   const abastecimentoId = assertUuid(id); if (!isRecord(body)) throw new AbastecimentoServiceError(400, 'O corpo deve ser um objeto.');
   const client = await pool.connect();
   try {
@@ -30,6 +32,7 @@ export async function updateAbastecimentoHistorico(id: string, body: unknown) {
     if (tipo === 'ESPECIAL') { especialId = assertUuid(body.destinacao_especial_id, 'destinacao_especial_id'); const special = await get(client, 'SELECT id,codigo,nome FROM abastecimento_destinacoes_especiais WHERE id=$1', [especialId]); if (!special) throw new AbastecimentoServiceError(404, 'Destinação especial não encontrada.'); identificacao = special.codigo || special.nome; placa = null; frotaOriginal = null; }
     if (tipo === 'EXTERNA') { frotaId = null; terceiroId = null; especialId = null; }
     await client.query(`UPDATE abastecimentos SET data_hora=$1,produto_id=$2,obra_id=$3,tipo_destinatario=$4,frota_id=$5,terceiro_id=$6,destinacao_especial_id=$7,identificacao_original=$8,placa_original=$9,frota_original=$10,litros=$11,valor_total=$12,km_hr=$13,horimetro=$14,bico_codigo_original=$15,bico_descricao_original=$16,frentista_original=$17 WHERE id=$18`, [dateTime(body.data_hora), produtoId, obraId, tipo, frotaId, terceiroId, especialId, identificacao, placa, frotaOriginal, litros, valor, optionalDecimal(body.km_hr, 'km_hr'), optionalDecimal(body.horimetro, 'horimetro'), text(body.bico_codigo_original, 'bico_codigo_original', false, 30), text(body.bico_descricao_original, 'bico_descricao_original'), text(body.frentista_original, 'frentista_original'), abastecimentoId]);
+    await recordAudit({ actor, acao: 'EDITAR', modulo: 'ABASTECIMENTO', entidade: 'abastecimentos', entidadeId: abastecimentoId, dadosAnteriores: { id: current.id, data_hora: current.data_hora, produto_id: current.produto_id, obra_id: current.obra_id, tipo_destinatario: current.tipo_destinatario, frota_id: current.frota_id, terceiro_id: current.terceiro_id, destinacao_especial_id: current.destinacao_especial_id, litros: current.litros, valor_total: current.valor_total }, dadosPosteriores: { id: abastecimentoId, data_hora: body.data_hora, produto_id: produtoId, obra_id: obraId, tipo_destinatario: tipo, frota_id: frotaId, terceiro_id: terceiroId, destinacao_especial_id: especialId, litros, valor_total: valor } }, client);
     await client.query('COMMIT'); return { id: abastecimentoId, origem_sistema: current.origem_sistema, identificador_externo: current.identificador_externo };
   } catch (error) { await client.query('ROLLBACK'); if (error instanceof AbastecimentoServiceError) throw error; throw error; } finally { client.release(); }
 }

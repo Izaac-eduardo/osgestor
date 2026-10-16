@@ -1,4 +1,6 @@
 import { pool } from '../config/database.js';
+import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { recordAudit } from './audit.service.js';
 import {
   OrdemServicoResumo,
   OrdemServicoServiceError,
@@ -12,6 +14,10 @@ import {
 } from '../types/servicos-os.js';
 
 type NaturezaOs = 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
+const auditItem = (row: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+  if (!row) return undefined;
+  return Object.fromEntries(['id', 'ordem_servico_id', 'funcionario_id', 'descricao', 'valor', 'classificacao_servico', 'classificacao_origem', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'].filter((key) => key in row).map((key) => [key, row[key]]));
+};
 
 export interface FuncionarioOs {
   id: string;
@@ -254,7 +260,7 @@ export async function listFuncionariosOs(ordemServicoId: string): Promise<Funcio
   return rawFuncionarios(ordemServicoId);
 }
 
-export async function addFuncionarioOs(ordemServicoId: string, body: unknown): Promise<FuncionarioOs> {
+export async function addFuncionarioOs(ordemServicoId: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<FuncionarioOs> {
   if (!isRecord(body) || typeof body.funcionario_id !== 'string') {
     throw new OrdemServicoServiceError(400, 'funcionario_id é obrigatório.');
   }
@@ -270,13 +276,20 @@ export async function addFuncionarioOs(ordemServicoId: string, body: unknown): P
     );
   }
   await ensureFuncionarioExists(funcionarioId);
+  const client = await pool.connect();
   try {
-    await pool.query(
+    await client.query('BEGIN');
+    await client.query(
       `INSERT INTO ordens_servico_funcionarios (ordem_servico_id, funcionario_id)
        VALUES ($1, $2)`,
       [ordemServicoId, funcionarioId],
     );
+    const result = await client.query<FuncionarioOs>('SELECT id, nome, matricula, cargo, status FROM funcionarios WHERE id = $1', [funcionarioId]);
+    await recordAudit({ actor, acao: 'CRIAR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico_funcionarios', entidadeId: `${ordemServicoId}:${funcionarioId}`, dadosPosteriores: { ordem_servico_id: ordemServicoId, funcionario_id: funcionarioId, ...auditItem(result.rows[0] as unknown as Record<string, unknown>) } }, client);
+    await client.query('COMMIT');
+    return result.rows[0]!;
   } catch (error) {
+    await client.query('ROLLBACK');
     if (isPostgresError(error) && error.code === '23505') {
       throw new OrdemServicoServiceError(409, 'O funcionário já está vinculado a esta OS.');
     }
@@ -284,19 +297,18 @@ export async function addFuncionarioOs(ordemServicoId: string, body: unknown): P
       throw new OrdemServicoServiceError(404, 'Ordem de Serviço ou funcionário não encontrado.');
     }
     throw error;
-  }
-  const result = await pool.query<FuncionarioOs>(
-    'SELECT id, nome, matricula, cargo, status FROM funcionarios WHERE id = $1',
-    [funcionarioId],
-  );
-  return result.rows[0]!;
+  } finally { client.release(); }
 }
 
 export async function removeFuncionarioOs(
   ordemServicoId: string,
   funcionarioId: string,
+  actor?: AuthenticatedRequestUser,
 ): Promise<void> {
-  const result = await pool.query(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query('SELECT ordem_servico_id, funcionario_id FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1 AND funcionario_id = $2 FOR UPDATE', [ordemServicoId, funcionarioId]);
+  const result = await client.query(
     `DELETE FROM ordens_servico_funcionarios
      WHERE ordem_servico_id = $1 AND funcionario_id = $2`,
     [ordemServicoId, funcionarioId],
@@ -304,6 +316,9 @@ export async function removeFuncionarioOs(
   if (result.rowCount === 0) {
     throw new OrdemServicoServiceError(404, 'Vínculo entre funcionário e OS não encontrado.');
   }
+  await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'ordens_servico_funcionarios', entidadeId: `${ordemServicoId}:${funcionarioId}`, dadosAnteriores: auditItem(before.rows[0]) }, client);
+  await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function listServicosOs(ordemServicoId: string): Promise<ServicoOs[]> {
@@ -311,7 +326,7 @@ export async function listServicosOs(ordemServicoId: string): Promise<ServicoOs[
   return rawServicos(ordemServicoId);
 }
 
-export async function createServicoOs(ordemServicoId: string, body: unknown): Promise<ServicoOs> {
+export async function createServicoOs(ordemServicoId: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<ServicoOs> {
   const fields = parseServico(body);
   const natureza = await getOrdemNatureza(ordemServicoId);
   if (natureza === 'MATERIAL') {
@@ -320,34 +335,42 @@ export async function createServicoOs(ordemServicoId: string, body: unknown): Pr
       'OS de natureza MATERIAL aceita somente produtos e não permite serviços.',
     );
   }
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
   const result = fields.classificacaoServico === undefined
-    ? await pool.query<ServicoOs>(
+    ? await client.query<ServicoOs>(
       `INSERT INTO servicos_os (ordem_servico_id, descricao, valor)
        VALUES ($1, $2, $3) RETURNING *`,
       [ordemServicoId, fields.descricao, fields.valor],
     )
-    : await pool.query<ServicoOs>(
+    : await client.query<ServicoOs>(
       `INSERT INTO servicos_os (
          ordem_servico_id, descricao, valor, classificacao_servico, classificacao_origem
        ) VALUES ($1, $2, $3, $4, 'MANUAL') RETURNING *`,
       [ordemServicoId, fields.descricao, fields.valor, fields.classificacaoServico],
     );
-  return result.rows[0]!;
+  await recordAudit({ actor, acao: 'CRIAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os', entidadeId: result.rows[0]!.id, dadosPosteriores: auditItem(result.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function updateServicoOs(
   ordemServicoId: string,
   servicoId: string,
   body: unknown,
+  actor?: AuthenticatedRequestUser,
 ): Promise<ServicoOs> {
   const fields = parseServico(body);
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ServicoOs>('SELECT * FROM servicos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [servicoId, ordemServicoId]);
   const result = fields.classificacaoServico === undefined
-    ? await pool.query<ServicoOs>(
+    ? await client.query<ServicoOs>(
       `UPDATE servicos_os SET descricao = $1, valor = $2
        WHERE id = $3 AND ordem_servico_id = $4 RETURNING *`,
       [fields.descricao, fields.valor, servicoId, ordemServicoId],
     )
-    : await pool.query<ServicoOs>(
+    : await client.query<ServicoOs>(
       `UPDATE servicos_os
           SET descricao = $1, valor = $2,
               classificacao_servico = $3::varchar,
@@ -362,17 +385,25 @@ export async function updateServicoOs(
   if (result.rows.length === 0) {
     throw new OrdemServicoServiceError(404, 'Serviço não encontrado nesta Ordem de Serviço.');
   }
-  return result.rows[0]!;
+  await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os', entidadeId: servicoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>), dadosPosteriores: auditItem(result.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function deleteServicoOs(ordemServicoId: string, servicoId: string): Promise<void> {
-  const result = await pool.query(
+export async function deleteServicoOs(ordemServicoId: string, servicoId: string, actor?: AuthenticatedRequestUser): Promise<void> {
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ServicoOs>('SELECT * FROM servicos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [servicoId, ordemServicoId]);
+  const result = await client.query(
     'DELETE FROM servicos_os WHERE id = $1 AND ordem_servico_id = $2',
     [servicoId, ordemServicoId],
   );
   if (result.rowCount === 0) {
     throw new OrdemServicoServiceError(404, 'Serviço não encontrado nesta Ordem de Serviço.');
   }
+  await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os', entidadeId: servicoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function listProdutosOs(ordemServicoId: string): Promise<ProdutoOs[]> {
@@ -380,10 +411,12 @@ export async function listProdutosOs(ordemServicoId: string): Promise<ProdutoOs[
   return rawProdutos(ordemServicoId);
 }
 
-export async function createProdutoOs(ordemServicoId: string, body: unknown): Promise<ProdutoOs> {
+export async function createProdutoOs(ordemServicoId: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<ProdutoOs> {
   const fields = parseProduto(body);
   await getOrdemNatureza(ordemServicoId);
-  const result = await pool.query<ProdutoOs>(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const result = await client.query<ProdutoOs>(
     `INSERT INTO produtos_os (
        ordem_servico_id, descricao, quantidade, unidade, valor_unitario
      ) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -395,16 +428,22 @@ export async function createProdutoOs(ordemServicoId: string, body: unknown): Pr
       fields.valor_unitario,
     ],
   );
-  return result.rows[0]!;
+  await recordAudit({ actor, acao: 'CRIAR', modulo: 'ORDENS_SERVICO', entidade: 'produtos_os', entidadeId: result.rows[0]!.id, dadosPosteriores: auditItem(result.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function updateProdutoOs(
   ordemServicoId: string,
   produtoId: string,
   body: unknown,
+  actor?: AuthenticatedRequestUser,
 ): Promise<ProdutoOs> {
   const fields = parseProduto(body);
-  const result = await pool.query<ProdutoOs>(
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ProdutoOs>('SELECT * FROM produtos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [produtoId, ordemServicoId]);
+  const result = await client.query<ProdutoOs>(
     `UPDATE produtos_os
      SET descricao = $1, quantidade = $2, unidade = $3, valor_unitario = $4
      WHERE id = $5 AND ordem_servico_id = $6 RETURNING *`,
@@ -420,17 +459,25 @@ export async function updateProdutoOs(
   if (result.rows.length === 0) {
     throw new OrdemServicoServiceError(404, 'Produto não encontrado nesta Ordem de Serviço.');
   }
-  return result.rows[0]!;
+  await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'produtos_os', entidadeId: produtoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>), dadosPosteriores: auditItem(result.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT'); return result.rows[0]!;
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function deleteProdutoOs(ordemServicoId: string, produtoId: string): Promise<void> {
-  const result = await pool.query(
+export async function deleteProdutoOs(ordemServicoId: string, produtoId: string, actor?: AuthenticatedRequestUser): Promise<void> {
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+  const before = await client.query<ProdutoOs>('SELECT * FROM produtos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [produtoId, ordemServicoId]);
+  const result = await client.query(
     'DELETE FROM produtos_os WHERE id = $1 AND ordem_servico_id = $2',
     [produtoId, ordemServicoId],
   );
   if (result.rowCount === 0) {
     throw new OrdemServicoServiceError(404, 'Produto não encontrado nesta Ordem de Serviço.');
   }
+  await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'produtos_os', entidadeId: produtoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>) }, client);
+  await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoDetalhes> {

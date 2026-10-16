@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import * as controller from '../controllers/frotas.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
 export const frotasRoutes = Router();
+frotasRoutes.use(requireMethodRole());
 frotasRoutes.get('/', controller.list);
 frotasRoutes.get('/:id', controller.get);
 frotasRoutes.post('/', controller.create);

@@ -1,5 +1,8 @@
 import { pool } from '../config/database.js';
 import { normalizeSearchText } from '../utils/text.js';
+import type { Pool, PoolClient } from 'pg';
+
+type ObraIdentifierExecutor = Pool | PoolClient;
 
 /** O importador Poli/Vega atual usa o vocabulário Vega para a origem externa. */
 export const VEGA_OBRA_ORIGIN = 'VEGA';
@@ -52,11 +55,12 @@ export async function createExternalObraIdentifier(
   obraId: string,
   origem: string,
   identificador: string,
+  executor: ObraIdentifierExecutor = pool,
 ): Promise<ExternalObraIdentifier> {
   const normalizedOrigin = normalizeExternalObraOrigin(origem);
   const normalizedIdentifier = normalizeExternalObraIdentifier(identificador);
   if (!normalizedOrigin || !normalizedIdentifier) throw new Error('Origem e identificador externo da obra são obrigatórios.');
-  const inserted = await pool.query<ExternalObraIdentifier>(
+  const inserted = await executor.query<ExternalObraIdentifier>(
     `INSERT INTO obra_identificadores_externos(obra_id,origem,identificador,identificador_normalizado)
      VALUES($1,$2,$3,$4)
      ON CONFLICT (origem,identificador_normalizado) DO NOTHING
@@ -64,7 +68,7 @@ export async function createExternalObraIdentifier(
     [obraId, normalizedOrigin, identificador.trim(), normalizedIdentifier],
   );
   if (inserted.rows[0]) return inserted.rows[0];
-  const existing = (await pool.query<ExternalObraIdentifier>(
+  const existing = (await executor.query<ExternalObraIdentifier>(
     `SELECT id,obra_id,origem,identificador,identificador_normalizado
        FROM obra_identificadores_externos
       WHERE origem=$1 AND identificador_normalizado=$2`,

@@ -15,6 +15,7 @@
     "check:frotas": "tsc -p database/tsconfig.json",
     "test:frotas:cli": "tsx --test database/tests/frotas.cli.test.ts",
     "test:imports": "tsx --test test/poli-os.test.ts",
+    "test:poli-categorization": "tsx --test test/poli-item-categorization.test.ts",
     "diagnose:os": "tsx scripts/diagnostico-poli-os.ts",
     "reconcile:monthly": "tsx scripts/reconcile-monthly.ts",
     "reconcile:monthly:l62": "tsx scripts/reconcile-monthly-l62.ts",
@@ -23,14 +24,18 @@
     "clean:test-data": "tsx scripts/clean-test-data.ts"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
-    "multer": "^2.0.2",
+    "multer": "^2.4.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.16.3",
     "xlsx": "^0.18.5"
+  },
+  "overrides": {
+    "proxy-addr": "2.0.8"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

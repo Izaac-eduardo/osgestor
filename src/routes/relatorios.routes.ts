@@ -16,8 +16,11 @@ import {
   osPorSemanaController,
   resumoController,
 } from '../controllers/relatorios.controller.js';
+import { requireMethodRole } from '../middleware/authorization.js';
+import { terceirosCategoriaItensController, terceirosCategoriasController } from '../controllers/terceiros-categorias.controller.js';
 
 export const relatoriosRoutes = Router();
+relatoriosRoutes.use(requireMethodRole());
 
 relatoriosRoutes.get('/gastos-por-veiculo/pdf', gastosPorVeiculoPdfController);
 relatoriosRoutes.get('/gastos-por-obra/pdf', gastosPorObraPdfController);
@@ -32,3 +35,5 @@ relatoriosRoutes.get('/gastos-por-veiculo', gastosPorVeiculoController);
 relatoriosRoutes.get('/gastos-por-obra', gastosPorObraController);
 relatoriosRoutes.get('/os-por-semana', osPorSemanaController);
 relatoriosRoutes.get('/resumo', resumoController);
+relatoriosRoutes.get('/terceiros-categorias', terceirosCategoriasController);
+relatoriosRoutes.get('/terceiros-categorias/:categoria/itens', terceirosCategoriaItensController);
