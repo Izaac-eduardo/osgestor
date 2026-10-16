@@ -97,7 +97,20 @@ export async function analyze(request: Request, response: Response): Promise<voi
     for (const item of items) item.importacaoId = token;
     await savePreview(token, metadata, items, request.authUser, recoveredResolutions);
     response.status(200).json({ token, filename, total: items.length, counts: { prontas: items.filter(x=>x.statusPreview==='PRONTA').length, revisao: items.filter(x=>x.statusPreview==='REQUER_REVISAO').length, jaCadastradas: items.filter(x=>x.statusPreview==='JA_CADASTRADA').length }, items });
-  } catch (error) { response.status(400).json({ message: error instanceof Error ? error.message : 'Não foi possível analisar o arquivo.' }); }
+  } catch (error) {
+    const databaseCode = typeof error === 'object' && error !== null && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+    const schemaError = databaseCode === '42P01';
+    const message = schemaError
+      ? 'O banco não possui todas as estruturas necessárias para analisar importações. Verifique as migrations pendentes; nenhuma migration foi executada automaticamente.'
+      : error instanceof Error ? error.message : 'Não foi possível analisar o arquivo.';
+    console.error('Falha ao analisar importação de O.S.', {
+      code: databaseCode ?? 'IMPORT_ANALYSIS_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    response.status(400).json({ code: schemaError ? 'SCHEMA_INCOMPATIBLE' : 'IMPORT_ANALYSIS_FAILED', message });
+  }
 }
 export async function getPreview(request: Request, response: Response): Promise<void> {
   const items = await loadPreview(tokenOf(request));

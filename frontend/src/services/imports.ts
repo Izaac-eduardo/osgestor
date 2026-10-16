@@ -9,6 +9,8 @@ import type {
 } from "../types/imports";
 const friendlyPreviewError = (error: unknown): never => {
   if (axios.isAxiosError(error)) {
+    if (typeof error.response?.data?.message === "string")
+      throw new Error(error.response.data.message);
     if (error.response?.status === 404)
       throw new Error(
         "A prévia desta importação expirou ou não está mais disponível. Analise o arquivo novamente.",
@@ -24,8 +26,12 @@ const friendlyPreviewError = (error: unknown): never => {
 export async function analyzeImport(file: File) {
   const form = new FormData();
   form.append("arquivo", file);
-  return (await api.post<ImportAnalysis>("/importacoes-os/analisar", form))
-    .data;
+  try {
+    return (await api.post<ImportAnalysis>("/importacoes-os/analisar", form))
+      .data;
+  } catch (error) {
+    return friendlyPreviewError(error);
+  }
 }
 export async function getImportPreview(token: string) {
   try {

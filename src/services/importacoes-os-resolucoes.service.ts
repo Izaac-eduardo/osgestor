@@ -17,6 +17,12 @@ type StoredResolution = {
   created_at: string;
 };
 
+const isUndefinedTable = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error
+    && (error as { code?: unknown }).code === '42P01';
+
+const manualResolutionSchemaMessage = 'A tabela de resoluções manuais da importação não está disponível. A migration 033 ainda precisa ser aplicada em um banco autorizado.';
+
 export const normalizeResolutionIdentifier = (campo: ResolutionField, value: string | null | undefined): string =>
   campo === 'frotaId' ? normalizeFleetCode(value ?? '') : normalizeSearchText(String(value ?? '').trim());
 
@@ -31,13 +37,19 @@ export async function recoverManualResolutions(
   metadata: PoliImport,
   token: string,
 ): Promise<number> {
-  const result = await pool.query<StoredResolution>(
-    `SELECT numero_os, campo, identificador_original, identificador_normalizado, valor_selecionado,
-            decidido_por, created_at
-       FROM importacoes_os_resolucoes_manuais
-      WHERE origem_sistema=$1 AND hash_arquivo=$2 AND decisao='APROVAR'`,
-    [metadata.origemSistema, metadata.hashArquivo],
-  );
+  let result: { rows: StoredResolution[] };
+  try {
+    result = await pool.query<StoredResolution>(
+      `SELECT numero_os, campo, identificador_original, identificador_normalizado, valor_selecionado,
+              decidido_por, created_at
+         FROM importacoes_os_resolucoes_manuais
+        WHERE origem_sistema=$1 AND hash_arquivo=$2 AND decisao='APROVAR'`,
+      [metadata.origemSistema, metadata.hashArquivo],
+    );
+  } catch (error) {
+    if (isUndefinedTable(error)) return 0;
+    throw error;
+  }
   let recovered = 0;
   for (const item of items) {
     const candidates: Array<{ campo: ResolutionField; original: string | null | undefined }> = [
@@ -86,12 +98,18 @@ export async function persistManualResolutions(
     const original = resolution.identificadorOriginal;
     const normalized = normalizeResolutionIdentifier(resolution.campo, original);
     if (!normalized) continue;
-    const existing = await client.query<{ valor_selecionado: string }>(
-      `SELECT valor_selecionado FROM importacoes_os_resolucoes_manuais
-        WHERE origem_sistema=$1 AND hash_arquivo=$2 AND numero_os=$3 AND campo=$4 AND identificador_normalizado=$5
-        FOR UPDATE`,
-      [metadata.origemSistema, metadata.hashArquivo, item.numeroOs, resolution.campo, normalized],
-    );
+    let existing: { rowCount: number | null; rows: Array<{ valor_selecionado: string }> };
+    try {
+      existing = await client.query<{ valor_selecionado: string }>(
+        `SELECT valor_selecionado FROM importacoes_os_resolucoes_manuais
+          WHERE origem_sistema=$1 AND hash_arquivo=$2 AND numero_os=$3 AND campo=$4 AND identificador_normalizado=$5
+          FOR UPDATE`,
+        [metadata.origemSistema, metadata.hashArquivo, item.numeroOs, resolution.campo, normalized],
+      );
+    } catch (error) {
+      if (isUndefinedTable(error)) throw new Error(manualResolutionSchemaMessage);
+      throw error;
+    }
     if (existing.rowCount && existing.rows[0]!.valor_selecionado !== resolution.valorSelecionado) {
       throw new Error(`Já existe uma resolução manual diferente para a O.S. ${item.numeroOs}.`);
     }
