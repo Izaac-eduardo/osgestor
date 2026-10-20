@@ -1,8 +1,10 @@
 import axios from 'axios'
+import { demoAdapter } from './demo-data'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
 
-export const api = axios.create({baseURL:configuredApiUrl || undefined,withCredentials:true,headers:{'Content-Type':'application/json'}})
+export const isDemoMode = import.meta.env.MODE === 'demo'
+export const api = axios.create({baseURL: isDemoMode ? undefined : (configuredApiUrl || undefined),withCredentials:true,headers:{'Content-Type':'application/json'}, ...(isDemoMode ? { adapter: demoAdapter } : {})})
 api.interceptors.request.use(config=>{
   if(config.data instanceof FormData) config.headers.delete('Content-Type')
   return config

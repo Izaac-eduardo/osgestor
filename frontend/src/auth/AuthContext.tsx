@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import axios from 'axios'
-import { api } from '../services/api'
+import { api, isDemoMode } from '../services/api'
 
 export type AuthRole = 'ADMIN' | 'OPERADOR' | 'GESTOR'
 export type AuthUser = { id: string; username: string; email: string; role: AuthRole; status: 'ATIVO' | 'INATIVO'; must_change_password: boolean }
@@ -30,11 +30,13 @@ function message(error: unknown, fallback: string): string {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  const demoUser: AuthUser = { id: 'demo-user', username: 'Visitante', email: 'demo@osgestor.local', role: 'ADMIN', status: 'ATIVO', must_change_password: false }
+  const [user, setUser] = useState<AuthUser | null>(isDemoMode ? demoUser : null)
+  const [loading, setLoading] = useState(!isDemoMode)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (isDemoMode) { setUser(demoUser); return demoUser }
     try {
       const response = await api.get<{ user: AuthUser }>('/auth/me')
       setUser(response.data.user)
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const login = useCallback(async (username: string, password: string) => {
+    if (isDemoMode) { if (!username.trim() || !password) throw new Error('Informe os dados de acesso demonstrativo.'); setUser(demoUser); return demoUser }
     setError(null)
     try {
       const response = await api.post<{ user: AuthUser }>('/auth/login', { username, password })
@@ -68,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    if (isDemoMode) { setUser(null); return }
     setError(null)
     try { await api.post('/auth/logout') } finally { setUser(null) }
   }, [])

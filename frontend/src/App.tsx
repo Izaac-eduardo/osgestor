@@ -20,6 +20,7 @@ import { LoginPage } from './pages/LoginPage'
 import { PasswordChangeRoute, ProtectedRoute, PublicRoute } from './components/RouteGuards'
 import { AdminUsersPage } from './pages/AdminUsersPage'
 import { AdminRoute } from './components/AdminRoute'
+import { isDemoMode } from './services/api'
 
 export default function App() {
   return <Routes>
@@ -28,6 +29,7 @@ export default function App() {
     <Route element={<ProtectedRoute />}>
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
+        {isDemoMode && <Route path="dashboard" element={<DashboardPage />} />}
         <Route path="ordens-servico" element={<OrdensServicoPage />} />
         <Route path="obras" element={<ObrasPage />} />
         <Route path="funcionarios" element={<FuncionariosPage />} />
@@ -44,6 +46,7 @@ export default function App() {
         <Route path="abastecimentos/destinacoes-especiais" element={<AbastecimentosEspeciaisPage />} />
         <Route path="abastecimentos/importar-polifrota" element={<AbastecimentosImportarPoliFrotaPage />} />
         <Route element={<AdminRoute />}><Route path="admin/usuarios" element={<AdminUsersPage />} /></Route>
+        {isDemoMode && <Route element={<AdminRoute />}><Route path="usuarios" element={<AdminUsersPage />} /></Route>}
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>

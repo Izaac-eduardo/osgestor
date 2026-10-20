@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { useAuth } from '../auth/AuthContext'
+import { isDemoMode } from '../services/api'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
@@ -26,6 +27,7 @@ export function AppLayout() {
     <div className="app-shell" data-auth-role={user?.role}>
       <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => void logout()} />
       <div className="app-shell__main">
+        {isDemoMode && <div className="demo-banner" role="status">Versão Demonstrativa · dados fictícios</div>}
         <main className="page-content">
           <Outlet />
         </main>

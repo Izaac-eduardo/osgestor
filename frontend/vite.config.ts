@@ -2,7 +2,7 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
@@ -11,7 +11,7 @@ export default defineConfig({
       origin: ['http://localhost:5173', 'http://192.168.53.100:5173'],
       credentials: true,
     },
-    proxy: {
+    proxy: mode === 'demo' ? undefined : {
       '/auth': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
       '/admin': 'http://localhost:3000',
@@ -27,4 +27,4 @@ export default defineConfig({
       '/abastecimento': 'http://localhost:3000',
     },
   },
-})
+}))
