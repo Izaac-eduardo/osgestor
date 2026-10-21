@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
+import { Header } from '../components/Header'
 import { useAuth } from '../auth/AuthContext'
 import { isDemoMode } from '../services/api'
+import { getPageTitle } from '../utils/pageTitles'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -28,6 +31,7 @@ export function AppLayout() {
       <Sidebar open={open} onClose={() => setOpen(false)} user={user} onLogout={() => void logout()} />
       <div className="app-shell__main">
         {isDemoMode && <div className="demo-banner" role="status">Versão Demonstrativa · dados fictícios</div>}
+        <Header title={getPageTitle(location.pathname)} onOpenMenu={() => setOpen(true)} />
         <main className="page-content">
           <Outlet />
         </main>
