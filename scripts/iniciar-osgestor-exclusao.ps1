@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$RealRoot = 'C:\Users\User\Documents\osgestor-main-exclusao'
+$RealRoot = 'C:\Users\User\Documents\osgestor'
 $FrontendRoot = Join-Path $RealRoot 'frontend'
 $LogRoot = 'C:\Users\User\Documents\osgestor-logs'
 $BackendPort = 3000
