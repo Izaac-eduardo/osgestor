@@ -17,11 +17,17 @@ type P = {
 export function ConfirmDialog(p: P) {
   const { busy, onCancel } = p
   const cancel = useRef<HTMLButtonElement>(null)
+  const busyRef = useRef(busy)
+  const onCancelRef = useRef(onCancel)
+  useEffect(() => {
+    busyRef.current = busy
+    onCancelRef.current = onCancel
+  }, [busy, onCancel])
   useEffect(() => {
     cancel.current?.focus()
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onCancel()
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && !busyRef.current && onCancelRef.current()
     document.addEventListener('keydown', key)
     return () => document.removeEventListener('keydown', key)
-  }, [busy, onCancel])
+  }, [])
   return <div className="nested-backdrop"><section aria-labelledby="confirm-title" aria-modal="true" className="confirm-dialog" role="dialog"><h3 id="confirm-title">{p.title}</h3><p>{p.message}</p>{p.details}{p.error && <p className="form-api-error" role="alert">{p.error}</p>}<footer><button className="button button--secondary" disabled={busy} onClick={onCancel} ref={cancel}>Cancelar</button><button className="button button--danger" disabled={busy || p.confirmDisabled} onClick={p.onConfirm}>{busy ? <><LoaderCircle className="spin" size={16} />{p.busyLabel || 'Removendo...'}</> : p.confirmLabel || 'Confirmar'}</button></footer></section></div>
 }
