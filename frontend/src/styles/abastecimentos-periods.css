@@ -1,0 +1,4 @@
+.abastecimento-filters__header{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.abastecimento-filters__header .dashboard-period-presets{display:flex;flex-wrap:wrap;gap:.45rem}
+.abastecimento-filters__header .dashboard-period-presets .button{min-height:36px}
+@media(max-width:760px){.abastecimento-filters__header{align-items:flex-start;flex-direction:column}.abastecimento-filters__header .dashboard-period-presets{width:100%}.abastecimento-filters__header .dashboard-period-presets .button{flex:1}}

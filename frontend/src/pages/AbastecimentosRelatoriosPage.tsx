@@ -25,6 +25,8 @@ import type {
 } from "../types/abastecimentos";
 import type { Project } from "../types/projects";
 import { formatCurrency, formatQuantity } from "../utils/formatters";
+import { activeAbastecimentoPeriod, abastecimentoPeriod, type AbastecimentoPeriodPreset } from "../utils/abastecimentos-periods";
+import "../styles/abastecimentos-periods.css";
 
 const products = [
   { value: "", label: "Todos" },
@@ -55,8 +57,7 @@ const errorMessage = (error: unknown) =>
 
 export function AbastecimentosRelatoriosPage() {
   const [filters, setFilters] = useState<ReportFilters>({
-    data_inicio: "",
-    data_fim: "",
+    ...abastecimentoPeriod("15days"),
     obra_id: "",
     produto: "",
     tipo_destinatario: "",
@@ -93,14 +94,18 @@ export function AbastecimentosRelatoriosPage() {
   }, []);
   const update = (key: keyof ReportFilters, value: string) =>
     setFilters((current) => ({ ...current, [key]: value }));
+  const applyPeriod = (preset: AbastecimentoPeriodPreset) => {
+    const next = { ...filters, ...abastecimentoPeriod(preset) };
+    setFilters(next);
+    void load(next);
+  };
   const apply = (event: FormEvent) => {
     event.preventDefault();
     void load(filters);
   };
   const clear = () => {
     const next: ReportFilters = {
-      data_inicio: "",
-      data_fim: "",
+      ...abastecimentoPeriod("15days"),
       obra_id: "",
       produto: "",
       tipo_destinatario: "",
@@ -119,7 +124,7 @@ export function AbastecimentosRelatoriosPage() {
           : { terceiro_id: next.id };
     setDrilldown({
       ...next,
-      filters: { ...detailFilters(filters), ...entityFilter },
+      filters: { ...detailFilters(appliedFilters), ...entityFilter },
     });
   };
 
@@ -142,9 +147,24 @@ export function AbastecimentosRelatoriosPage() {
         className="orders-filters abastecimento-filters relatorios-abastecimento-filters"
         onSubmit={apply}
       >
-        <header>
-          <h2>Filtros</h2>
-          <p>Todos os indicadores e rankings respeitam os filtros aplicados.</p>
+        <header className="abastecimento-filters__header">
+          <div>
+            <h2>Filtros</h2>
+            <p>Todos os indicadores e rankings respeitam os filtros aplicados.</p>
+          </div>
+          <div className="dashboard-period-presets" role="group" aria-label="Atalhos de período">
+            {([['week', '1 semana'], ['15days', '15 dias'], ['month', 'Mensal']] as [AbastecimentoPeriodPreset, string][]).map(([preset, label]) => (
+              <button
+                key={preset}
+                className={`button ${activeAbastecimentoPeriod(filters) === preset ? 'button--primary' : 'button--secondary'}`}
+                aria-pressed={activeAbastecimentoPeriod(filters) === preset}
+                type="button"
+                onClick={() => applyPeriod(preset)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </header>
         <div className="orders-filters__grid">
           <label>
@@ -235,9 +255,9 @@ export function AbastecimentosRelatoriosPage() {
         report && (
           <ReportContent
             report={report}
-            periodo={filters.periodo}
+            periodo={appliedFilters.periodo}
             onPeriodoChange={(periodo) => {
-              const next = { ...filters, periodo };
+              const next = { ...appliedFilters, periodo };
               setFilters(next);
               void load(next);
             }}
