@@ -1,0 +1,7 @@
+.historico-actions{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+.historico-actions .button{display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap}
+.confirm-dialog__details{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .75rem;margin:0 0 1rem;padding:.75rem;background:#f8fafb;border:1px solid var(--border);border-radius:.45rem;font-size:.8rem}
+.confirm-dialog__details dt{color:var(--muted);font-weight:650}
+.confirm-dialog__details dd{margin:0;color:var(--text);overflow-wrap:anywhere}
+.confirm-dialog__reason{display:grid;gap:.35rem;margin-bottom:1rem;font-weight:650}
+.confirm-dialog__reason textarea{width:100%;min-height:5rem;resize:vertical;padding:.6rem;border:1px solid var(--border);border-radius:.45rem;font:inherit;font-weight:400;color:var(--text);background:#fff}

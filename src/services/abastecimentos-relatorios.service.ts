@@ -17,7 +17,7 @@ const bind = (values: string[], value: string): string => { values.push(value); 
 const from = `FROM abastecimentos a JOIN abastecimento_produtos p ON p.id=a.produto_id JOIN obras o ON o.id=a.obra_id LEFT JOIN frotas f ON f.id=a.frota_id LEFT JOIN abastecimento_terceiros t ON t.id=a.terceiro_id LEFT JOIN abastecimento_destinacoes_especiais d ON d.id=a.destinacao_especial_id`;
 
 function where(filters: RelatorioAbastecimentosFilters, values: string[]): string {
-  const conditions: string[] = [];
+  const conditions: string[] = ['a.excluido_at IS NULL'];
   const start = date(filters.data_inicio, 'data_inicio'); const end = date(filters.data_fim, 'data_fim');
   if (start) conditions.push(`a.data_hora >= ${bind(values, `${start}T00:00:00`)}`);
   if (end) conditions.push(`a.data_hora < (${bind(values, `${end}T00:00:00`)}::timestamp + interval '1 day')`);

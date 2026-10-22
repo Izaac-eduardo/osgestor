@@ -18,6 +18,7 @@ export async function updateAbastecimentoHistorico(id: string, body: unknown, ac
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (await get(client, 'SELECT id FROM abastecimentos WHERE id=$1 AND excluido_at IS NOT NULL FOR UPDATE', [abastecimentoId])) throw new AbastecimentoServiceError(409, 'Abastecimento excluído não pode ser editado.');
     const current = await get(client, 'SELECT * FROM abastecimentos WHERE id=$1 FOR UPDATE', [abastecimentoId]); if (!current) throw new AbastecimentoServiceError(404, 'Abastecimento não encontrado.');
     const tipo = body.tipo_destinatario; if (!recipientTypes.includes(tipo as typeof recipientTypes[number])) throw new AbastecimentoServiceError(400, 'tipo_destinatario inválido.');
     const produtoId = assertUuid(body.produto_id, 'produto_id'); const obraId = assertUuid(body.obra_id, 'obra_id');

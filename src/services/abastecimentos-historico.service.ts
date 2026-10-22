@@ -40,7 +40,7 @@ const limitValue = (value: string | undefined): number => {
 const bindValue = (values: string[], value: string): string => { values.push(value); return `$${values.length}`; };
 
 function buildWhere(filters: HistoricoFilters, values: string[]): string {
-  const conditions: string[] = [];
+  const conditions: string[] = ['a.excluido_at IS NULL'];
   const start = date(filters.data_inicio, 'data_inicio');
   const end = date(filters.data_fim, 'data_fim');
   if (start) conditions.push(`a.data_hora >= ${bindValue(values, `${start}T00:00:00`)}`);
@@ -76,7 +76,7 @@ export async function listAbastecimentosHistoricoBicos(): Promise<string[]> {
     FROM (
       SELECT btrim(bico_codigo_original) AS codigo
       FROM abastecimentos
-      WHERE bico_codigo_original IS NOT NULL AND btrim(bico_codigo_original) <> ''
+      WHERE excluido_at IS NULL AND bico_codigo_original IS NOT NULL AND btrim(bico_codigo_original) <> ''
       UNION
       SELECT b.codigo
       FROM abastecimento_bicos b

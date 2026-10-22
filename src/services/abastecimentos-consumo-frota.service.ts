@@ -84,7 +84,7 @@ const inRange = (row: SourceRow, start?: string, end?: string): boolean => {
 };
 
 function buildWhere(filters: ConsumoFrotaFilters, values: string[]): string {
-  const conditions = ["a.tipo_destinatario = 'FROTA'", "p.tipo = 'DIESEL'"];
+  const conditions = ['a.excluido_at IS NULL', "a.tipo_destinatario = 'FROTA'", "p.tipo = 'DIESEL'"];
   const bind = (value: string): string => { values.push(value); return `$${values.length}`; };
   if (filters.frota_id) conditions.push(`a.frota_id = ${bind(assertUuid(filters.frota_id, 'frota_id'))}`);
   if (filters.produto) conditions.push(`p.codigo = ${bind(filters.produto.trim().toUpperCase())}`);

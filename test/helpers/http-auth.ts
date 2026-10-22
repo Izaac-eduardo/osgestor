@@ -8,7 +8,7 @@ const password = 'Senha HTTP PoliFrota 2026!';
 
 export async function authenticateHttpFixture(base: string): Promise<{ cookie: string; cleanup: () => Promise<void> }> {
   const database = await pool.query<{ current_database: string }>('SELECT current_database()');
-  assert.equal(database.rows[0]?.current_database, 'oficina_test');
+  assert.equal(database.rows[0]?.current_database, 'oficina_teste_fase051');
   const username = `${prefix}_admin`;
   const passwordHash = await hashPassword(password);
   const user = (await pool.query<{ id: string }>(

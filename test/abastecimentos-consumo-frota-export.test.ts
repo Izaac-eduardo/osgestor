@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { app } from '../src/app.js';
 import { pool } from '../src/config/database.js';
 import { testCatalog } from './support/fixtures.js';
+import { authenticateHttpFixture, httpHeaders } from './helpers/http-auth.js';
 
 test('exportação de consumo usa dataset completo, filtros e valores numéricos auditáveis', async () => {
   const catalog = await testCatalog();
@@ -36,13 +37,15 @@ test('exportação de consumo usa dataset completo, filtros e valores numéricos
   await insert('CONSUMO-EXPORT-HR-FINAL', '2028-01-02 08:00', s10.id, hourFleet, 30, 0, 15);
 
   let server: ReturnType<typeof app.listen> | null = null;
+  let auth: Awaited<ReturnType<typeof authenticateHttpFixture>> | undefined;
   try {
     server = app.listen(0);
     const address = server.address();
     assert.ok(address && typeof address === 'object');
     const base = `http://127.0.0.1:${address.port}`;
-    const request = async (path: string) => fetch(`${base}${path}`);
-    const xlsx = await request('/abastecimento/relatorios/consumo-frota/excel?produto=DIESEL_S500&page=2&limit=25');
+    auth = await authenticateHttpFixture(base);
+    const request = async (path: string) => fetch(`${base}${path}`, { headers: httpHeaders(auth.cookie) });
+    const xlsx = await request('/abastecimento/relatorios/consumo-frota/excel?produto=DIESEL_S500&data_inicio=2028-01-01&data_fim=2028-01-02&page=2&limit=25');
     assert.equal(xlsx.status, 200);
     assert.match(xlsx.headers.get('content-type') ?? '', /spreadsheetml/);
     assert.match(xlsx.headers.get('content-disposition') ?? '', /relatorio-consumo-frota/);
@@ -54,7 +57,7 @@ test('exportação de consumo usa dataset completo, filtros e valores numéricos
     assert.equal(header.getCell(1).value, 'Frota');
     const exportedRows: ExcelJS.Row[] = [];
     consumption.eachRow((row, rowNumber) => { if (rowNumber > 10 && row.getCell(1).value) exportedRows.push(row); });
-    const paged = await (await request('/abastecimento/relatorios/consumo-frota?produto=DIESEL_S500')).json() as { pagination: { total: number } };
+    const paged = await (await request('/abastecimento/relatorios/consumo-frota?produto=DIESEL_S500&data_inicio=2028-01-01&data_fim=2028-01-02')).json() as { pagination: { total: number } };
     assert.ok(paged.pagination.total >= 27);
     assert.equal(exportedRows.length, paged.pagination.total);
     const validRow = exportedRows.find(row => row.getCell(1).value === 'CONS-EXPORT-01')!;
@@ -90,13 +93,14 @@ test('exportação de consumo usa dataset completo, filtros e valores numéricos
     const calculatedBook = new ExcelJS.Workbook(); await calculatedBook.xlsx.load(await calculated.arrayBuffer());
     const calculatedRows = calculatedBook.getWorksheet('Consumo por Frota')!.getRows(11, 1);
     assert.equal(calculatedRows[0]!.getCell(1).value, 'CONS-EXPORT-01');
-    const hours = await request('/abastecimento/relatorios/consumo-frota/excel?produto=DIESEL_S10&tipo_calculo=L_H');
+    const hours = await request('/abastecimento/relatorios/consumo-frota/excel?produto=DIESEL_S10&data_inicio=2028-01-01&data_fim=2028-01-02&tipo_calculo=L_H');
     const hoursBook = new ExcelJS.Workbook(); await hoursBook.xlsx.load(await hours.arrayBuffer());
     const hourRow = hoursBook.getWorksheet('Consumo por Frota')!.getRows(11, hoursBook.getWorksheet('Consumo por Frota')!.rowCount).find(row => row.getCell(1).value === 'CONS-EXPORT-HR')!;
     assert.equal(hourRow.getCell(8).value, 6);
     assert.equal(hourRow.getCell(9).value, 'L/h');
   } finally {
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (auth) await auth.cleanup();
     await pool.query('DELETE FROM abastecimentos WHERE id=ANY($1::uuid[])', [ids]);
     await pool.query('DELETE FROM frotas WHERE id=ANY($1::uuid[])', [fleetIds]);
   }

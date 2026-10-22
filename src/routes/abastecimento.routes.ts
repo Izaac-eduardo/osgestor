@@ -4,13 +4,14 @@ import { listAbastecimentosHistoricoBicosController, listAbastecimentosHistorico
 import { getRelatorioAbastecimentosController } from '../controllers/abastecimentos-relatorios.controller.js';
 import { getRelatorioEntradasController } from '../controllers/abastecimentos-entradas-relatorio.controller.js';
 import { updateAbastecimentoHistoricoController } from '../controllers/abastecimentos-historico-edit.controller.js';
+import { deleteAbastecimentoHistoricoController } from '../controllers/abastecimentos-historico-delete.controller.js';
 import { exportAbastecimentosExcelController, exportAbastecimentosPdfController, exportEntradasExcelController, exportEntradasPdfController } from '../controllers/abastecimentos-export.controller.js';
 import { getConsumoFrotaController } from '../controllers/abastecimentos-consumo-frota.controller.js';
 import { exportConsumoFrotaExcelController, exportConsumoFrotaPdfController } from '../controllers/abastecimentos-export.controller.js';
 import * as frotasTerceiras from '../controllers/abastecimentos-frotas-terceiras.controller.js';
 import { createAbastecimentoManualController } from '../controllers/abastecimentos-manual.controller.js';
 import * as frotaDireta from '../controllers/abastecimentos-entrada-frota-direta.controller.js';
-import { requireMethodRole } from '../middleware/authorization.js';
+import { requireMethodRole, requireRole } from '../middleware/authorization.js';
 
 export const abastecimentoRoutes = Router();
 abastecimentoRoutes.use(requireMethodRole());
@@ -22,6 +23,7 @@ abastecimentoRoutes.get('/entradas/destinos/:destinoId/abastecimentos-candidatos
 abastecimentoRoutes.post('/entradas/destinos/:destinoId/vincular-abastecimento', frotaDireta.link);
 abastecimentoRoutes.get('/historico/bicos', listAbastecimentosHistoricoBicosController);
 abastecimentoRoutes.patch('/historico/:id', updateAbastecimentoHistoricoController);
+abastecimentoRoutes.delete('/historico/:id', requireRole('ADMIN'), deleteAbastecimentoHistoricoController);
 abastecimentoRoutes.get('/relatorios', getRelatorioAbastecimentosController);
 abastecimentoRoutes.get('/relatorios/entradas', getRelatorioEntradasController);
 abastecimentoRoutes.get('/relatorios/consumo-frota', getConsumoFrotaController);

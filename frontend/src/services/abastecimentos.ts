@@ -188,6 +188,8 @@ export const updateAbastecimentoHistorico = async (
   id: string,
   payload: AbastecimentoHistoricoEditPayload,
 ) => (await api.patch(`/abastecimento/historico/${id}`, payload)).data;
+export const deleteAbastecimentoHistorico = async (id: string, motivo: string) =>
+  (await api.delete(`/abastecimento/historico/${id}`, { data: { motivo } })).data;
 export const getRelatorioAbastecimentos = async (
   params: AbastecimentoHistoricoFilters,
 ) =>

@@ -155,7 +155,7 @@ const abastecimentoWhere = (
   filters: RelatorioAbastecimentosFilters,
   values: string[],
 ): string => {
-  const conditions: string[] = [];
+  const conditions: string[] = ['a.excluido_at IS NULL'];
   const bind = (value: string): string => {
     values.push(value);
     return `$${values.length}`;

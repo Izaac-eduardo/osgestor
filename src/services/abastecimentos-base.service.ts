@@ -22,7 +22,7 @@ type DecimalInput = string | number;
 type ProductRow = { id: string; codigo: string; nome: string; tipo: string; permite_entrada: boolean; permite_distribuicao: boolean; permite_abastecimento: boolean; status: AbastecimentoStatus };
 
 export class AbastecimentoServiceError extends Error {
-  constructor(public readonly statusCode: 400 | 404 | 409 | 500, message: string) { super(message); this.name = 'AbastecimentoServiceError'; }
+  constructor(public readonly statusCode: 400 | 403 | 404 | 409 | 500, message: string) { super(message); this.name = 'AbastecimentoServiceError'; }
 }
 
 const isRecord = (value: unknown): value is RecordValue => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -209,11 +209,11 @@ const validateDestinos = async (db: PoolClient, product: ProductRow, destinos: D
     if(fleets.some(fleet=>fleet.status !== 'ATIVO'))throw new AbastecimentoServiceError(400,'Não é possível destinar para frota inativa.');
   }
 };
-const destinationRows = async (db: typeof pool | PoolClient, entryId: string) => (await db.query(`SELECT d.id,d.tipo_destino,d.ponto_id,d.frota_id,d.litros,d.observacoes,p.codigo AS ponto_codigo,p.nome AS ponto_nome,f.codigo AS frota_codigo,a.id AS abastecimento_id,a.identificador_externo AS abastecimento_identificador FROM abastecimento_entrada_destinos d LEFT JOIN abastecimento_pontos p ON p.id=d.ponto_id LEFT JOIN frotas f ON f.id=d.frota_id LEFT JOIN abastecimentos a ON a.entrada_destino_id=d.id WHERE d.entrada_id=$1 ORDER BY d.created_at,d.id`,[entryId])).rows.map(row=>({...row,litros:numberValue(row.litros,'destinos.litros'),abastecimento:row.abastecimento_id ? { id: row.abastecimento_id, identificador_externo: row.abastecimento_identificador } : null}));
+const destinationRows = async (db: typeof pool | PoolClient, entryId: string) => (await db.query(`SELECT d.id,d.tipo_destino,d.ponto_id,d.frota_id,d.litros,d.observacoes,p.codigo AS ponto_codigo,p.nome AS ponto_nome,f.codigo AS frota_codigo,a.id AS abastecimento_id,a.identificador_externo AS abastecimento_identificador FROM abastecimento_entrada_destinos d LEFT JOIN abastecimento_pontos p ON p.id=d.ponto_id LEFT JOIN frotas f ON f.id=d.frota_id LEFT JOIN abastecimentos a ON a.entrada_destino_id=d.id AND a.excluido_at IS NULL WHERE d.entrada_id=$1 ORDER BY d.created_at,d.id`,[entryId])).rows.map(row=>({...row,litros:numberValue(row.litros,'destinos.litros'),abastecimento:row.abastecimento_id ? { id: row.abastecimento_id, identificador_externo: row.abastecimento_identificador } : null}));
 const destinationRowsBatch = async (db: typeof pool | PoolClient, entryIds: string[]) => {
   const grouped = new Map<string, Array<RecordValue & { litros: number }>>();
   if (!entryIds.length) return grouped;
-  const rows = (await db.query(`SELECT d.id,d.entrada_id,d.tipo_destino,d.ponto_id,d.frota_id,d.litros,d.observacoes,p.codigo AS ponto_codigo,p.nome AS ponto_nome,f.codigo AS frota_codigo,a.id AS abastecimento_id,a.identificador_externo AS abastecimento_identificador FROM abastecimento_entrada_destinos d LEFT JOIN abastecimento_pontos p ON p.id=d.ponto_id LEFT JOIN frotas f ON f.id=d.frota_id LEFT JOIN abastecimentos a ON a.entrada_destino_id=d.id WHERE d.entrada_id=ANY($1::uuid[]) ORDER BY d.created_at,d.id`, [entryIds])).rows;
+  const rows = (await db.query(`SELECT d.id,d.entrada_id,d.tipo_destino,d.ponto_id,d.frota_id,d.litros,d.observacoes,p.codigo AS ponto_codigo,p.nome AS ponto_nome,f.codigo AS frota_codigo,a.id AS abastecimento_id,a.identificador_externo AS abastecimento_identificador FROM abastecimento_entrada_destinos d LEFT JOIN abastecimento_pontos p ON p.id=d.ponto_id LEFT JOIN frotas f ON f.id=d.frota_id LEFT JOIN abastecimentos a ON a.entrada_destino_id=d.id AND a.excluido_at IS NULL WHERE d.entrada_id=ANY($1::uuid[]) ORDER BY d.created_at,d.id`, [entryIds])).rows;
   for (const row of rows) { const list = grouped.get(row.entrada_id) ?? []; list.push({ ...row, litros: numberValue(row.litros, 'destinos.litros'), abastecimento: row.abastecimento_id ? { id: row.abastecimento_id, identificador_externo: row.abastecimento_identificador } : null }); grouped.set(row.entrada_id, list); }
   return grouped;
 };
@@ -228,6 +228,6 @@ export async function listAbastecimentoEntradas(filters:EntradaFilters={}){const
 export async function deleteAbastecimentoEntrada(id:string,actor?:AuthenticatedRequestUser|null):Promise<void>{const entryId=assertUuid(id);const client=await pool.connect();try{await client.query('BEGIN');const before=(await client.query('SELECT * FROM abastecimento_entradas WHERE id=$1 FOR UPDATE',[entryId])).rows[0];if(!before)throw new AbastecimentoServiceError(404,'Entrada não encontrada.');await client.query('DELETE FROM abastecimento_entrada_destinos WHERE entrada_id=$1',[entryId]);await client.query('DELETE FROM abastecimento_entradas WHERE id=$1',[entryId]);await audit(actor,'EXCLUIR','abastecimento_entradas',entryId,auditFields(before,auditFieldsEntrada),null,client);await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');if(error instanceof AbastecimentoServiceError)throw error;return mapDatabaseError(error,'Entrada duplicada.','Não é possível excluir a entrada.');}finally{client.release();}}
 export async function assertEntradaSemDestinoVinculado(id: string): Promise<void> {
   const entryId = assertUuid(id);
-  const result = await pool.query('SELECT 1 FROM abastecimento_entrada_destinos d JOIN abastecimentos a ON a.entrada_destino_id=d.id WHERE d.entrada_id=$1 LIMIT 1', [entryId]);
+  const result = await pool.query('SELECT 1 FROM abastecimento_entrada_destinos d JOIN abastecimentos a ON a.entrada_destino_id=d.id AND a.excluido_at IS NULL WHERE d.entrada_id=$1 LIMIT 1', [entryId]);
   if (result.rowCount) throw new AbastecimentoServiceError(409, 'A entrada possui destino vinculado; alterações estruturais não são permitidas.');
 }

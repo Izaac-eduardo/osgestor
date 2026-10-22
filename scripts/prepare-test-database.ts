@@ -3,16 +3,17 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Pool } from 'pg';
 
-const testDatabase = process.env.TEST_DB_NAME?.trim() || 'oficina_test';
-if (testDatabase !== 'oficina_test') throw new Error('Preparação recusada: TEST_DB_NAME deve ser oficina_test.');
-const connection = { host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 5432), user: process.env.DB_USER ?? 'postgres', password: process.env.DB_PASSWORD ?? '' };
-const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
+const testDatabaseName = 'oficina_teste_fase051';
+const configuredDatabase = process.env.TEST_DB_NAME?.trim() || process.env.DB_NAME?.trim();
+const testDatabase = configuredDatabase || testDatabaseName;
+if (testDatabase !== testDatabaseName) throw new Error(`Test database must be ${testDatabaseName}.`);
+const connection = { host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 5432), user: process.env.DB_USER ?? 'postgres', password: process.env.DB_PASSWORD ?? '', connectionTimeoutMillis: 3000 };
 
 (async () => {
   const admin = new Pool({ ...connection, database: process.env.DB_ADMIN_DATABASE?.trim() || 'postgres' });
   try {
     const exists = await admin.query<{ exists: boolean }>('SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname=$1) AS exists', [testDatabase]);
-    if (!exists.rows[0]?.exists) await admin.query(`CREATE DATABASE ${quoteIdentifier(testDatabase)}`);
+    if (!exists.rows[0]?.exists) throw new Error(`Test database ${testDatabase} does not exist; automatic creation is refused.`);
   } finally { await admin.end(); }
   const target = new Pool({ ...connection, database: testDatabase });
   try {
@@ -53,4 +54,4 @@ const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
     `);
     console.log(`Banco de testes preparado: ${testDatabase}`);
   } finally { await target.end(); }
-})();
+})().catch(error => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
