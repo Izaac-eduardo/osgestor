@@ -42,11 +42,13 @@ async function fixture(options: { withLink: boolean; withEquivalent: boolean; eq
 
 test('reclassifica produto importado, preserva vínculo histórico e evita reversão na sincronização', async () => {
   const f = await fixture({ withLink: true, withEquivalent: false });
-  const result = await reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'Correção homologada pela revisão operacional.' }, actor);
+  const result = await reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO' }, actor);
   assert.equal(result.criouServico, true);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 1);
   assert.equal((await pool.query(`SELECT count(*)::int AS count FROM produtos_os p WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)`, [f.productId])).rows[0].count, 0);
   assert.equal((await pool.query(`SELECT estado_vinculo FROM ordens_servico_item_vinculos WHERE produto_os_id=$1`, [f.productId])).rows[0].estado_vinculo, 'REVOGADO');
+  const audit = (await pool.query<{ dados_posteriores: Record<string, unknown> }>(`SELECT dados_posteriores FROM auditoria WHERE entidade_id=$1 ORDER BY created_at DESC LIMIT 1`, [f.productId])).rows[0];
+  assert.match(JSON.stringify(audit.dados_posteriores), /Reclassificação de item realizada pelo usuário/);
   assert.equal((await pool.query(`SELECT tipo_item,servico_os_id FROM ordens_servico_item_vinculos WHERE ordem_servico_id=$1 AND estado_vinculo='ATIVO'`, [f.orderId])).rows[0].tipo_item, 'SERVICO');
   const current = await loadExistingOsUsing(pool, Number((await pool.query('SELECT numero_os FROM ordens_servico WHERE id=$1', [f.orderId])).rows[0].numero_os));
   assert.ok(current);
@@ -91,9 +93,8 @@ test('rejeita vínculo de reclassificação entre ordens diferentes', async () =
   );
 });
 
-test('exige justificativa e desfaz a transação quando a auditoria fica inválida', async () => {
+test('desfaz a transação quando a auditoria fica inválida mesmo sem justificativa digitada', async () => {
   const f = await fixture({ withLink: false, withEquivalent: false });
-  await assert.rejects(() => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO' }, actor), /justificativa é obrigatória/);
   const invalidActor = { ...actor, id: randomUUID() } as never;
   await assert.rejects(() => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'Falha controlada para testar rollback.' }, invalidActor), /violates foreign key|chave estrangeira/i);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);

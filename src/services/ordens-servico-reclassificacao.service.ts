@@ -38,15 +38,7 @@ type ProductLink = {
   evidencia_snapshot: Record<string, unknown>;
 };
 
-const requiredJustification = (value: unknown): string => {
-  if (typeof value !== 'string' || value.trim().length < 3) {
-    throw new OrdemServicoServiceError(400, 'A justificativa é obrigatória e deve ter pelo menos 3 caracteres.');
-  }
-  if (value.trim().length > 2000) {
-    throw new OrdemServicoServiceError(400, 'A justificativa não pode exceder 2000 caracteres.');
-  }
-  return value.trim();
-};
+const standardJustification = 'Reclassificação de item realizada pelo usuário.';
 
 const requestedServiceId = (value: unknown): string | undefined => {
   if (value === undefined || value === null || value === '') return undefined;
@@ -94,7 +86,7 @@ export async function reclassifyProdutoAsServico(
   }
   const input = body as Record<string, unknown>;
   const destino = requestedDestination(input.tipo_servico);
-  const justificativa = requiredJustification(input.justificativa);
+  const justificativa = standardJustification;
   const servicoEquivalenteId = requestedServiceId(input.servico_equivalente_id);
   const confirmarRegularizacao = input.confirmar_regularizacao_terceiro === true;
   if (actor.role !== 'ADMIN') throw new OrdemServicoServiceError(403, 'A reclassificaÃ§Ã£o exige um usuÃ¡rio ADMIN.', 'RECLASSIFICACAO_ADMIN_REQUIRED');
