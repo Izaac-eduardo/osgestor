@@ -504,8 +504,9 @@ export async function getOsPorSemana(filters: RelatorioFilters) {
 }
 
 export async function getResumo(filters: RelatorioFilters) {
-  const allowed: FilterName[] = ['data_inicio', 'data_fim', 'obra_id'];
+  const allowed: FilterName[] = ['data_inicio', 'data_fim', 'obra_id', 'categoria'];
   const { where, values } = buildWhere(filters, allowed);
+  const financial = financialColumns(filters, values);
   const result = await pool.query<ResumoRow>(
     `SELECT
        COUNT(*) AS quantidade_os,
@@ -521,7 +522,7 @@ export async function getResumo(filters: RelatorioFilters) {
        COALESCE(SUM(total_produtos) FILTER (WHERE status <> 'CANCELADA'), 0)
          AS total_produtos,
        COALESCE(SUM(total_os) FILTER (WHERE status <> 'CANCELADA'), 0) AS total_gasto
-     FROM vw_ordens_servico_resumo
+     FROM (SELECT v.id,v.status,v.data_abertura,v.obra_id,${financial} FROM vw_ordens_servico_resumo v) v
      ${where}`,
     values,
   );
