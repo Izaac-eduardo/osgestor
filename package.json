@@ -21,6 +21,7 @@
     "reconcile:monthly:l62": "tsx scripts/reconcile-monthly-l62.ts",
     "reconcile:execucoes": "tsx scripts/reconcile-execucoes.ts",
     "prepare:test-db": "tsx scripts/prepare-test-database.ts",
+    "migration:deploy": "tsx scripts/deploy-migration.ts",
     "clean:test-data": "tsx scripts/clean-test-data.ts"
   },
   "dependencies": {

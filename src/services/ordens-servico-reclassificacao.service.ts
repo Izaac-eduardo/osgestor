@@ -25,7 +25,7 @@ type ProductRow = {
   hash_conteudo: string | null;
 };
 
-type ServiceCandidate = { id: string; descricao: string; valor: string };
+type ServiceCandidate = { id: string; descricao: string; valor: string; classificacao_servico: 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO' };
 type ReclassificationDestination = 'TERCEIRO' | 'INTERNO';
 type ProductLink = {
   id: string;
@@ -114,10 +114,28 @@ export async function reclassifyProdutoAsServico(
     if (previous.rows[0]) throw new OrdemServicoServiceError(409, 'Este produto já foi reclassificado como serviço.');
 
     const services = (await client.query<ServiceCandidate>(
-      'SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id',
+      'SELECT id,descricao,valor,classificacao_servico FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id',
       [ordemServicoId],
     )).rows;
     const candidates = services.filter(service => sameItem(product, service));
+    const incompatibleCandidates = candidates.filter(service => service.classificacao_servico !== 'TERCEIRO');
+    if (servicoEquivalenteId) {
+      const selected = services.find(candidate => candidate.id === servicoEquivalenteId);
+      if (selected && selected.classificacao_servico !== 'TERCEIRO') {
+        throw new OrdemServicoServiceError(
+          409,
+          `O serviço equivalente “${selected.descricao}” está classificado como ${selected.classificacao_servico}. Regularize a classificação para TERCEIRO antes da associação. Nenhum produto, vínculo ou total foi alterado.`,
+          'SERVICO_EQUIVALENTE_CLASSIFICACAO_INCOMPATIVEL',
+        );
+      }
+    }
+    if (incompatibleCandidates.length && !candidates.some(candidate => candidate.classificacao_servico === 'TERCEIRO')) {
+      throw new OrdemServicoServiceError(
+        409,
+        `O serviço possivelmente equivalente (${incompatibleCandidates.map(value => `${value.descricao} — ${value.classificacao_servico}`).join(', ')}) não está classificado como TERCEIRO. Regularize a classificação antes da associação. Nenhum produto, vínculo ou total foi alterado.`,
+        'SERVICO_EQUIVALENTE_CLASSIFICACAO_INCOMPATIVEL',
+      );
+    }
     if (candidates.length && !servicoEquivalenteId) {
       throw new OrdemServicoServiceError(
         409,

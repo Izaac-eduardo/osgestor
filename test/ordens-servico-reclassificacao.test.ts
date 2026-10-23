@@ -14,7 +14,7 @@ const productIds: string[] = [];
 const serviceIds: string[] = [];
 const importIds: string[] = [];
 
-async function fixture(options: { withLink: boolean; withEquivalent: boolean }) {
+async function fixture(options: { withLink: boolean; withEquivalent: boolean; equivalentClassification?: 'TERCEIRO' | 'INTERNO' | 'INDETERMINADO' }) {
   const obra = (await pool.query<{ id: string }>(`SELECT id FROM obras WHERE codigo='TEST-OBRA-001' LIMIT 1`)).rows[0];
   const fleet = (await pool.query<{ id: string; prefixo_frota_id: string }>('SELECT id,prefixo_frota_id FROM frotas ORDER BY codigo LIMIT 1')).rows[0];
   assert.ok(obra && fleet);
@@ -27,7 +27,7 @@ async function fixture(options: { withLink: boolean; withEquivalent: boolean }) 
   let equivalentId: string | undefined;
   if (options.withEquivalent) {
     equivalentId = randomUUID();
-    await pool.query(`INSERT INTO servicos_os(id,ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem) VALUES($1,$2,'ITEM RECLASSIFICAR',60,'TERCEIRO','MANUAL')`, [equivalentId, orderId]);
+    await pool.query(`INSERT INTO servicos_os(id,ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem) VALUES($1,$2,'ITEM RECLASSIFICAR',60,$3,'MANUAL')`, [equivalentId, orderId, options.equivalentClassification ?? 'TERCEIRO']);
     serviceIds.push(equivalentId);
   }
   if (options.withLink) {
@@ -61,6 +61,32 @@ test('associa serviço equivalente sem criar duplicata', async () => {
   assert.equal((await pool.query<{ count: string }>('SELECT count(*) count FROM servicos_os WHERE ordem_servico_id=$1', [f.orderId])).rows[0].count, before);
   const totals = (await pool.query<{ total_produtos: string; total_servicos_terceiros: string; total_os: string }>('SELECT total_produtos,total_servicos_terceiros,total_os FROM vw_ordens_servico_resumo WHERE id=$1', [f.orderId])).rows[0];
   assert.deepEqual(totals, { total_produtos: '0', total_servicos_terceiros: '60.00', total_os: '60.00' });
+});
+
+test('bloqueia associação a serviço equivalente incompatível sem alterar dados', async () => {
+  const f = await fixture({ withLink: true, withEquivalent: true, equivalentClassification: 'INDETERMINADO' });
+  await assert.rejects(
+    () => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'Tentativa de associacao incompatível.', servico_equivalente_id: f.equivalentId }, actor),
+    error => error instanceof Error && error.message.includes('Regularize a classificação para TERCEIRO'),
+  );
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_vinculos WHERE produto_os_id=$1', [f.productId])).rows[0].count, 1);
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM servicos_os WHERE ordem_servico_id=$1', [f.orderId])).rows[0].count, 1);
+});
+
+test('rejeita vínculo de reclassificação entre ordens diferentes', async () => {
+  const left = await fixture({ withLink: false, withEquivalent: false });
+  const right = await fixture({ withLink: false, withEquivalent: true });
+  await assert.rejects(
+    () => pool.query(
+      `INSERT INTO ordens_servico_item_reclassificacoes(
+         ordem_servico_id,produto_os_id,servico_os_id,descricao_original,quantidade_original,
+         unidade_original,valor_unitario_original,valor_total_original,justificativa,usuario_nome
+       ) VALUES($1,$2,$3,'ITEM RECLASSIFICAR',1,'UN',60,60,'Vinculo cruzado de teste.','teste')`,
+      [left.orderId, left.productId, right.equivalentId],
+    ),
+    /foreign key|chave estrangeira/i,
+  );
 });
 
 test('exige justificativa e desfaz a transação quando a auditoria fica inválida', async () => {
