@@ -7,6 +7,7 @@ import {
   getOrdemServico,
 } from './ordens-servico.service.js';
 import { ExecucaoServico, listExecucoesOrdem } from './servicos-os-execucoes.service.js';
+import { hasReclassificacaoSchema } from './ordens-servico-reclassificacao-schema.service.js';
 import {
   isClassificacaoServico,
   type ClassificacaoOrigem,
@@ -240,10 +241,16 @@ const rawServicos = async (ordemServicoId: string): Promise<ServicoOs[]> => {
 };
 
 const rawProdutos = async (ordemServicoId: string): Promise<ProdutoOs[]> => {
-  const result = await pool.query<ProdutoOs>(
-    'SELECT * FROM produtos_os WHERE ordem_servico_id = $1 ORDER BY created_at ASC',
-    [ordemServicoId],
-  );
+  const hasSchema = await hasReclassificacaoSchema();
+  const result = await pool.query<ProdutoOs>(hasSchema
+    ? `SELECT p.* FROM produtos_os p
+        WHERE p.ordem_servico_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM ordens_servico_item_reclassificacoes r
+             WHERE r.produto_os_id = p.id
+          )
+        ORDER BY p.created_at ASC`
+    : 'SELECT * FROM produtos_os WHERE ordem_servico_id = $1 ORDER BY created_at ASC', [ordemServicoId]);
   return result.rows;
 };
 
@@ -468,6 +475,22 @@ export async function deleteProdutoOs(ordemServicoId: string, produtoId: string,
   const client = await pool.connect();
   try { await client.query('BEGIN');
   const before = await client.query<ProdutoOs>('SELECT * FROM produtos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [produtoId, ordemServicoId]);
+  if (before.rows.length === 0) {
+    throw new OrdemServicoServiceError(404, 'Produto não encontrado nesta Ordem de Serviço.');
+  }
+  const vinculo = await client.query<{ estado_vinculo: string; metodo_vinculo: string }>(
+    `SELECT estado_vinculo, metodo_vinculo
+       FROM ordens_servico_item_vinculos
+      WHERE produto_os_id = $1 AND ordem_servico_id = $2
+      LIMIT 1`,
+    [produtoId, ordemServicoId],
+  );
+  if (vinculo.rows.length > 0) {
+    throw new OrdemServicoServiceError(
+      409,
+      'Produto não pode ser removido porque possui vínculo com o histórico de importação. Preserve o vínculo e solicite uma correção homologada do item.',
+    );
+  }
   const result = await client.query(
     'DELETE FROM produtos_os WHERE id = $1 AND ordem_servico_id = $2',
     [produtoId, ordemServicoId],
@@ -477,7 +500,16 @@ export async function deleteProdutoOs(ordemServicoId: string, produtoId: string,
   }
   await recordAudit({ actor, acao: 'EXCLUIR', modulo: 'ORDENS_SERVICO', entidade: 'produtos_os', entidadeId: produtoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>) }, client);
   await client.query('COMMIT');
-  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (isPostgresError(error) && error.code === '23503') {
+      throw new OrdemServicoServiceError(
+        409,
+        'Produto não pode ser removido porque possui vínculo com o histórico de importação. Preserve o vínculo e solicite uma correção homologada do item.',
+      );
+    }
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function getOrdemServicoDetalhes(id: string): Promise<OrdemServicoDetalhes> {

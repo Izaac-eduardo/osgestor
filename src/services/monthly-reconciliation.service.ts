@@ -2,6 +2,7 @@ import { pool } from '../config/database.js';
 import { matchPreview, parsePoliOs, type ParsedItem, type ParsedOs } from '../imports/poli-os.js';
 import { buildPoliImport, type PoliImport } from '../imports/poli-canonical.js';
 import { normalizeSearchText } from '../utils/text.js';
+import { hasReclassificacaoSchema } from './ordens-servico-reclassificacao-schema.service.js';
 
 export const reconciliationClassifications = ['NEW', 'NO_CHANGE', 'SAFE_UPDATE', 'PROTECTED_OVERRIDE', 'REVIEW', 'BLOCKED'] as const;
 export type ReconciliationClassification = typeof reconciliationClassifications[number];
@@ -48,7 +49,8 @@ interface DbItem { id: string; ordem_servico_id: string; descricao: string; quan
 interface DbExecution { id: string; ordem_servico_id: string; servico_os_id: string | null; funcionario_id: string; inicio: string; fim: string; fingerprint_contexto: string | null; hash_conteudo: string | null; }
 interface DbOverride { ordem_servico_id: string; campo: 'natureza_os' | 'obra_id' | 'status' | 'frota_id'; valor_origem: unknown; valor_override: unknown; frota_id_override: string | null; }
 interface DbItemVinculo { ordem_servico_id: string; tipo_item: 'PRODUTO' | 'SERVICO'; produto_os_id: string | null; servico_os_id: string | null; fingerprint_contexto: string; estado_vinculo: 'ATIVO' | 'REVOGADO'; }
-export interface ReconciliationSnapshot { order: DbOrder; services: DbItem[]; products: DbItem[]; executions: DbExecution[]; overrides: DbOverride[]; vinculos?: DbItemVinculo[]; }
+interface DbReclassification { ordem_servico_id: string; produto_id: string; fingerprint_contexto: string | null; descricao_original: string; quantidade_original: string; unidade_original: string; valor_unitario_original: string; }
+export interface ReconciliationSnapshot { order: DbOrder; services: DbItem[]; products: DbItem[]; executions: DbExecution[]; overrides: DbOverride[]; vinculos?: DbItemVinculo[]; reclassificacoes?: DbReclassification[]; }
 type Snapshot = ReconciliationSnapshot;
 
 const text = (value: unknown): string => normalizeSearchText(String(value ?? ''));
@@ -57,6 +59,12 @@ const decodeJson = (value: unknown): unknown => {
   if (typeof value !== 'string') return value;
   try { return JSON.parse(value); } catch { return value; }
 };
+const matchesReclassification = (item: ParsedItem, value: DbReclassification): boolean =>
+  Boolean(item.fingerprintContexto && value.fingerprint_contexto && item.fingerprintContexto === value.fingerprint_contexto)
+  || (text(item.descricao) === text(value.descricao_original)
+    && item.quantidade.toFixed(3) === Number(value.quantidade_original).toFixed(3)
+    && text(item.unidade) === text(value.unidade_original)
+    && item.valorUnitario.toFixed(2) === Number(value.valor_unitario_original).toFixed(2));
 const addCount = (map: Record<string, number>, key: string, increment = 1): void => { map[key] = (map[key] ?? 0) + increment; };
 
 function statusSafe(current: string, source: string): boolean {
@@ -170,7 +178,7 @@ function compareItemType(result: ReconciliationResult, incoming: ParsedItem[], e
 function compareItems(result: ReconciliationResult, parsed: ParsedOs, snapshot: Snapshot): void {
   const links = snapshot.vinculos ?? [];
   compareItemType(result, parsed.itens.filter(item => item.tipo === 'SERVICO'), snapshot.services, 'servicos', links, snapshot.order.id);
-  compareItemType(result, parsed.itens.filter(item => item.tipo === 'PRODUTO'), snapshot.products, 'produtos', links, snapshot.order.id);
+  compareItemType(result, parsed.itens.filter(item => item.tipo === 'PRODUTO' && !(snapshot.reclassificacoes ?? []).some(value => matchesReclassification(item, value))), snapshot.products, 'produtos', links, snapshot.order.id);
   for (const execution of parsed.execucoes) if (!execution.funcionarioId || !execution.hashConteudo) {
     result.reviews.push({ reasonCode: 'UNLINKED_EXECUTION', description: 'Source execution lacks sufficient identity/provenance.' });
     result.differences.push({ domain: 'execution', field: 'execucoes', currentValue: null, sourceValue: execution, action: 'REVIEW', reasonCode: 'UNLINKED_EXECUTION', protected: false });
@@ -231,14 +239,20 @@ async function loadSnapshots(numbers: number[]): Promise<Map<number, Snapshot>> 
   const orders = (await pool.query<DbOrder>(`SELECT id,numero_os,obra_id,frota_id,natureza_os,categoria_servico,status,status_original,status_origem,observacoes FROM ordens_servico WHERE numero_os = ANY($1::bigint[])`, [numbers])).rows;
   const ids = orders.map(row => row.id);
   if (!ids.length) return snapshots;
+  const hasSchema = await hasReclassificacaoSchema();
   const [services, products, executions, overrides, vinculos] = await Promise.all([
     pool.query<DbItem>(`SELECT id,ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,codigo_poli,fingerprint_contexto,hash_conteudo FROM servicos_os WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
-    pool.query<DbItem>(`SELECT id,ordem_servico_id,descricao,quantidade,unidade,valor_unitario,codigo_poli,fingerprint_contexto,hash_conteudo FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
+    pool.query<DbItem>(hasSchema
+      ? `SELECT p.id,p.ordem_servico_id,p.descricao,p.quantidade,p.unidade,p.valor_unitario,p.codigo_poli,p.fingerprint_contexto,p.hash_conteudo FROM produtos_os p WHERE p.ordem_servico_id = ANY($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)`
+      : `SELECT id,ordem_servico_id,descricao,quantidade,unidade,valor_unitario,codigo_poli,fingerprint_contexto,hash_conteudo FROM produtos_os WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbExecution>(`SELECT id,ordem_servico_id,servico_os_id,funcionario_id,to_char(inicio,'YYYY-MM-DD"T"HH24:MI') inicio,to_char(fim,'YYYY-MM-DD"T"HH24:MI') fim,fingerprint_contexto,hash_conteudo FROM servicos_os_execucoes WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbOverride>(`SELECT ordem_servico_id,campo,valor_origem,valor_override,frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id = ANY($1::uuid[])`, [ids]),
     pool.query<DbItemVinculo>(`SELECT ordem_servico_id,tipo_item,produto_os_id,servico_os_id,fingerprint_contexto,estado_vinculo FROM ordens_servico_item_vinculos WHERE ordem_servico_id = ANY($1::uuid[]) AND estado_vinculo='ATIVO'`, [ids]),
   ]);
-  for (const order of orders) snapshots.set(Number(order.numero_os), { order, services: services.rows.filter(row => row.ordem_servico_id === order.id), products: products.rows.filter(row => row.ordem_servico_id === order.id), executions: executions.rows.filter(row => row.ordem_servico_id === order.id), overrides: overrides.rows.map(row => ({ ...row, valor_origem: decodeJson(row.valor_origem), valor_override: decodeJson(row.valor_override) })).filter(row => row.ordem_servico_id === order.id), vinculos: vinculos.rows.filter(row => row.ordem_servico_id === order.id) });
+  const reclassificacoes = hasSchema
+    ? (await pool.query<DbReclassification>(`SELECT ordem_servico_id,produto_os_id,fingerprint_contexto,descricao_original,quantidade_original,unidade_original,valor_unitario_original FROM ordens_servico_item_reclassificacoes WHERE ordem_servico_id = ANY($1::uuid[])`, [ids])).rows
+    : [];
+  for (const order of orders) snapshots.set(Number(order.numero_os), { order, services: services.rows.filter(row => row.ordem_servico_id === order.id), products: products.rows.filter(row => row.ordem_servico_id === order.id), executions: executions.rows.filter(row => row.ordem_servico_id === order.id), overrides: overrides.rows.map(row => ({ ...row, valor_origem: decodeJson(row.valor_origem), valor_override: decodeJson(row.valor_override) })).filter(row => row.ordem_servico_id === order.id), vinculos: vinculos.rows.filter(row => row.ordem_servico_id === order.id), reclassificacoes: reclassificacoes.filter(row => row.produto_id && row.ordem_servico_id === order.id) });
   return snapshots;
 }
 

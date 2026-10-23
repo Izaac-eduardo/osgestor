@@ -18,6 +18,7 @@ import {
   listProdutosOsController,
   listServicosOsController,
   removeFuncionarioOsController,
+  reclassifyProdutoAsServicoController,
   updateProdutoOsController,
   updateServicoOsController,
 } from '../controllers/ordens-servico-itens.controller.js';
@@ -51,6 +52,7 @@ ordensServicoRoutes.get('/:id/overrides', listOrdemServicoOverridesController);
 ordensServicoRoutes.delete('/:id/overrides/:campo', requireRole('ADMIN'), removeOrdemServicoOverrideController);
 ordensServicoRoutes.post('/:id/produtos', createProdutoOsController);
 ordensServicoRoutes.put('/:id/produtos/:produtoId', updateProdutoOsController);
+ordensServicoRoutes.post('/:id/produtos/:produtoId/reclassificar-servico', requireRole('ADMIN'), reclassifyProdutoAsServicoController);
 ordensServicoRoutes.delete('/:id/produtos/:produtoId', deleteProdutoOsController);
 ordensServicoRoutes.get('/:id', getOrdemServicoController);
 ordensServicoRoutes.post('/', createOrdemServicoController);

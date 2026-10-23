@@ -3,6 +3,7 @@ import { normalizeSearchText } from '../utils/text.js';
 import type { ParsedExecucao, ParsedItem, ParsedOs } from '../imports/poli-os.js';
 import type { AuthenticatedRequestUser } from '../types/auth.js';
 import { recordAudit } from './audit.service.js';
+import { hasReclassificacaoSchema } from './ordens-servico-reclassificacao-schema.service.js';
 
 export type SyncPreviewState = 'NOVA' | 'ATUALIZACAO_DISPONIVEL' | 'SEM_ALTERACOES' | 'REQUER_REVISAO';
 
@@ -30,6 +31,14 @@ export interface ExistingOsSnapshot {
   updatedAt?: string;
   servicos: Array<{ id: string; descricao: string; valor: number }>;
   produtos: Array<{ id: string; descricao: string; quantidade: number; unidade: string; valorUnitario: number }>;
+  reclassificacoes?: Array<{
+    produtoId: string;
+    fingerprintContexto: string | null;
+    descricao: string;
+    quantidade: number;
+    unidade: string;
+    valorUnitario: number;
+  }>;
   execucoes: Array<{ id: string; funcionarioId: string; inicio: string; fim: string; servicoOsId: string | null }>;
 }
 
@@ -80,6 +89,12 @@ const equivalentProduct = (current: { descricao: string; quantidade: number; uni
   && current.valorUnitario.toFixed(2) === incoming.valorUnitario.toFixed(2)
   && text(current.unidade) !== text(incoming.unidade)
   && ['UN', 'L'].includes(text(current.unidade)) && ['UN', 'L'].includes(text(incoming.unidade));
+const matchesReclassification = (item: ParsedItem, reclassification: NonNullable<ExistingOsSnapshot['reclassificacoes']>[number]): boolean =>
+  Boolean(item.fingerprintContexto && reclassification.fingerprintContexto && item.fingerprintContexto === reclassification.fingerprintContexto)
+  || (text(item.descricao) === text(reclassification.descricao)
+    && item.quantidade.toFixed(3) === reclassification.quantidade.toFixed(3)
+    && text(item.unidade) === text(reclassification.unidade)
+    && item.valorUnitario.toFixed(2) === reclassification.valorUnitario.toFixed(2));
 
 function consume<T>(values: T[], key: (value: T) => string, candidate: T): T | undefined {
   const index = values.findIndex(value => key(value) === key(candidate));
@@ -156,7 +171,9 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   const productPool = [...current.produtos];
   const novosProdutos: ParsedItem[] = [];
   const produtosAlterados: OsUpdateDiff['produtosAlterados'] = [];
+  const reclassificacoes = current.reclassificacoes ?? [];
   for (const item of parsed.itens.filter(value => value.tipo === 'PRODUTO')) {
+    if (reclassificacoes.some(value => matchesReclassification(item, value))) continue;
     const candidate = { descricao: item.descricao, quantidade: item.quantidade, unidade: item.unidade, valorUnitario: item.valorUnitario };
     if (consume(productPool, productKey, candidate)) continue;
     const equivalent = productPool.find(value => equivalentProduct(value, item));
@@ -225,10 +242,23 @@ export async function loadExistingOsUsing(db: { query: typeof pool.query }, nume
   if (!order.rows[0]) return undefined;
   const row = order.rows[0];
   const services = await db.query<{ id: string; descricao: string; valor: string }>('SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
-  const products = await db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>('SELECT id,descricao,quantidade,unidade,valor_unitario FROM produtos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
+  const hasSchema = await hasReclassificacaoSchema(db);
+  const products = await db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>(hasSchema
+    ? `SELECT p.id,p.descricao,p.quantidade,p.unidade,p.valor_unitario
+        FROM produtos_os p
+        WHERE p.ordem_servico_id=$1
+          AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)
+        ORDER BY p.created_at,p.id`
+    : 'SELECT id,descricao,quantidade,unidade,valor_unitario FROM produtos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
+  const reclassificacoes = hasSchema
+    ? await db.query<{ produto_id: string; fingerprint_contexto: string | null; descricao_original: string; quantidade_original: string; unidade_original: string; valor_unitario_original: string }>(
+      `SELECT produto_os_id, fingerprint_contexto, descricao_original, quantidade_original, unidade_original, valor_unitario_original
+         FROM ordens_servico_item_reclassificacoes WHERE ordem_servico_id=$1 ORDER BY created_at,id`, [row.id],
+    )
+    : { rows: [] };
   const executions = await db.query<{ id: string; funcionario_id: string; inicio: string; fim: string; servico_os_id: string | null }>('SELECT id,funcionario_id,to_char(inicio,\'YYYY-MM-DD"T"HH24:MI\') inicio,to_char(fim,\'YYYY-MM-DD"T"HH24:MI\') fim,servico_os_id FROM servicos_os_execucoes WHERE ordem_servico_id=$1', [row.id]);
   const fleetOverride = await db.query<{ frota_id_override: string | null }>(`SELECT frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo='frota_id'`, [row.id]);
-  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataAbertura: row.data_abertura, dataFechamento: row.data_fechamento, updatedAt: row.updated_at, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
+  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataAbertura: row.data_abertura, dataFechamento: row.data_fechamento, updatedAt: row.updated_at, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), reclassificacoes: reclassificacoes.rows.map(value => ({ produtoId: value.produto_id, fingerprintContexto: value.fingerprint_contexto, descricao: value.descricao_original, quantidade: Number(value.quantidade_original), unidade: value.unidade_original, valorUnitario: Number(value.valor_unitario_original) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
 }
 
 export async function synchronizeOrder(parsed: ParsedOs, actor?: AuthenticatedRequestUser | null): Promise<OsUpdateDiff> {

@@ -16,10 +16,11 @@ import {
   updateProdutoOs,
   updateServicoOs,
 } from '../services/ordens-servico-itens.service.js';
+import { reclassifyProdutoAsServico } from '../services/ordens-servico-reclassificacao.service.js';
 
 const sendError = (response: Response, error: unknown): void => {
   if (error instanceof OrdemServicoServiceError) {
-    response.status(error.statusCode).json({ message: error.message });
+    response.status(error.statusCode).json({ message: error.message, ...(error.code ? { code: error.code } : {}), ...(error.details ? { details: error.details } : {}) });
     return;
   }
   console.error('Erro interno nos itens da Ordem de Serviço.');
@@ -124,6 +125,17 @@ export async function deleteProdutoOsController(request: Request, response: Resp
       request.authUser!,
     );
     response.status(204).send();
+  } catch (error) { sendError(response, error); }
+}
+
+export async function reclassifyProdutoAsServicoController(request: Request, response: Response): Promise<void> {
+  try {
+    response.status(200).json(await reclassifyProdutoAsServico(
+      routeUuid(request.params.id, 'id'),
+      routeUuid(request.params.produtoId, 'produtoId'),
+      request.body,
+      request.authUser!,
+    ));
   } catch (error) { sendError(response, error); }
 }
 
