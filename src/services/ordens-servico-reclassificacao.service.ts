@@ -23,6 +23,9 @@ type ProductRow = {
   codigo_poli: string | null;
   fingerprint_contexto: string | null;
   hash_conteudo: string | null;
+  categoria_gerencial: string | null;
+  subcategoria_gerencial: string | null;
+  origem_classificacao: string | null;
 };
 
 type ServiceCandidate = { id: string; descricao: string; valor: string; classificacao_servico: 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO'; classificacao_origem: string | null };
@@ -97,7 +100,8 @@ export async function reclassifyProdutoAsServico(
     if (!order.rows[0]) throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
     const productResult = await client.query<ProductRow>(
       `SELECT id,ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total,valor_total_original,
-              importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo
+              importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo,
+              categoria_gerencial,subcategoria_gerencial,origem_classificacao
          FROM produtos_os WHERE id=$1 AND ordem_servico_id=$2 FOR UPDATE`,
       [produtoId, ordemServicoId],
     );
@@ -142,9 +146,11 @@ export async function reclassifyProdutoAsServico(
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO servicos_os(
            ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,
+           categoria_gerencial,subcategoria_gerencial,origem_classificacao,
            importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo
-         ) VALUES($1,$2,$3,'TERCEIRO','REVISAO',$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [ordemServicoId, product.descricao, effectiveProductValue(product), product.importacao_id, product.origem_linha,
+         ) VALUES($1,$2,$3,'TERCEIRO','REVISAO',$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [ordemServicoId, product.descricao, effectiveProductValue(product), product.categoria_gerencial,
+          product.subcategoria_gerencial, product.origem_classificacao, product.importacao_id, product.origem_linha,
           product.sequencia_importacao, product.codigo_poli, product.fingerprint_contexto, product.hash_conteudo],
       );
       serviceId = inserted.rows[0]!.id;
