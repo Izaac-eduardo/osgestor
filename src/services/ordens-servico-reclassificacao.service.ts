@@ -25,7 +25,7 @@ type ProductRow = {
   hash_conteudo: string | null;
 };
 
-type ServiceCandidate = { id: string; descricao: string; valor: string; classificacao_servico: 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO' };
+type ServiceCandidate = { id: string; descricao: string; valor: string; classificacao_servico: 'INTERNO' | 'TERCEIRO' | 'INDETERMINADO'; classificacao_origem: string | null };
 type ReclassificationDestination = 'TERCEIRO' | 'INTERNO';
 type ProductLink = {
   id: string;
@@ -85,7 +85,7 @@ export async function reclassifyProdutoAsServico(
   produtoId: string,
   body: unknown,
   actor: AuthenticatedRequestUser,
-): Promise<{ servicoId: string; produtoId: string; criouServico: boolean; total: number; tipoServico: ReclassificationDestination }> {
+): Promise<{ servicoId: string; produtoId: string; criouServico: boolean; regularizouClassificacao: boolean; total: number; tipoServico: ReclassificationDestination }> {
   if (!await hasReclassificacaoSchema()) {
     throw new OrdemServicoServiceError(503, 'A reclassificação de produtos ainda não está disponível neste ambiente. A atualização estrutural necessária não foi aplicada.', 'RECLASSIFICACAO_INDISPONIVEL');
   }
@@ -96,10 +96,12 @@ export async function reclassifyProdutoAsServico(
   const destino = requestedDestination(input.tipo_servico);
   const justificativa = requiredJustification(input.justificativa);
   const servicoEquivalenteId = requestedServiceId(input.servico_equivalente_id);
+  const confirmarRegularizacao = input.confirmar_regularizacao_terceiro === true;
+  if (actor.role !== 'ADMIN') throw new OrdemServicoServiceError(403, 'A reclassificaÃ§Ã£o exige um usuÃ¡rio ADMIN.', 'RECLASSIFICACAO_ADMIN_REQUIRED');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const order = await client.query<{ id: string }>('SELECT id FROM ordens_servico WHERE id=$1 FOR UPDATE', [ordemServicoId]);
+    const order = await client.query<{ id: string; natureza_os: string }>('SELECT id,natureza_os FROM ordens_servico WHERE id=$1 FOR UPDATE', [ordemServicoId]);
     if (!order.rows[0]) throw new OrdemServicoServiceError(404, 'Ordem de Serviço não encontrada.');
     const productResult = await client.query<ProductRow>(
       `SELECT id,ordem_servico_id,descricao,quantidade,unidade,valor_unitario,valor_total,valor_total_original,
@@ -114,40 +116,35 @@ export async function reclassifyProdutoAsServico(
     if (previous.rows[0]) throw new OrdemServicoServiceError(409, 'Este produto já foi reclassificado como serviço.');
 
     const services = (await client.query<ServiceCandidate>(
-      'SELECT id,descricao,valor,classificacao_servico FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id',
+      'SELECT id,descricao,valor,classificacao_servico,classificacao_origem FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id FOR UPDATE',
       [ordemServicoId],
     )).rows;
     const candidates = services.filter(service => sameItem(product, service));
-    const incompatibleCandidates = candidates.filter(service => service.classificacao_servico !== 'TERCEIRO');
-    if (servicoEquivalenteId) {
-      const selected = services.find(candidate => candidate.id === servicoEquivalenteId);
-      if (selected && selected.classificacao_servico !== 'TERCEIRO') {
-        throw new OrdemServicoServiceError(
-          409,
-          `O serviço equivalente “${selected.descricao}” está classificado como ${selected.classificacao_servico}. Regularize a classificação para TERCEIRO antes da associação. Nenhum produto, vínculo ou total foi alterado.`,
-          'SERVICO_EQUIVALENTE_CLASSIFICACAO_INCOMPATIVEL',
-        );
-      }
-    }
-    if (incompatibleCandidates.length && !candidates.some(candidate => candidate.classificacao_servico === 'TERCEIRO')) {
+    if (candidates.length > 1 && !servicoEquivalenteId) {
       throw new OrdemServicoServiceError(
         409,
-        `O serviço possivelmente equivalente (${incompatibleCandidates.map(value => `${value.descricao} — ${value.classificacao_servico}`).join(', ')}) não está classificado como TERCEIRO. Regularize a classificação antes da associação. Nenhum produto, vínculo ou total foi alterado.`,
-        'SERVICO_EQUIVALENTE_CLASSIFICACAO_INCOMPATIVEL',
+        `Foram encontrados múltiplos serviços equivalentes (${candidates.map(value => value.descricao).join(', ')}). Selecione explicitamente qual deve ser reutilizado.`,
+        'SERVICO_EQUIVALENTE_AMBIGUO',
       );
     }
-    if (candidates.length && !servicoEquivalenteId) {
-      throw new OrdemServicoServiceError(
-        409,
-        `Existe serviço possivelmente equivalente (${candidates.map(value => value.descricao).join(', ')}). Selecione-o explicitamente para evitar duplicidade.`,
-        'POSSIVEL_DUPLICIDADE',
-      );
-    }
-    let serviceId = servicoEquivalenteId;
+    let serviceId = servicoEquivalenteId ?? (candidates.length === 1 ? candidates[0]!.id : undefined);
+    let regularizouClassificacao = false;
     let criouServico = false;
     if (serviceId) {
       if (!candidates.some(candidate => candidate.id === serviceId)) {
         throw new OrdemServicoServiceError(409, 'O serviço selecionado não corresponde exatamente ao produto.');
+      }
+      const selected = candidates.find(candidate => candidate.id === serviceId);
+      if (selected?.classificacao_servico === 'INTERNO') throw new OrdemServicoServiceError(409, 'ServiÃ§os INTERNOS nÃ£o podem ser convertidos automaticamente em serviÃ§os terceirizados.', 'SERVICO_INTERNO_INCOMPATIVEL');
+      if (selected?.classificacao_servico === 'INDETERMINADO') {
+        if (order.rows[0]!.natureza_os !== 'TERCEIRO') throw new OrdemServicoServiceError(409, 'A regularizaÃ§Ã£o sÃ³ Ã© permitida para O.S. de natureza TERCEIRO.', 'OS_NATUREZA_INCOMPATIVEL');
+        if (!confirmarRegularizacao) throw new OrdemServicoServiceError(409, 'Confirme explicitamente que o serviÃ§o legado Ã© terceirizado para regularizar sua classificaÃ§Ã£o.', 'CONFIRMACAO_REGULARIZACAO_TERCEIRO_OBRIGATORIA');
+        await client.query(`UPDATE servicos_os SET classificacao_servico='TERCEIRO',classificacao_origem='REVISAO' WHERE id=$1 AND ordem_servico_id=$2 AND classificacao_servico='INDETERMINADO'`, [selected.id, ordemServicoId]);
+        await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os', entidadeId: selected.id,
+          dadosAnteriores: { id: selected.id, ordem_servico_id: ordemServicoId, classificacao_servico: 'INDETERMINADO', classificacao_origem: selected.classificacao_origem },
+          dadosPosteriores: { id: selected.id, ordem_servico_id: ordemServicoId, classificacao_servico: 'TERCEIRO', classificacao_origem: 'REVISAO' },
+          metadata: { operacao: 'REGULARIZACAO_CLASSIFICACAO_RECLASSIFICACAO' } }, client);
+        regularizouClassificacao = true;
       }
     } else {
       const inserted = await client.query<{ id: string }>(
@@ -207,10 +204,10 @@ export async function reclassifyProdutoAsServico(
       entidadeId: produtoId,
       dadosAnteriores: { classificacao: 'PRODUTO', produto_os_id: produtoId, ...product },
       dadosPosteriores: { classificacao: 'SERVICO_TERCEIRO', servico_os_id: serviceId, valor: effectiveProductValue(product), justificativa },
-      metadata: { operacao: 'RECLASSIFICACAO_PRODUTO_SERVICO', criou_servico: criouServico },
+      metadata: { operacao: 'RECLASSIFICACAO_PRODUTO_SERVICO', criou_servico: criouServico, regularizou_classificacao: regularizouClassificacao },
     }, client);
     await client.query('COMMIT');
-    return { servicoId: serviceId!, produtoId, criouServico, total: effectiveProductValue(product), tipoServico: destino };
+    return { servicoId: serviceId!, produtoId, criouServico, regularizouClassificacao, total: effectiveProductValue(product), tipoServico: destino };
   } catch (error) {
     return rollbackAndThrow(client, error);
   } finally {

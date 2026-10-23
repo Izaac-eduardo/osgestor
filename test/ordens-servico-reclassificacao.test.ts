@@ -15,6 +15,8 @@ const serviceIds: string[] = [];
 const importIds: string[] = [];
 
 async function fixture(options: { withLink: boolean; withEquivalent: boolean; equivalentClassification?: 'TERCEIRO' | 'INTERNO' | 'INDETERMINADO' }) {
+  const databaseCheck = await pool.query<{ current_database: string }>('SELECT current_database()');
+  assert.equal(databaseCheck.rows[0]?.current_database, 'oficina_teste_fase051', 'a escrita de teste exige o banco isolado autorizado');
   const obra = (await pool.query<{ id: string }>(`SELECT id FROM obras WHERE codigo='TEST-OBRA-001' LIMIT 1`)).rows[0];
   const fleet = (await pool.query<{ id: string; prefixo_frota_id: string }>('SELECT id,prefixo_frota_id FROM frotas ORDER BY codigo LIMIT 1')).rows[0];
   assert.ok(obra && fleet);
@@ -67,7 +69,7 @@ test('bloqueia associação a serviço equivalente incompatível sem alterar dad
   const f = await fixture({ withLink: true, withEquivalent: true, equivalentClassification: 'INDETERMINADO' });
   await assert.rejects(
     () => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'Tentativa de associacao incompatível.', servico_equivalente_id: f.equivalentId }, actor),
-    error => error instanceof Error && error.message.includes('Regularize a classificação para TERCEIRO'),
+    error => error instanceof Error && error.message.includes('Confirme explicitamente'),
   );
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_vinculos WHERE produto_os_id=$1', [f.productId])).rows[0].count, 1);
@@ -106,6 +108,43 @@ test('rejeita mão de obra interna sem criar serviço ou reclassificação', asy
   );
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM servicos_os WHERE ordem_servico_id=$1', [f.orderId])).rows[0].count, 0);
+});
+
+test('regulariza serviÃ§o legado INDETERMINADO e reutiliza correspondÃªncia Ãºnica na mesma transaÃ§Ã£o', async () => {
+  const f = await fixture({ withLink: true, withEquivalent: true, equivalentClassification: 'INDETERMINADO' });
+  await assert.rejects(
+    () => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'ConfirmaÃ§Ã£o pendente.' }, actor),
+    error => error instanceof Error && error.message.includes('Confirme explicitamente'),
+  );
+  assert.equal((await pool.query<{ classificacao_servico: string }>('SELECT classificacao_servico FROM servicos_os WHERE id=$1', [f.equivalentId])).rows[0].classificacao_servico, 'INDETERMINADO');
+  const result = await reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'ServiÃ§o confirmado como terceirizado.', confirmar_regularizacao_terceiro: true }, actor);
+  assert.equal(result.criouServico, false);
+  assert.equal(result.regularizouClassificacao, true);
+  assert.deepEqual((await pool.query<{ classificacao_servico: string; classificacao_origem: string }>('SELECT classificacao_servico,classificacao_origem FROM servicos_os WHERE id=$1', [f.equivalentId])).rows[0], { classificacao_servico: 'TERCEIRO', classificacao_origem: 'REVISAO' });
+  assert.deepEqual((await pool.query<{ total_produtos: string; total_servicos_terceiros: string; total_os: string }>('SELECT total_produtos,total_servicos_terceiros,total_os FROM vw_ordens_servico_resumo WHERE id=$1', [f.orderId])).rows[0], { total_produtos: '0', total_servicos_terceiros: '60.00', total_os: '60.00' });
+  assert.ok((await pool.query(`SELECT count(*)::int AS count FROM auditoria WHERE entidade='servicos_os' AND entidade_id=$1`, [f.equivalentId])).rows[0].count >= 1);
+});
+
+test('mantÃ©m ambiguidade sem escolher serviÃ§o arbitrariamente', async () => {
+  const f = await fixture({ withLink: false, withEquivalent: true, equivalentClassification: 'TERCEIRO' });
+  const second = randomUUID();
+  await pool.query(`INSERT INTO servicos_os(id,ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem) VALUES($1,$2,'ITEM RECLASSIFICAR',60,'TERCEIRO','MANUAL')`, [second, f.orderId]);
+  serviceIds.push(second);
+  await assert.rejects(
+    () => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'Ambiguidade controlada.' }, actor),
+    error => error instanceof Error && error.message.includes('Foram encontrados'),
+  );
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);
+});
+
+test('bloqueia serviÃ§o equivalente INTERNO mesmo com confirmaÃ§Ã£o', async () => {
+  const f = await fixture({ withLink: false, withEquivalent: true, equivalentClassification: 'INTERNO' });
+  await assert.rejects(
+    () => reclassifyProdutoAsServico(f.orderId, f.productId, { tipo_servico: 'TERCEIRO', justificativa: 'ServiÃ§o interno nÃ£o deve ser convertido.', confirmar_regularizacao_terceiro: true }, actor),
+    error => error instanceof Error && error.message.includes('INTERNOS'),
+  );
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM ordens_servico_item_reclassificacoes WHERE produto_os_id=$1', [f.productId])).rows[0].count, 0);
+  assert.equal((await pool.query('SELECT classificacao_servico FROM servicos_os WHERE id=$1', [f.equivalentId])).rows[0].classificacao_servico, 'INTERNO');
 });
 
 after(async () => {

@@ -90,7 +90,7 @@ export interface OrdemServicoFilters {
 
 export class OrdemServicoServiceError extends Error {
   constructor(
-    public readonly statusCode: 400 | 404 | 409 | 503,
+    public readonly statusCode: 400 | 403 | 404 | 409 | 503,
     message: string,
     public readonly code?: string,
     public readonly details?: unknown,
