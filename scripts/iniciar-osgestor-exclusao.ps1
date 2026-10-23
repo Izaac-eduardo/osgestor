@@ -4,7 +4,13 @@ param(
   [ValidatePattern('^[0-9a-f]{40}$')]
   [string]$ExpectedCommit,
   [switch]$CheckOnly,
-  [string]$CredentialFile = 'C:\Users\User\Documents\osgestor\.env'
+  [string]$CredentialFile = 'C:\Users\User\Documents\osgestor\.env',
+  [ValidateRange(5,300)]
+  [int]$BackendTimeoutSec = 60,
+  [ValidateRange(5,300)]
+  [int]$FrontendTimeoutSec = 60,
+  [ValidateRange(1,10)]
+  [int]$PollIntervalSec = 1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +32,11 @@ function Stop-WithError([string]$Message) {
   throw "OS Gestor com exclusão não iniciado: $Message"
 }
 
+function Format-PortOwners($Owners) {
+  if (-not $Owners -or $Owners.Count -eq 0) { return 'nenhum processo identificado' }
+  return (($Owners | ForEach-Object { "PID=$($_.ProcessId) Path=$($_.ExecutablePath) CommandLine=$($_.CommandLine)" }) -join ' | ')
+}
+
 function Read-EnvFile([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Stop-WithError "arquivo de credenciais não encontrado: $Path" }
   $values = @{}
@@ -40,10 +51,66 @@ function Read-EnvFile([string]$Path) {
 }
 
 function Get-PortOwners([int]$Port) {
+  $seen = @{}
   @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($seen.ContainsKey($_.OwningProcess)) { return }
+    $seen[$_.OwningProcess] = $true
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)"
     [pscustomobject]@{ Port=$Port; ProcessId=$_.OwningProcess; ExecutablePath=$process.ExecutablePath; CommandLine=$process.CommandLine }
   })
+}
+
+function Test-OfficialBackendProcess($Owner) {
+  if (-not $Owner.CommandLine) { return $false }
+  return $Owner.CommandLine.IndexOf($RealRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+    $Owner.CommandLine -match '(?i)(^|[\\/ ])src[\\/]server\.ts([" ]|$)'
+}
+
+function Test-OfficialFrontendProcess($Owner) {
+  if (-not $Owner.CommandLine) { return $false }
+  return $Owner.CommandLine.IndexOf($FrontendRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+    $Owner.CommandLine -match '(?i)(^|[\\/])vite([\\/]|[.]js)'
+}
+
+function Wait-BackendReady([int]$TimeoutSec, [string]$LogPath, [string]$ErrorLogPath) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  $lastError = 'nenhuma resposta recebida'
+  do {
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing 'http://localhost:3000/health' -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
+      $payload = $response.Content | ConvertFrom-Json
+      if ($response.StatusCode -eq 200 -and $payload.status -eq 'ok' -and $payload.message -eq 'API OSGestor está funcionando.') {
+        return $true
+      }
+      $lastError = "resposta inválida (HTTP $($response.StatusCode)): $($response.Content)"
+    } catch {
+      $lastError = $_.Exception.Message
+    }
+    Start-Sleep -Seconds $PollIntervalSec
+  } while ((Get-Date) -lt $deadline)
+
+  $owners = @(Get-PortOwners $BackendPort)
+  $processState = if ($owners.Count -gt 0) { Format-PortOwners $owners } else { 'nenhum processo escutando na porta 3000' }
+  Stop-WithError "backend não ficou pronto em ${TimeoutSec}s; última tentativa: $lastError; processos: $processState; logs: $LogPath e $ErrorLogPath"
+}
+
+function Wait-FrontendReady([int]$TimeoutSec, [string]$LogPath, [string]$ErrorLogPath) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  $lastError = 'nenhuma resposta recebida'
+  do {
+    try {
+      $response = Invoke-WebRequest -UseBasicParsing 'http://localhost:5173/' -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
+      if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) { return $true }
+      $lastError = "resposta inválida (HTTP $($response.StatusCode))"
+    } catch {
+      $lastError = $_.Exception.Message
+    }
+    Start-Sleep -Seconds $PollIntervalSec
+  } while ((Get-Date) -lt $deadline)
+
+  $owners = @(Get-PortOwners $FrontendPort)
+  $processState = if ($owners.Count -gt 0) { Format-PortOwners $owners } else { 'nenhum processo escutando na porta 5173' }
+  Stop-WithError "frontend não ficou pronto em ${TimeoutSec}s; última tentativa: $lastError; processos: $processState; logs: $LogPath e $ErrorLogPath"
 }
 
 if (-not (Test-Path -LiteralPath $RealRoot -PathType Container)) { Stop-WithError "worktree ausente: $RealRoot" }
@@ -56,6 +123,7 @@ Write-RunLog "START worktree=$RealRoot expectedCommit=$ExpectedCommit checkOnly=
 
 $actualCommit = (& git -C $RealRoot rev-parse HEAD).Trim()
 if ($actualCommit -ne $ExpectedCommit) { Stop-WithError "commit incorreto: $actualCommit. Esperado: $ExpectedCommit" }
+if ((& git -C $RealRoot branch --show-current).Trim() -ne 'main') { Stop-WithError 'branch incorreta; a inicialização exige a branch main.' }
 if ((git -C $RealRoot status --porcelain)) { Stop-WithError 'worktree não está limpo; publique uma versão commitada antes de iniciar.' }
 Write-RunLog "COMMIT_OK $actualCommit"
 
@@ -76,13 +144,20 @@ Write-RunLog 'DATABASE_OK database=oficina schema=034+035'
 
 $backendOwners=@(Get-PortOwners $BackendPort); $frontendOwners=@(Get-PortOwners $FrontendPort)
 Write-RunLog ("PORT_3000 owners=" + (($backendOwners|ForEach-Object{$_.ProcessId}) -join ',')); Write-RunLog ("PORT_5173 owners=" + (($frontendOwners|ForEach-Object{$_.ProcessId}) -join ','))
-$badBackend=$backendOwners|Where-Object{$_.CommandLine -notlike "*$RealRoot*" -or $_.CommandLine -notmatch 'src[\\/]server\.ts'}; $badFrontend=$frontendOwners|Where-Object{$_.CommandLine -notlike "*$FrontendRoot*" -or $_.CommandLine -notmatch 'vite'}
-if($badBackend){Stop-WithError 'porta 3000 ocupada por processo incompatível; nenhum processo foi encerrado.'}; if($badFrontend){Stop-WithError 'porta 5173 ocupada por processo incompatível; nenhum processo foi encerrado.'}
+$badBackend=@($backendOwners|Where-Object{ -not (Test-OfficialBackendProcess $_) }); $badFrontend=@($frontendOwners|Where-Object{ -not (Test-OfficialFrontendProcess $_) })
+if($badBackend){Stop-WithError "porta 3000 ocupada por processo incompatível ou não identificado; nenhum processo foi encerrado. $((Format-PortOwners $badBackend))"}; if($badFrontend){Stop-WithError "porta 5173 ocupada por processo incompatível ou não identificado; nenhum processo foi encerrado. $((Format-PortOwners $badFrontend))"}
 if($CheckOnly){Write-RunLog 'CHECK_ONLY_OK';Write-Output 'CHECK-ONLY concluído.';exit 0}
 
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'; $backendLog=Join-Path $LogRoot "backend-exclusao-$stamp.log"; $backendErr=Join-Path $LogRoot "backend-exclusao-$stamp.err.log"; $frontendLog=Join-Path $LogRoot "frontend-exclusao-$stamp.log"; $frontendErr=Join-Path $LogRoot "frontend-exclusao-$stamp.err.log"
-if($backendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev') -WorkingDirectory $RealRoot -RedirectStandardOutput $backendLog -RedirectStandardError $backendErr|Out-Null;Write-RunLog "BACKEND_START log=$backendLog";Start-Sleep 3}
-try{$h=Invoke-WebRequest -UseBasicParsing http://localhost:3000/health -TimeoutSec 10;if($h.StatusCode-ne 200){Stop-WithError 'backend não respondeu HTTP 200.'}}catch{Stop-WithError 'backend não respondeu em /health.'}
-if($frontendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev','--','--host','0.0.0.0') -WorkingDirectory $FrontendRoot -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErr|Out-Null;Write-RunLog "FRONTEND_START log=$frontendLog";Start-Sleep 3}
-try{$f=Invoke-WebRequest -UseBasicParsing http://localhost:5173 -TimeoutSec 10;if($f.StatusCode-ne 200){Stop-WithError 'frontend não respondeu HTTP 200.'}}catch{Stop-WithError 'frontend não respondeu em localhost:5173.'}
-Write-RunLog 'START_OK backend=3000 frontend=5173';Write-Output "OS Gestor com exclusão iniciado. Logs: $LogRoot"
+Write-Output '[1/5] Validações de Git, diretório e segurança concluídas.'
+Write-Output '[2/5] Validação do banco de dados concluída.'
+Write-Output '[3/5] Verificando backend...'
+if($backendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev') -WorkingDirectory $RealRoot -RedirectStandardOutput $backendLog -RedirectStandardError $backendErr|Out-Null;Write-RunLog "BACKEND_START log=$backendLog";Write-Output 'Backend iniciado; aguardando /health...'} else {Write-Output 'Backend oficial já está em execução; reutilizando-o.'}
+Wait-BackendReady -TimeoutSec $BackendTimeoutSec -LogPath $backendLog -ErrorLogPath $backendErr
+Write-Output 'Backend respondendo com conteúdo válido.'
+Write-Output '[4/5] Verificando frontend...'
+if($frontendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev','--','--host','0.0.0.0') -WorkingDirectory $FrontendRoot -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErr|Out-Null;Write-RunLog "FRONTEND_START log=$frontendLog";Write-Output 'Frontend iniciado; aguardando HTTP...'} else {Write-Output 'Frontend oficial já está em execução; reutilizando-o.'}
+Wait-FrontendReady -TimeoutSec $FrontendTimeoutSec -LogPath $frontendLog -ErrorLogPath $frontendErr
+Write-Output 'Frontend respondendo.'
+Write-Output '[5/5] Verificação final...'
+Write-RunLog 'START_OK backend=3000 frontend=5173';Write-Output 'START_OK';Write-Output "OS Gestor disponível em: http://localhost:5173`nLogs: $LogRoot"
