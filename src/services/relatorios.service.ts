@@ -5,6 +5,7 @@ import {
   ordemServicoNaturezas,
   ordemServicoStatuses,
 } from './ordens-servico.service.js';
+import { addCategoriaPredicate, parseCategoriaFiltro } from './categorias-filtro.service.js';
 
 export interface RelatorioFilters {
   obra_id?: string;
@@ -15,6 +16,7 @@ export interface RelatorioFilters {
   data_fim?: string;
   natureza_os?: string;
   categoria_servico?: string;
+  categoria?: string;
   status?: string;
 }
 
@@ -97,6 +99,7 @@ const validateFilters = (filters: RelatorioFilters, allowed: readonly FilterName
   ) {
     throw new RelatorioServiceError(400, 'prefixo_frota_id deve ser um UUID válido.');
   }
+  parseCategoriaFiltro(filters.categoria);
   if (accepts('data_inicio') && filters.data_inicio !== undefined && !isValidDate(filters.data_inicio)) {
     throw new RelatorioServiceError(400, 'data_inicio deve estar no formato YYYY-MM-DD.');
   }
@@ -176,12 +179,13 @@ const buildWhere = (
   if (allowed.includes('status') && filters.status !== undefined) add('status', filters.status);
   if (allowed.includes('data_inicio') && filters.data_inicio !== undefined) {
     values.push(filters.data_inicio);
-    conditions.push(`data_abertura >= $${values.length}`);
+    conditions.push(`data_abertura >= $${values.length}::date`);
   }
   if (allowed.includes('data_fim') && filters.data_fim !== undefined) {
     values.push(filters.data_fim);
-    conditions.push(`data_abertura <= $${values.length}`);
+    conditions.push(`data_abertura <= $${values.length}::date`);
   }
+  addCategoriaPredicate(conditions, values, 'v', parseCategoriaFiltro(filters.categoria));
   return {
     where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
     values,
@@ -194,6 +198,14 @@ const numeric = (value: string, field: string): number => {
     throw new Error(`Valor numérico fora da faixa segura em ${field}.`);
   }
   return converted;
+};
+
+const financialColumns = (filters: RelatorioFilters, values: QueryValue[]): string => {
+  const categoria = parseCategoriaFiltro(filters.categoria);
+  if (categoria?.origem !== 'GERENCIAL') return 'v.total_mao_obra_interna,v.total_servicos_terceiros,v.total_produtos,v.total_os';
+  const parameter = `$${values.length}`;
+  const services = `(SELECT COALESCE(SUM(s.valor),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
+  return `0 total_mao_obra_interna,${services} total_servicos_terceiros,0 total_produtos,${services} total_os`;
 };
 
 export interface RelatorioFilterLabels {
@@ -296,7 +308,7 @@ export async function getOrdensServicoRelatorio(
 ): Promise<OrdemServicoRelatorio[]> {
   const allowed: FilterName[] = [
     'obra_id', 'prefixo_frota_id', 'frota_numero', 'frota_codigo', 'data_inicio', 'data_fim',
-    'natureza_os', 'categoria_servico', 'status',
+    'natureza_os', 'categoria_servico', 'categoria', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed);
   const ordensResult = await pool.query<OrdemRelatorioRow>(
@@ -304,7 +316,7 @@ export async function getOrdensServicoRelatorio(
        categoria_servico, prestador_terceiro, data_abertura, status,
        observacoes,
        total_mao_obra_interna, total_servicos_terceiros, total_produtos, total_os
-     FROM vw_ordens_servico_resumo
+     FROM vw_ordens_servico_resumo v
      ${where}
      ORDER BY data_abertura ASC, numero_os ASC`,
     values,
@@ -405,9 +417,10 @@ export async function getOrdensServicoRelatorio(
 export async function getGastosPorVeiculo(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
     'obra_id', 'prefixo_frota_id', 'frota_numero', 'frota_codigo', 'data_inicio', 'data_fim',
-    'natureza_os', 'categoria_servico', 'status',
+    'natureza_os', 'categoria_servico', 'categoria', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
+  const financial = financialColumns(filters, values);
   const result = await pool.query<GastosVeiculoRow>(
     `SELECT
        obra_id, obra_codigo, obra_nome, prefixo_frota_id, frota_prefixo,
@@ -417,7 +430,7 @@ export async function getGastosPorVeiculo(filters: RelatorioFilters) {
        SUM(total_produtos) AS total_produtos,
        SUM(total_os) AS total_gasto,
        COUNT(*) AS quantidade_os
-     FROM vw_ordens_servico_resumo
+     FROM (SELECT v.obra_id,v.obra_codigo,v.obra_nome,v.prefixo_frota_id,v.frota_prefixo,v.frota_numero,v.frota_codigo,v.status,v.data_abertura,v.natureza_os,v.categoria_servico,v.id,${financial} FROM vw_ordens_servico_resumo v) v
      ${where}
      GROUP BY obra_id, obra_codigo, obra_nome, prefixo_frota_id, frota_prefixo,
        frota_numero, frota_codigo
@@ -436,9 +449,10 @@ export async function getGastosPorVeiculo(filters: RelatorioFilters) {
 
 export async function getGastosPorObra(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'obra_id', 'frota_codigo', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico', 'status',
+    'obra_id', 'frota_codigo', 'data_inicio', 'data_fim', 'natureza_os', 'categoria_servico', 'categoria', 'status',
   ];
   const { where, values } = buildWhere(filters, allowed, ["status <> 'CANCELADA'"]);
+  const financial = financialColumns(filters, values);
   const result = await pool.query<GastosObraRow>(
     `SELECT
        obra_id, obra_codigo, obra_nome,
@@ -447,7 +461,7 @@ export async function getGastosPorObra(filters: RelatorioFilters) {
        SUM(total_produtos) AS total_produtos,
        SUM(total_os) AS total_gasto,
        COUNT(*) AS quantidade_os
-     FROM vw_ordens_servico_resumo
+     FROM (SELECT v.obra_id,v.obra_codigo,v.obra_nome,v.frota_codigo,v.status,v.data_abertura,v.natureza_os,v.categoria_servico,v.id,${financial} FROM vw_ordens_servico_resumo v) v
      ${where}
      GROUP BY obra_id, obra_codigo, obra_nome
      ORDER BY total_gasto DESC`,
@@ -465,16 +479,17 @@ export async function getGastosPorObra(filters: RelatorioFilters) {
 
 export async function getOsPorSemana(filters: RelatorioFilters) {
   const allowed: FilterName[] = [
-    'data_inicio', 'data_fim', 'obra_id', 'frota_codigo', 'status', 'natureza_os', 'categoria_servico',
+    'data_inicio', 'data_fim', 'obra_id', 'frota_codigo', 'status', 'natureza_os', 'categoria_servico', 'categoria',
   ];
   const { where, values } = buildWhere(filters, allowed);
+  const financial = financialColumns(filters, values);
   const result = await pool.query<OsSemanaRow>(
     `SELECT
        EXTRACT(ISOYEAR FROM data_abertura)::integer AS ano,
        EXTRACT(WEEK FROM data_abertura)::integer AS semana,
        to_char(date_trunc('week', data_abertura), 'YYYY-MM-DD') AS data_inicio_semana,
        COUNT(*) AS quantidade_os
-     FROM vw_ordens_servico_resumo
+     FROM (SELECT v.id,v.data_abertura,v.status,v.obra_id,v.frota_codigo,v.natureza_os,v.categoria_servico,${financial} FROM vw_ordens_servico_resumo v) v
      ${where}
      GROUP BY ano, semana, data_inicio_semana
      ORDER BY ano ASC, semana ASC`,

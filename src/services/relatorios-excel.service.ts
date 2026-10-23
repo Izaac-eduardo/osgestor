@@ -79,7 +79,7 @@ export async function exportGastosPorVeiculoExcel(filters: RelatorioFilters): Pr
       { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Número da Frota', value: filterValue(filters.frota_numero, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     [
       'Obra', 'Nome da Obra', 'Veículo', 'Mão de Obra Interna',
@@ -118,7 +118,7 @@ export async function exportGastosPorObraExcel(filters: RelatorioFilters): Promi
       { label: 'Período', value: periodText(filters) },
       { label: 'Obra', value: displayFilters.obra },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     [
       'Código da Obra', 'Nome da Obra', 'Mão de Obra Interna',
@@ -157,7 +157,7 @@ export async function exportOsPorSemanaExcel(filters: RelatorioFilters): Promise
       { label: 'Obra', value: displayFilters.obra },
       { label: 'Status', value: filterValue(filters.status, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     ['Ano', 'Semana', 'Início da Semana', 'Quantidade de OS'],
     [12, 12, 22, 20],

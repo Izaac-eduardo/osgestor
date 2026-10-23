@@ -1,10 +1,11 @@
 import { pool } from '../config/database.js';
 import { normalizeFleetCode } from '../utils/frotas.js';
 import { ordemServicoCategorias, ordemServicoNaturezas, ordemServicoStatuses } from './ordens-servico.service.js';
+import { addCategoriaPredicate, parseCategoriaFiltro } from './categorias-filtro.service.js';
 
 export interface DashboardFilters {
   data_inicio: string; data_fim: string; obra_id?: string; natureza_os?: string; status?: string;
-  frota_codigo?: string; categoria_servico?: string;
+  frota_codigo?: string; categoria_servico?: string; categoria?: string;
 }
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,16 +35,25 @@ const filterSql = (filters: DashboardFilters) => {
   if (filters.status) add('v.status', filters.status);
   if (filters.frota_codigo) add('v.frota_codigo', normalizeFleetCode(filters.frota_codigo));
   if (filters.categoria_servico) add('v.categoria_servico', filters.categoria_servico);
-  return { values, where: conditions.join(' AND ') };
+  const categoria = parseCategoriaFiltro(filters.categoria);
+  addCategoriaPredicate(conditions, values, 'v', categoria);
+  return { values, where: conditions.join(' AND '), categoria };
 };
 
 export async function getDashboard(filters: DashboardFilters) {
   validate(filters);
-  const { values, where } = filterSql(filters);
+  const { values, where, categoria } = filterSql(filters);
+  const gerencialParameter = categoria?.origem === 'GERENCIAL' ? `$${values.length}` : '';
+  const gerencialTotal = gerencialParameter
+    ? `(SELECT COALESCE(SUM(categoria_servico_item.valor),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
+    : '';
   const base = `WITH filtered AS (
     SELECT v.id, v.status, v.natureza_os, v.categoria_servico, v.data_abertura,
       v.obra_id, v.obra_codigo, v.obra_nome, v.frota_codigo,
-      v.total_mao_obra_interna, v.total_servicos_terceiros, v.total_produtos, v.total_os
+      ${gerencialTotal ? '0' : 'v.total_mao_obra_interna'} total_mao_obra_interna,
+      ${gerencialTotal || 'v.total_servicos_terceiros'} total_servicos_terceiros,
+      ${gerencialTotal ? '0' : 'v.total_produtos'} total_produtos,
+      ${gerencialTotal || 'v.total_os'} total_os
     FROM vw_ordens_servico_resumo v WHERE ${where}
   ), orders AS (SELECT * FROM filtered)`;
   const hourStart = values.length + 1; const hourEnd = values.length + 2;

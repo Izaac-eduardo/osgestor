@@ -13,6 +13,7 @@ import {
   createServiceOrder,
   deleteServiceOrder,
   getFleetPrefixes,
+  getCategoryFilterOptions,
   getProjects,
   getServiceOrder,
   getServiceOrderDetails,
@@ -26,6 +27,7 @@ import type {
   ProjectOption,
   ServiceOrder,
   ServiceOrderDetails,
+  CategoryFilterOption,
 } from '../types/orders'
 import type { Fleet } from '../types/fleets'
 
@@ -38,6 +40,7 @@ export function OrdensServicoPage() {
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [prefixes, setPrefixes] = useState<FleetPrefixOption[]>([])
   const [fleets, setFleets] = useState<Fleet[]>([])
+  const [categories, setCategories] = useState<CategoryFilterOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -80,11 +83,12 @@ export function OrdensServicoPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    Promise.all([getProjects(controller.signal), getFleetPrefixes(controller.signal), getFleets()])
-      .then(([projectOptions, prefixOptions, fleetOptions]) => {
+    Promise.all([getProjects(controller.signal), getFleetPrefixes(controller.signal), getFleets(), getCategoryFilterOptions(controller.signal)])
+      .then(([projectOptions, prefixOptions, fleetOptions, categoryOptions]) => {
         setProjects(projectOptions)
         setPrefixes(prefixOptions)
         setFleets(fleetOptions)
+        setCategories(categoryOptions)
       })
       .catch(() => undefined)
     return () => controller.abort()
@@ -217,6 +221,7 @@ export function OrdensServicoPage() {
         filters={draft}
         setFilters={setDraft}
         projects={projects}
+        categories={categories}
         loadingOptions={!projects.length}
         onSubmit={() => setFilters({ ...draft })}
         onClear={clear}

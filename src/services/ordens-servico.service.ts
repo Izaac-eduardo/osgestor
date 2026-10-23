@@ -3,20 +3,10 @@ import { normalizeFleetCode } from '../utils/frotas.js';
 import { upsertOverride } from './ordens-servico-overrides.service.js';
 import { recordAudit } from './audit.service.js';
 import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { addCategoriaPredicate, ordemServicoCategorias, parseCategoriaFiltro } from './categorias-filtro.service.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
-export const ordemServicoCategorias = [
-  'LAVAGEM',
-  'MECANICA',
-  'AUTO_ELETRICA',
-  'ELETRICA',
-  'BORRACHARIA',
-  'LUBRIFICACAO',
-  'SOLDAGEM',
-  'FUNILARIA',
-  'HIDRAULICA',
-  'OUTROS',
-] as const;
+export { ordemServicoCategorias } from './categorias-filtro.service.js';
 export const ordemServicoStatuses = [
   'ABERTA',
   'EM_ANDAMENTO',
@@ -79,6 +69,7 @@ export interface OrdemServicoFilters {
   status?: string;
   natureza_os?: string;
   categoria_servico?: string;
+  categoria?: string;
   obra_id?: string;
   prefixo_frota_id?: string;
   numero_os?: string;
@@ -278,6 +269,8 @@ export async function listOrdensServico(filters: OrdemServicoFilters): Promise<O
   if (filters.categoria_servico !== undefined && !isCategoria(filters.categoria_servico)) {
     throw new OrdemServicoServiceError(400, 'categoria_servico inválida.');
   }
+  let categoriaFiltro;
+  try { categoriaFiltro = parseCategoriaFiltro(filters.categoria); } catch (error) { throw new OrdemServicoServiceError(400, error instanceof Error ? error.message : 'categoria inválida.'); }
   if (filters.obra_id !== undefined && !uuidPattern.test(filters.obra_id)) {
     throw new OrdemServicoServiceError(400, 'obra_id deve ser um UUID válido.');
   }
@@ -324,9 +317,22 @@ export async function listOrdensServico(filters: OrdemServicoFilters): Promise<O
     values.push(filters.data_fim);
   }
 
+  if (categoriaFiltro) {
+    values.push(categoriaFiltro.valor);
+    conditions.push(categoriaFiltro.origem === 'OS'
+      ? `v.categoria_servico = $${values.length}`
+      : `EXISTS (SELECT 1 FROM servicos_os categoria_servico_filtro WHERE categoria_servico_filtro.ordem_servico_id = v.id AND categoria_servico_filtro.categoria_gerencial = $${values.length})`);
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await pool.query<OrdemServicoResumo>(
-    `SELECT * FROM vw_ordens_servico_resumo ${where} ORDER BY numero_os DESC`,
+    `SELECT v.id,v.numero_os,v.obra_id,v.obra_codigo,v.obra_nome,v.prefixo_frota_id,v.frota_prefixo,v.frota_numero,v.frota_codigo,v.natureza_os,v.categoria_servico,v.prestador_terceiro,v.data_abertura,v.data_fechamento,v.status,
+       ${categoriaFiltro?.origem === 'GERENCIAL' ? '0' : 'v.total_mao_obra_interna'} total_mao_obra_interna,
+       ${categoriaFiltro?.origem === 'GERENCIAL' ? `(SELECT COALESCE(SUM(s.valor),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=$${values.length})` : 'v.total_servicos_terceiros'} total_servicos_terceiros,
+       ${categoriaFiltro?.origem === 'GERENCIAL' ? '0' : 'v.total_produtos'} total_produtos,
+       ${categoriaFiltro?.origem === 'GERENCIAL' ? `(SELECT COALESCE(SUM(s.valor),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=$${values.length})` : 'v.total_os'} total_os,
+       v.observacoes,v.created_at,v.updated_at
+     FROM vw_ordens_servico_resumo v ${where} ORDER BY v.numero_os DESC`,
     values,
   );
   return result.rows;

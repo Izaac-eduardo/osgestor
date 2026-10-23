@@ -6,6 +6,7 @@ import {
   listOrdensServicoController,
   updateOrdemServicoController,
   updateOrdemServicoStatusController,
+  categoriasFiltroController,
 } from '../controllers/ordens-servico.controller.js';
 import {
   addFuncionarioOsController,
@@ -35,6 +36,7 @@ export const ordensServicoRoutes = Router();
 ordensServicoRoutes.use(requireMethodRole({ deleteRoles: ['ADMIN', 'OPERADOR'] }));
 
 ordensServicoRoutes.get('/', listOrdensServicoController);
+ordensServicoRoutes.get('/categorias-filtro', categoriasFiltroController);
 ordensServicoRoutes.get('/:id/detalhes', getOrdemServicoDetalhesController);
 ordensServicoRoutes.get('/:id/funcionarios', listFuncionariosOsController);
 ordensServicoRoutes.post('/:id/funcionarios', addFuncionarioOsController);

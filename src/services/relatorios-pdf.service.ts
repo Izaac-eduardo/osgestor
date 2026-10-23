@@ -209,7 +209,7 @@ export async function exportGastosPorVeiculoPdf(filters: RelatorioFilters): Prom
       { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Número da Frota', value: filterValue(filters.frota_numero, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     columns: [
       { title: 'Obra', width: 92, value: (item) => item.obra_codigo },
@@ -240,7 +240,7 @@ export async function exportGastosPorObraPdf(filters: RelatorioFilters): Promise
     filters: [
       ...commonFilters(filters, displayFilters.obra),
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     columns: [
       { title: 'Código', width: 72, value: (item) => item.obra_codigo },
@@ -271,7 +271,7 @@ export async function exportOsPorSemanaPdf(filters: RelatorioFilters): Promise<B
       ...commonFilters(filters, displayFilters.obra),
       { label: 'Status', value: filterValue(filters.status, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
-      { label: 'Categoria', value: filterValue(filters.categoria_servico, 'Todas') },
+      { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
     columns: [
       { title: 'Ano', width: 80, align: 'center', value: (item) => String(item.ano) },

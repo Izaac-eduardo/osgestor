@@ -8,6 +8,7 @@ import {
   updateOrdemServico,
   updateOrdemServicoStatus,
 } from '../services/ordens-servico.service.js';
+import { getCategoriasFiltro } from '../services/categorias-filtro.service.js';
 
 const sendError = (response: Response, error: unknown): void => {
   if (error instanceof OrdemServicoServiceError) {
@@ -37,6 +38,7 @@ export async function listOrdensServicoController(request: Request, response: Re
       status: queryText(request.query.status),
       natureza_os: queryText(request.query.natureza_os),
       categoria_servico: queryText(request.query.categoria_servico),
+      categoria: queryText(request.query.categoria),
       obra_id: queryText(request.query.obra_id),
       prefixo_frota_id: queryText(request.query.prefixo_frota_id),
       numero_os: queryText(request.query.numero_os),
@@ -49,6 +51,10 @@ export async function listOrdensServicoController(request: Request, response: Re
   } catch (error) {
     sendError(response, error);
   }
+}
+
+export async function categoriasFiltroController(_request: Request, response: Response): Promise<void> {
+  response.status(200).json(await getCategoriasFiltro());
 }
 
 export async function getOrdemServicoController(request: Request, response: Response): Promise<void> {

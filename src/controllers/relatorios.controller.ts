@@ -29,6 +29,7 @@ const reportFilters = (request: Request): RelatorioFilters => ({
   data_fim: queryText(request.query.data_fim),
   natureza_os: queryText(request.query.natureza_os),
   categoria_servico: queryText(request.query.categoria_servico),
+  categoria: queryText(request.query.categoria),
   status: queryText(request.query.status),
 });
 
