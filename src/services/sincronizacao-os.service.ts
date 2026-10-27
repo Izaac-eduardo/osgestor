@@ -29,7 +29,7 @@ export interface ExistingOsSnapshot {
   dataFechamento: string | null;
   dataAbertura?: string;
   updatedAt?: string;
-  servicos: Array<{ id: string; descricao: string; valor: number }>;
+  servicos: Array<{ id: string; descricao: string; valor: number; categoriaGerencial?: string | null; categoriaGerencialManual?: boolean; descricaoManual?: boolean }>;
   produtos: Array<{ id: string; descricao: string; quantidade: number; unidade: string; valorUnitario: number }>;
   reclassificacoes?: Array<{
     produtoId: string;
@@ -159,6 +159,10 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   }
   for (const item of incomingServices) {
     if (equivalentServices.has(item)) continue;
+    const exact = servicePool.find((value) => serviceKey(value) === serviceKey({ descricao: item.descricao, valor: item.total }));
+    if (exact?.categoriaGerencialManual && exact.categoriaGerencial !== (item.categoria_gerencial ?? null)) {
+      divergencias.push('CATEGORIA_GERENCIAL_MANUAL_CONFLITANTE');
+    }
     if (consume(servicePool, serviceKey, { descricao: item.descricao, valor: item.total })) continue;
     const equivalent = servicePool.find(value => equivalentService(value, item));
     if (equivalent) { avisos.push('SERVICO_EQUIVALENTE_CONSOLIDADO'); servicePool.splice(servicePool.indexOf(equivalent), 1); continue; }
@@ -241,7 +245,7 @@ export async function loadExistingOsUsing(db: { query: typeof pool.query }, nume
       WHERE os.numero_os=$1 FOR UPDATE OF os`, [numeroOs]);
   if (!order.rows[0]) return undefined;
   const row = order.rows[0];
-  const services = await db.query<{ id: string; descricao: string; valor: string }>('SELECT id,descricao,valor FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
+  const services = await db.query<{ id: string; descricao: string; valor: string; categoria_gerencial: string | null; categoria_gerencial_editada_manualmente: boolean; descricao_editada_manualmente: boolean }>('SELECT id,descricao,valor,categoria_gerencial,categoria_gerencial_editada_manualmente,descricao_editada_manualmente FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
   const hasSchema = await hasReclassificacaoSchema(db);
   const products = await db.query<{ id: string; descricao: string; quantidade: string; unidade: string; valor_unitario: string }>(hasSchema
     ? `SELECT p.id,p.descricao,p.quantidade,p.unidade,p.valor_unitario
@@ -258,7 +262,7 @@ export async function loadExistingOsUsing(db: { query: typeof pool.query }, nume
     : { rows: [] };
   const executions = await db.query<{ id: string; funcionario_id: string; inicio: string; fim: string; servico_os_id: string | null }>('SELECT id,funcionario_id,to_char(inicio,\'YYYY-MM-DD"T"HH24:MI\') inicio,to_char(fim,\'YYYY-MM-DD"T"HH24:MI\') fim,servico_os_id FROM servicos_os_execucoes WHERE ordem_servico_id=$1', [row.id]);
   const fleetOverride = await db.query<{ frota_id_override: string | null }>(`SELECT frota_id_override FROM ordens_servico_overrides WHERE ordem_servico_id=$1 AND campo='frota_id'`, [row.id]);
-  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataAbertura: row.data_abertura, dataFechamento: row.data_fechamento, updatedAt: row.updated_at, servicos: services.rows.map(value => ({ ...value, valor: Number(value.valor) })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), reclassificacoes: reclassificacoes.rows.map(value => ({ produtoId: value.produto_id, fingerprintContexto: value.fingerprint_contexto, descricao: value.descricao_original, quantidade: Number(value.quantidade_original), unidade: value.unidade_original, valorUnitario: Number(value.valor_unitario_original) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
+  return { id: row.id, numeroOs: Number(row.numero_os), obraId: row.obra_id, obra: row.obra, frotaId: row.frota_id, frotaOverrideId: fleetOverride.rows[0]?.frota_id_override ?? null, frota: row.frota, natureza: row.natureza_os, categoria: row.categoria_servico, status: row.status, problema: row.observacoes, dataAbertura: row.data_abertura, dataFechamento: row.data_fechamento, updatedAt: row.updated_at, servicos: services.rows.map(value => ({ id: value.id, descricao: value.descricao, valor: Number(value.valor), categoriaGerencial: value.categoria_gerencial, categoriaGerencialManual: value.categoria_gerencial_editada_manualmente, descricaoManual: value.descricao_editada_manualmente })), produtos: products.rows.map(value => ({ id: value.id, descricao: value.descricao, quantidade: Number(value.quantidade), unidade: value.unidade, valorUnitario: Number(value.valor_unitario) })), reclassificacoes: reclassificacoes.rows.map(value => ({ produtoId: value.produto_id, fingerprintContexto: value.fingerprint_contexto, descricao: value.descricao_original, quantidade: Number(value.quantidade_original), unidade: value.unidade_original, valorUnitario: Number(value.valor_unitario_original) })), execucoes: executions.rows.map(value => ({ id: value.id, funcionarioId: value.funcionario_id, inicio: value.inicio, fim: value.fim, servicoOsId: value.servico_os_id })) };
 }
 
 export async function synchronizeOrder(parsed: ParsedOs, actor?: AuthenticatedRequestUser | null): Promise<OsUpdateDiff> {

@@ -1,8 +1,9 @@
 import {api} from './api'
-import type{CategoryFilterOption,FleetPrefixOption,OrderFilters,ProjectOption,ServiceOrder,ServiceOrderDetails}from'../types/orders'
+import type{CategoryFilterOption,FleetPrefixOption,OrderFilters,ProjectOption,ServiceOrder,ServiceOrderDetails,ServiceCategoryOption,ServiceGerencialEditPayload}from'../types/orders'
 const params=(filters:OrderFilters):Record<string,string>=>Object.fromEntries(Object.entries(filters).filter((entry):entry is[string,string]=>Boolean(entry[1])))
 export async function getServiceOrders(filters:OrderFilters={},signal?:AbortSignal){const{data}=await api.get<ServiceOrder[]>('/ordens-servico',{params:params(filters),signal});return data}
 export async function getCategoryFilterOptions(signal?:AbortSignal){const{data}=await api.get<CategoryFilterOption[]>('/ordens-servico/categorias-filtro',{signal});return data}
+export async function getServiceCategoryOptions(signal?:AbortSignal){const{data}=await api.get<ServiceCategoryOption[]>('/ordens-servico/categorias-gerenciais',{signal});return data}
 export async function getServiceOrder(id:string,signal?:AbortSignal){const{data}=await api.get<ServiceOrder>(`/ordens-servico/${id}`,{signal});return data}
 export async function getServiceOrderDetails(id:string,signal?:AbortSignal){const{data}=await api.get<ServiceOrderDetails>(`/ordens-servico/${id}/detalhes`,{signal});return data}
 export async function getProjects(signal?:AbortSignal){const{data}=await api.get<ProjectOption[]>('/obras',{signal});return data}
@@ -14,6 +15,7 @@ export async function addOrderEmployee(orderId:string,payload:import('../types/o
 export async function removeOrderEmployee(orderId:string,employeeId:string){await api.delete(`/ordens-servico/${orderId}/funcionarios/${employeeId}`)}
 export async function createOrderService(orderId:string,payload:import('../types/orders').ServiceItemPayload){const{data}=await api.post<import('../types/orders').OrderService>(`/ordens-servico/${orderId}/servicos`,payload);return data}
 export async function updateOrderService(orderId:string,itemId:string,payload:import('../types/orders').ServiceItemPayload){const{data}=await api.put<import('../types/orders').OrderService>(`/ordens-servico/${orderId}/servicos/${itemId}`,payload);return data}
+export async function updateOrderServiceGerencial(orderId:string,itemId:string,payload:ServiceGerencialEditPayload){const{data}=await api.patch<import('../types/orders').OrderService>(`/ordens-servico/${orderId}/servicos/${itemId}/categoria-gerencial`,payload);return data}
 export async function removeOrderService(orderId:string,itemId:string){await api.delete(`/ordens-servico/${orderId}/servicos/${itemId}`)}
 export async function createServiceExecution(orderId:string,serviceId:string,payload:import('../types/orders').ServiceExecutionPayload){const{data}=await api.post<import('../types/orders').ServiceExecution>(`/ordens-servico/${orderId}/servicos/${serviceId}/execucoes`,payload);return data}
 export async function updateServiceExecution(orderId:string,serviceId:string,executionId:string,payload:import('../types/orders').ServiceExecutionPayload){const{data}=await api.put<import('../types/orders').ServiceExecution>(`/ordens-servico/${orderId}/servicos/${serviceId}/execucoes/${executionId}`,payload);return data}

@@ -44,14 +44,18 @@ export async function getDashboard(filters: DashboardFilters) {
   validate(filters);
   const { values, where, categoria } = filterSql(filters);
   const gerencialParameter = categoria?.origem === 'GERENCIAL' ? `$${values.length}` : '';
-  const gerencialTotal = gerencialParameter
-    ? `(SELECT COALESCE(SUM(categoria_servico_item.valor),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
+  const gerencialInternal = gerencialParameter
+    ? `(SELECT COALESCE(SUM(categoria_servico_item.valor) FILTER (WHERE categoria_servico_item.classificacao_servico = 'INTERNO' OR (categoria_servico_item.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'INTERNA')),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
     : '';
+  const gerencialThirdParty = gerencialParameter
+    ? `(SELECT COALESCE(SUM(categoria_servico_item.valor) FILTER (WHERE categoria_servico_item.classificacao_servico = 'TERCEIRO' OR (categoria_servico_item.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
+    : '';
+  const gerencialTotal = gerencialParameter ? `(${gerencialInternal}+${gerencialThirdParty})` : '';
   const base = `WITH filtered AS (
     SELECT v.id, v.status, v.natureza_os, v.categoria_servico, v.data_abertura,
       v.obra_id, v.obra_codigo, v.obra_nome, v.frota_codigo,
-      ${gerencialTotal ? '0' : 'v.total_mao_obra_interna'} total_mao_obra_interna,
-      ${gerencialTotal || 'v.total_servicos_terceiros'} total_servicos_terceiros,
+      ${gerencialTotal ? gerencialInternal : 'v.total_mao_obra_interna'} total_mao_obra_interna,
+      ${gerencialTotal ? gerencialThirdParty : 'v.total_servicos_terceiros'} total_servicos_terceiros,
       ${gerencialTotal ? '0' : 'v.total_produtos'} total_produtos,
       ${gerencialTotal || 'v.total_os'} total_os
     FROM vw_ordens_servico_resumo v WHERE ${where}

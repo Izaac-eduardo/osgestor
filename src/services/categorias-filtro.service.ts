@@ -46,3 +46,26 @@ export async function getCategoriasFiltro(): Promise<CategoriaFiltroOpcao[]> {
     ...result.rows.map(({ categoria: valor }) => ({ origem: 'GERENCIAL' as const, valor, value: `GERENCIAL:${valor}`, label: `${valor} (serviços)` })),
   ];
 }
+
+export interface CategoriaGerencialOpcao {
+  value: string;
+}
+
+export async function getCategoriasGerenciais(): Promise<CategoriaGerencialOpcao[]> {
+  const result = await pool.query<{ value: string }>(
+    `SELECT value
+       FROM (
+         SELECT DISTINCT categoria_gerencial AS value
+           FROM servicos_os
+          WHERE categoria_gerencial IS NOT NULL AND btrim(categoria_gerencial) <> ''
+         UNION
+         SELECT DISTINCT categoria_gerencial AS value
+           FROM poli_item_categorias_gerenciais
+          WHERE tipo_item = 'SERVICO'
+            AND status_aprovacao = 'APROVADO'
+            AND btrim(categoria_gerencial) <> ''
+       ) categories
+      ORDER BY value`,
+  );
+  return result.rows;
+}

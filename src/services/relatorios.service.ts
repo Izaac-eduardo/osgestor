@@ -204,8 +204,9 @@ const financialColumns = (filters: RelatorioFilters, values: QueryValue[]): stri
   const categoria = parseCategoriaFiltro(filters.categoria);
   if (categoria?.origem !== 'GERENCIAL') return 'v.total_mao_obra_interna,v.total_servicos_terceiros,v.total_produtos,v.total_os';
   const parameter = `$${values.length}`;
-  const services = `(SELECT COALESCE(SUM(s.valor),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
-  return `0 total_mao_obra_interna,${services} total_servicos_terceiros,0 total_produtos,${services} total_os`;
+  const internal = `(SELECT COALESCE(SUM(s.valor) FILTER (WHERE s.classificacao_servico = 'INTERNO' OR (s.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'INTERNA')),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
+  const thirdParty = `(SELECT COALESCE(SUM(s.valor) FILTER (WHERE s.classificacao_servico = 'TERCEIRO' OR (s.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
+  return `${internal} total_mao_obra_interna,${thirdParty} total_servicos_terceiros,0 total_produtos,(${internal}+${thirdParty}) total_os`;
 };
 
 export interface RelatorioFilterLabels {

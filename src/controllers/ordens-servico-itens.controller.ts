@@ -12,10 +12,12 @@ import {
   listFuncionariosOs,
   listProdutosOs,
   listServicosOs,
+  updateServicoGerencialManual,
   removeFuncionarioOs,
   updateProdutoOs,
   updateServicoOs,
 } from '../services/ordens-servico-itens.service.js';
+import { getCategoriasGerenciais } from '../services/categorias-filtro.service.js';
 import { reclassifyProdutoAsServico } from '../services/ordens-servico-reclassificacao.service.js';
 
 const sendError = (response: Response, error: unknown): void => {
@@ -66,6 +68,10 @@ export async function listServicosOsController(request: Request, response: Respo
   } catch (error) { sendError(response, error); }
 }
 
+export async function listCategoriasGerenciaisController(_request: Request, response: Response): Promise<void> {
+  try { response.status(200).json(await getCategoriasGerenciais()); } catch (error) { sendError(response, error); }
+}
+
 export async function createServicoOsController(request: Request, response: Response): Promise<void> {
   try {
     response.status(201).json(await createServicoOs(routeUuid(request.params.id, 'id'), request.body, request.authUser!));
@@ -75,6 +81,17 @@ export async function createServicoOsController(request: Request, response: Resp
 export async function updateServicoOsController(request: Request, response: Response): Promise<void> {
   try {
     response.status(200).json(await updateServicoOs(
+      routeUuid(request.params.id, 'id'),
+      routeUuid(request.params.servicoId, 'servicoId'),
+      request.body,
+      request.authUser!,
+    ));
+  } catch (error) { sendError(response, error); }
+}
+
+export async function updateServicoGerencialManualController(request: Request, response: Response): Promise<void> {
+  try {
+    response.status(200).json(await updateServicoGerencialManual(
       routeUuid(request.params.id, 'id'),
       routeUuid(request.params.servicoId, 'servicoId'),
       request.body,

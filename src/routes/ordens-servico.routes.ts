@@ -18,10 +18,12 @@ import {
   listFuncionariosOsController,
   listProdutosOsController,
   listServicosOsController,
+  listCategoriasGerenciaisController,
   removeFuncionarioOsController,
   reclassifyProdutoAsServicoController,
   updateProdutoOsController,
   updateServicoOsController,
+  updateServicoGerencialManualController,
 } from '../controllers/ordens-servico-itens.controller.js';
 import { listOrdemServicoOverridesController, removeOrdemServicoOverrideController } from '../controllers/ordens-servico-overrides.controller.js';
 import {
@@ -37,6 +39,7 @@ ordensServicoRoutes.use(requireMethodRole({ deleteRoles: ['ADMIN', 'OPERADOR'] }
 
 ordensServicoRoutes.get('/', listOrdensServicoController);
 ordensServicoRoutes.get('/categorias-filtro', categoriasFiltroController);
+ordensServicoRoutes.get('/categorias-gerenciais', listCategoriasGerenciaisController);
 ordensServicoRoutes.get('/:id/detalhes', getOrdemServicoDetalhesController);
 ordensServicoRoutes.get('/:id/funcionarios', listFuncionariosOsController);
 ordensServicoRoutes.post('/:id/funcionarios', addFuncionarioOsController);
@@ -44,6 +47,7 @@ ordensServicoRoutes.delete('/:id/funcionarios/:funcionarioId', removeFuncionario
 ordensServicoRoutes.get('/:id/servicos', listServicosOsController);
 ordensServicoRoutes.post('/:id/servicos', createServicoOsController);
 ordensServicoRoutes.put('/:id/servicos/:servicoId', updateServicoOsController);
+ordensServicoRoutes.patch('/:id/servicos/:servicoId/categoria-gerencial', requireRole('ADMIN', 'OPERADOR'), updateServicoGerencialManualController);
 ordensServicoRoutes.delete('/:id/servicos/:servicoId', deleteServicoOsController);
 ordensServicoRoutes.get('/:id/servicos/:servicoId/execucoes', listExecucoesController);
 ordensServicoRoutes.post('/:id/servicos/:servicoId/execucoes', createExecucaoController);

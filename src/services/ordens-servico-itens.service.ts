@@ -13,11 +13,12 @@ import {
   type ClassificacaoOrigem,
   type ClassificacaoServico,
 } from '../types/servicos-os.js';
+import { getCategoriasGerenciais } from './categorias-filtro.service.js';
 
 type NaturezaOs = 'INTERNA' | 'TERCEIRO' | 'MATERIAL';
 const auditItem = (row: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
   if (!row) return undefined;
-  return Object.fromEntries(['id', 'ordem_servico_id', 'funcionario_id', 'descricao', 'valor', 'classificacao_servico', 'classificacao_origem', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'].filter((key) => key in row).map((key) => [key, row[key]]));
+  return Object.fromEntries(['id', 'ordem_servico_id', 'funcionario_id', 'descricao', 'valor', 'classificacao_servico', 'classificacao_origem', 'categoria_gerencial', 'subcategoria_gerencial', 'origem_classificacao', 'descricao_editada_manualmente', 'categoria_gerencial_editada_manualmente', 'quantidade', 'unidade', 'valor_unitario', 'valor_total'].filter((key) => key in row).map((key) => [key, row[key]]));
 };
 
 export interface FuncionarioOs {
@@ -35,6 +36,11 @@ export interface ServicoOs {
   valor: string;
   classificacao_servico: ClassificacaoServico;
   classificacao_origem: ClassificacaoOrigem;
+  categoria_gerencial: string | null;
+  subcategoria_gerencial: string | null;
+  origem_classificacao: string | null;
+  descricao_editada_manualmente: boolean;
+  categoria_gerencial_editada_manualmente: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -179,6 +185,22 @@ const parseServico = (body: unknown): ServicoFields => {
     fields.classificacaoServico = body.classificacao_servico;
   }
   return fields;
+};
+
+interface ServicoEdicaoManualFields { descricao: string; categoria_gerencial: string | null; }
+
+const parseServicoEdicaoManual = (body: unknown): ServicoEdicaoManualFields => {
+  if (!isRecord(body)) throw new OrdemServicoServiceError(400, 'O corpo da requisição deve ser um objeto.');
+  const keys = Object.keys(body).sort();
+  if (keys.join(',') !== 'categoria_gerencial,descricao') {
+    throw new OrdemServicoServiceError(400, 'A edição manual aceita somente descricao e categoria_gerencial.');
+  }
+  const descricao = requiredText(body.descricao, 'descricao');
+  const categoria = body.categoria_gerencial;
+  if (categoria !== null && (typeof categoria !== 'string' || categoria.trim() === '')) {
+    throw new OrdemServicoServiceError(400, 'categoria_gerencial deve ser uma categoria válida ou null.');
+  }
+  return { descricao, categoria_gerencial: typeof categoria === 'string' ? categoria.trim() : null };
 };
 
 const parseProduto = (body: unknown): ProdutoFields => {
@@ -373,13 +395,15 @@ export async function updateServicoOs(
   const before = await client.query<ServicoOs>('SELECT * FROM servicos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE', [servicoId, ordemServicoId]);
   const result = fields.classificacaoServico === undefined
     ? await client.query<ServicoOs>(
-      `UPDATE servicos_os SET descricao = $1, valor = $2
+      `UPDATE servicos_os SET descricao = $1, valor = $2,
+          descricao_editada_manualmente = descricao_editada_manualmente OR descricao IS DISTINCT FROM $1
        WHERE id = $3 AND ordem_servico_id = $4 RETURNING *`,
       [fields.descricao, fields.valor, servicoId, ordemServicoId],
     )
     : await client.query<ServicoOs>(
       `UPDATE servicos_os
           SET descricao = $1, valor = $2,
+              descricao_editada_manualmente = descricao_editada_manualmente OR descricao IS DISTINCT FROM $1,
               classificacao_servico = $3::varchar,
               classificacao_origem = CASE
                 WHEN classificacao_servico IS DISTINCT FROM $3::varchar THEN 'REVISAO'
@@ -395,6 +419,60 @@ export async function updateServicoOs(
   await recordAudit({ actor, acao: 'EDITAR', modulo: 'ORDENS_SERVICO', entidade: 'servicos_os', entidadeId: servicoId, dadosAnteriores: auditItem(before.rows[0] as unknown as Record<string, unknown>), dadosPosteriores: auditItem(result.rows[0] as unknown as Record<string, unknown>) }, client);
   await client.query('COMMIT'); return result.rows[0]!;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+}
+
+export async function updateServicoGerencialManual(
+  ordemServicoId: string,
+  servicoId: string,
+  body: unknown,
+  actor?: AuthenticatedRequestUser,
+): Promise<ServicoOs> {
+  const fields = parseServicoEdicaoManual(body);
+  await getOrdemNatureza(ordemServicoId);
+  if (fields.categoria_gerencial !== null) {
+    const valid = (await getCategoriasGerenciais()).some((item) => item.value === fields.categoria_gerencial);
+    if (!valid) throw new OrdemServicoServiceError(400, 'categoria_gerencial inválida.');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = await client.query<ServicoOs>(
+      'SELECT * FROM servicos_os WHERE id = $1 AND ordem_servico_id = $2 FOR UPDATE',
+      [servicoId, ordemServicoId],
+    );
+    if (before.rows.length === 0) throw new OrdemServicoServiceError(404, 'Serviço não encontrado nesta Ordem de Serviço.');
+    const current = before.rows[0]!;
+    const changed = current.descricao !== fields.descricao || current.categoria_gerencial !== fields.categoria_gerencial;
+    if (!changed) {
+      await client.query('ROLLBACK');
+      return current;
+    }
+    const result = await client.query<ServicoOs>(
+      `UPDATE servicos_os
+          SET descricao = $1,
+              categoria_gerencial = $2::varchar(80),
+              origem_classificacao = CASE WHEN categoria_gerencial IS DISTINCT FROM $2::varchar(80) THEN 'MANUAL' ELSE origem_classificacao END,
+              descricao_editada_manualmente = descricao_editada_manualmente OR descricao IS DISTINCT FROM $1::text,
+              categoria_gerencial_editada_manualmente = categoria_gerencial_editada_manualmente OR categoria_gerencial IS DISTINCT FROM $2::varchar(80)
+        WHERE id = $3 AND ordem_servico_id = $4
+        RETURNING *`,
+      [fields.descricao, fields.categoria_gerencial, servicoId, ordemServicoId],
+    );
+    await recordAudit({
+      actor,
+      acao: 'EDITAR',
+      modulo: 'CATEGORIAS_GERENCIAIS',
+      entidade: 'servicos_os',
+      entidadeId: servicoId,
+      dadosAnteriores: { ordem_servico_id: ordemServicoId, servico_id: servicoId, descricao: current.descricao, categoria_gerencial: current.categoria_gerencial },
+      dadosPosteriores: { ordem_servico_id: ordemServicoId, servico_id: servicoId, descricao: result.rows[0]!.descricao, categoria_gerencial: result.rows[0]!.categoria_gerencial },
+    }, client);
+    await client.query('COMMIT');
+    return result.rows[0]!;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function deleteServicoOs(ordemServicoId: string, servicoId: string, actor?: AuthenticatedRequestUser): Promise<void> {
