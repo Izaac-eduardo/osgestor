@@ -7,6 +7,7 @@ import { Pool, type PoolClient } from 'pg';
 const allowedVersions = new Map([
   ['036', '036_reclassificacao_produto_servico.sql'],
   ['037', '037_integridade_reclassificacao_produto_servico.sql'],
+  ['038', '038_edicao_manual_servicos_categorias.sql'],
 ]);
 const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051']);
 
@@ -20,7 +21,7 @@ if (!preview && !apply) throw new Error('Use exatamente um modo: --preview ou --
 if (preview === apply) throw new Error('Use exatamente um modo: --preview ou --apply.');
 if (!database) throw new Error('Informe explicitamente --database=NOME.');
 if (!allowedDatabases.has(database)) throw new Error(`Banco alvo não autorizado: ${database}.`);
-if (!version || !allowedVersions.has(version)) throw new Error('Informe --version=036 ou --version=037.');
+if (!version || !allowedVersions.has(version)) throw new Error('Informe --version=036, --version=037 ou --version=038.');
 if (apply && confirmedTarget !== database) throw new Error('O modo --apply exige --confirm-target com o mesmo nome do banco alvo.');
 if (process.env.DB_NAME && process.env.DB_NAME !== database) throw new Error(`DB_NAME (${process.env.DB_NAME}) diverge de --database (${database}).`);
 
