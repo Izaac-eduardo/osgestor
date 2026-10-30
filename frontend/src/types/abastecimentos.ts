@@ -136,7 +136,7 @@ export interface EntradasRelatorioFilters { data_inicio?: string; data_fim?: str
 export interface EntradasRelatorioResponse {
   summary: { entradas: number; litros_nf: number; valor_nf: number }
   por_produto: Array<{ produto_id: string; produto: string; nome: string; quantidade: number; litros_nf: number; valor_nf: number; percentual_litros: number; percentual_valor: number }>
-  por_ponto: Array<{ ponto_id: string; codigo: string; nome: string; entradas: number; litros: number }>
+  por_ponto: Array<{ ponto_id: string; codigo: string; nome: string; entradas: number; litros: number; litros_distribuidos: number }>
   por_frota_direta: Array<{ frota_id: string; codigo: string; litros: number }>
   total_frota_direta: number
   evolucao: Array<{ periodo: string; entradas: number; litros_nf: number; valor_nf: number }>

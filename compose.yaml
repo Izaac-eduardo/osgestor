@@ -1,0 +1,179 @@
+services:
+  docker-env-guard:
+    image: alpine:3.22
+    environment:
+      EXPECTED_DB: osgestor_docker_test
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ "$${POSTGRES_DB}" != "$${EXPECTED_DB}" ] || [ "$${DB_NAME}" != "$${EXPECTED_DB}" ] || [ "$${DB_NAME}" != "$${POSTGRES_DB}" ]; then
+          echo 'Configuração recusada: o ambiente Docker exige osgestor_docker_test em POSTGRES_DB e DB_NAME.' >&2
+          exit 1
+        fi
+        echo 'Configuração do banco Docker validada.'
+    networks:
+      - private
+
+  docker-migrations:
+    profiles: ["manual"]
+    build:
+      context: .
+      dockerfile: Dockerfile.maintenance
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+      DOCKER_MIGRATIONS_CONFIRM: ${DOCKER_MIGRATIONS_CONFIRM:-}
+    command: ["npx", "tsx", "scripts/docker-migrate.ts"]
+    networks:
+      - private
+    depends_on:
+      docker-env-guard:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  docker-admin-bootstrap:
+    profiles: ["manual"]
+    build:
+      context: .
+      dockerfile: Dockerfile.maintenance
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+      DOCKER_ADMIN_CONFIRM: ${DOCKER_ADMIN_CONFIRM:-}
+      DOCKER_ADMIN_USERNAME: ${DOCKER_ADMIN_USERNAME:-}
+      DOCKER_ADMIN_EMAIL: ${DOCKER_ADMIN_EMAIL:-}
+      DOCKER_ADMIN_PASSWORD: ${DOCKER_ADMIN_PASSWORD:-}
+    command: ["npx", "tsx", "scripts/docker-bootstrap-admin.ts"]
+    networks:
+      - private
+    depends_on:
+      docker-env-guard:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  docker-restore-migration-038:
+    profiles: ["manual"]
+    build:
+      context: .
+      dockerfile: Dockerfile.maintenance
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: osgestor_restore_test
+      POSTGRES_DB: osgestor_restore_test
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+      DOCKER_RESTORE_038_CONFIRM: ${DOCKER_RESTORE_038_CONFIRM:-}
+    command: ["npx", "tsx", "scripts/docker-migrate-038-restore.ts", "--preview"]
+    networks:
+      - private
+    depends_on:
+      docker-env-guard:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+    depends_on:
+      docker-env-guard:
+        condition: service_completed_successfully
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.docker}
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+    expose:
+      - "3000"
+    networks:
+      - private
+    depends_on:
+      docker-env-guard:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - public
+      - private
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health | grep -q 'status' && wget -qO- http://127.0.0.1/ | grep -q 'root'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+
+networks:
+  public:
+    driver: bridge
+
+  private:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:

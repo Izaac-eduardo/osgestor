@@ -1,0 +1,141 @@
+services:
+  prod-env-guard:
+    image: alpine:3.22
+    environment:
+      NODE_ENV: production
+      EXPECTED_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.prod}
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.prod}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ "$${NODE_ENV}" != "production" ] || [ -z "$${EXPECTED_DB}" ] || [ "$${POSTGRES_DB}" != "$${EXPECTED_DB}" ] || [ "$${DB_NAME}" != "$${EXPECTED_DB}" ]; then
+          echo 'Configuração de produção recusada.' >&2
+          exit 1
+        fi
+        echo 'Configuração de produção validada.'
+    network_mode: none
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.prod}
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.prod}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.prod}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql
+    networks:
+      - backend_db
+    depends_on:
+      prod-env-guard:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?Defina POSTGRES_DB em .env.prod}
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.prod}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.prod}
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:?Defina PUBLIC_ORIGIN em .env.prod}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_NAME: osgestor_session
+    expose:
+      - "3000"
+    networks:
+      - frontend_backend
+      - backend_db
+    depends_on:
+      prod-env-guard:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    expose:
+      - "80"
+    networks:
+      - edge
+      - frontend_backend
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ | grep -q 'root'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?Defina DOMAIN em .env.prod}
+      ACME_EMAIL: ${ACME_EMAIL:?Defina ACME_EMAIL em .env.prod}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+
+networks:
+  edge:
+    driver: bridge
+  frontend_backend:
+    driver: bridge
+    internal: true
+  backend_db:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_prod_data:
+  caddy_data:
+  caddy_config:

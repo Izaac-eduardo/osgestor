@@ -1,10 +1,12 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import ExcelJS from "exceljs";
 import { test } from "node:test";
 import { app } from "../src/app.js";
 import { pool } from "../src/config/database.js";
 import { testCatalog } from "./support/fixtures.js";
+import { authenticateHttpFixture, httpHeaders } from "./helpers/http-auth.js";
 
 async function serverUrl() {
   const server = app.listen(0);
@@ -69,10 +71,10 @@ test("exportações de abastecimentos cobrem filtros, conjunto vazio, PDF e tipo
     ids.push(result.rows[0]!.id);
   }
   const { server, url } = await serverUrl();
+  const auth = await authenticateHttpFixture(url);
+  const request = (path: string, init: RequestInit = {}) => fetch(`${url}${path}`, { ...init, headers: { ...httpHeaders(auth.cookie), ...(init.headers ?? {}) } });
   try {
-    const excelResponse = await fetch(
-      `${url}/abastecimento/relatorios/exportar/excel`,
-    );
+    const excelResponse = await request('/abastecimento/relatorios/exportar/excel');
     assert.equal(excelResponse.status, 200);
     assert.match(
       excelResponse.headers.get("content-type") || "",
@@ -105,9 +107,7 @@ test("exportações de abastecimentos cobrem filtros, conjunto vazio, PDF e tipo
     assert.equal(frotaRow.getCell(11).value, 0);
     assert.equal(thirdRow.getCell(10).value, null);
     assert.equal(thirdRow.getCell(11).value, null);
-    const pdfResponse = await fetch(
-      `${url}/abastecimento/relatorios/exportar/pdf`,
-    );
+    const pdfResponse = await request('/abastecimento/relatorios/exportar/pdf');
     assert.equal(pdfResponse.status, 200);
     assert.match(
       pdfResponse.headers.get("content-type") || "",
@@ -123,23 +123,17 @@ test("exportações de abastecimentos cobrem filtros, conjunto vazio, PDF e tipo
     assert.equal(pdf.toString("latin1", 0, 4), "%PDF");
     assert.equal(
       (
-        await fetch(
-          `${url}/abastecimento/relatorios/exportar/excel?produto=DIESEL_S500`,
-        )
+        await request('/abastecimento/relatorios/exportar/excel?produto=DIESEL_S500')
       ).status,
       200,
     );
     assert.equal(
       (
-        await fetch(
-          `${url}/abastecimento/relatorios/exportar/pdf?tipo_destinatario=TERCEIRO`,
-        )
+        await request('/abastecimento/relatorios/exportar/pdf?tipo_destinatario=TERCEIRO')
       ).status,
       200,
     );
-    const emptyExcel = await fetch(
-      `${url}/abastecimento/relatorios/exportar/excel?data_inicio=2000-01-01&data_fim=2000-01-02`,
-    );
+    const emptyExcel = await request('/abastecimento/relatorios/exportar/excel?data_inicio=2000-01-01&data_fim=2000-01-02');
     assert.equal(emptyExcel.status, 200);
     const emptyWorkbook = new ExcelJS.Workbook();
     await emptyWorkbook.xlsx.load(await bufferFrom(emptyExcel));
@@ -147,13 +141,12 @@ test("exportações de abastecimentos cobrem filtros, conjunto vazio, PDF e tipo
       emptyWorkbook.worksheets.map((sheet) => sheet.name),
       ["Resumo", "Abastecimentos"],
     );
-    const emptyPdf = await fetch(
-      `${url}/abastecimento/relatorios/exportar/pdf?data_inicio=2000-01-01&data_fim=2000-01-02`,
-    );
+    const emptyPdf = await request('/abastecimento/relatorios/exportar/pdf?data_inicio=2000-01-01&data_fim=2000-01-02');
     assert.equal(emptyPdf.status, 200);
     assert.equal((await bufferFrom(emptyPdf)).toString("latin1", 0, 4), "%PDF");
     assert.ok(hasValue(workbook.getWorksheet("Resumo")!, "Resumo"));
   } finally {
+    await auth.cleanup();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await pool.query("DELETE FROM abastecimentos WHERE id = ANY($1::uuid[])", [
       ids,
@@ -179,16 +172,17 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     )
   ).rows[0]!;
   const entries: string[] = [];
+  const exportNf = `EXPORT-NF-${randomUUID().slice(0, 8)}`;
   const first = (
     await pool.query<{ id: string }>(
-      `INSERT INTO abastecimento_entradas(data_entrada,numero_nf,produto_id,litros_nf,valor_total_nf) VALUES ('2026-09-20','EXPORT-NF',$1,100,500) RETURNING id`,
-      [catalog.product.id],
+      `INSERT INTO abastecimento_entradas(data_entrada,numero_nf,produto_id,litros_nf,valor_total_nf) VALUES ('2026-09-20',$1,$2,100,500) RETURNING id`,
+      [exportNf, catalog.product.id],
     )
   ).rows[0]!.id;
   const second = (
     await pool.query<{ id: string }>(
-      `INSERT INTO abastecimento_entradas(data_entrada,numero_nf,produto_id,litros_nf,valor_total_nf) VALUES ('2026-09-21','EXPORT-NF',$1,50,250) RETURNING id`,
-      [arla.id],
+      `INSERT INTO abastecimento_entradas(data_entrada,numero_nf,produto_id,litros_nf,valor_total_nf) VALUES ('2026-09-21',$1,$2,50,250) RETURNING id`,
+      [exportNf, arla.id],
     )
   ).rows[0]!.id;
   entries.push(first, second);
@@ -197,10 +191,10 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     [first, point.id, secondPoint.id],
   );
   const { server, url } = await serverUrl();
+  const auth = await authenticateHttpFixture(url);
+  const request = (path: string, init: RequestInit = {}) => fetch(`${url}${path}`, { ...init, headers: { ...httpHeaders(auth.cookie), ...(init.headers ?? {}) } });
   try {
-    const excelResponse = await fetch(
-      `${url}/abastecimento/relatorios/entradas/exportar/excel`,
-    );
+    const excelResponse = await request(`/abastecimento/relatorios/entradas/exportar/excel?numero_nf=${exportNf}`);
     assert.equal(excelResponse.status, 200);
     assert.match(
       excelResponse.headers.get("content-type") || "",
@@ -223,7 +217,7 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     const entriesSheet = workbook.getWorksheet("Entradas")!;
     const entryRows = entriesSheet
       .getRows(1, entriesSheet.rowCount)
-      .filter((row) => row.values.some((cell) => cell === "EXPORT-NF"));
+      .filter((row) => row.getCell(2).value === exportNf && row.getCell(1).value instanceof Date);
     assert.equal(entryRows.length, 2);
     const entryRow = entryRows.find((row) => row.getCell(4).value === 100)!;
     assert.equal(typeof entryRow.getCell(4).value, "number");
@@ -242,9 +236,7 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
       .getRows(1, destinations.rowCount)
       .filter((row) => row.getCell(5).value === "Ponto: CC01" || row.getCell(5).value === "Ponto: CC02");
     assert.equal(destinationRows.length, 2);
-    const pdfResponse = await fetch(
-      `${url}/abastecimento/relatorios/entradas/exportar/pdf`,
-    );
+    const pdfResponse = await request(`/abastecimento/relatorios/entradas/exportar/pdf?numero_nf=${exportNf}`);
     assert.equal(pdfResponse.status, 200);
     assert.match(
       pdfResponse.headers.get("content-type") || "",
@@ -261,23 +253,17 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
     );
     assert.equal(
       (
-        await fetch(
-          `${url}/abastecimento/relatorios/entradas/exportar/excel?produto_id=${catalog.product.id}`,
-        )
+        await request(`/abastecimento/relatorios/entradas/exportar/excel?produto_id=${catalog.product.id}`)
       ).status,
       200,
     );
     assert.equal(
       (
-        await fetch(
-          `${url}/abastecimento/relatorios/entradas/exportar/pdf?ponto_id=${point.id}`,
-        )
+        await request(`/abastecimento/relatorios/entradas/exportar/pdf?ponto_id=${point.id}`)
       ).status,
       200,
     );
-    const emptyExcel = await fetch(
-      `${url}/abastecimento/relatorios/entradas/exportar/excel?data_inicio=2000-01-01&data_fim=2000-01-02`,
-    );
+    const emptyExcel = await request('/abastecimento/relatorios/entradas/exportar/excel?data_inicio=2000-01-01&data_fim=2000-01-02');
     assert.equal(emptyExcel.status, 200);
     const emptyWorkbook = new ExcelJS.Workbook();
     await emptyWorkbook.xlsx.load(await bufferFrom(emptyExcel));
@@ -285,12 +271,11 @@ test("exportações de entradas cobrem filtros, NF repetida, destinos, ARLA, con
       emptyWorkbook.worksheets.map((sheet) => sheet.name),
       ["Resumo", "Entradas", "Destinos"],
     );
-    const emptyPdf = await fetch(
-      `${url}/abastecimento/relatorios/entradas/exportar/pdf?data_inicio=2000-01-01&data_fim=2000-01-02`,
-    );
+    const emptyPdf = await request('/abastecimento/relatorios/entradas/exportar/pdf?data_inicio=2000-01-01&data_fim=2000-01-02');
     assert.equal(emptyPdf.status, 200);
     assert.equal((await bufferFrom(emptyPdf)).toString("latin1", 0, 4), "%PDF");
   } finally {
+    await auth.cleanup();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await pool.query(
       "DELETE FROM abastecimento_entrada_destinos WHERE entrada_id = ANY($1::uuid[])",

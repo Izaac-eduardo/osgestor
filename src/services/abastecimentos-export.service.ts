@@ -402,9 +402,9 @@ export async function exportEntradasExcel(
   summary.addRow(["Por Ponto"]);
   addTable(
     summary,
-    ["Ponto", "Entradas relacionadas", "Litros recebidos"],
-    report.por_ponto.map((item: any) => [item.codigo, item.entradas, item.litros]),
-    [24, 22, 18],
+    ["Ponto", "Entradas relacionadas", "Litros recebidos", "Litros distribuídos"],
+    report.por_ponto.map((item: any) => [item.codigo, item.entradas, item.litros, item.litros_distribuidos]),
+    [24, 22, 18, 22],
   );
   summary.addRow([]);
   summary.addRow(["Abastecimentos diretos em frota"]);
@@ -481,11 +481,13 @@ interface PdfSection {
   headers: string[];
   rows: string[][];
 }
+interface PdfOptions { flowSections?: boolean }
 const pdf = (
   title: string,
   filters: FilterLine[],
   summary: string[],
   sections: PdfSection[],
+  options: PdfOptions = {},
 ): Promise<Buffer> =>
   new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -518,15 +520,23 @@ const pdf = (
       doc.moveDown(0.5);
     };
     const table = (section: PdfSection): void => {
-      doc.addPage();
       const pageWidth =
         doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const footerLineY = doc.page.height - doc.page.margins.bottom - 18;
+      const contentBottom = footerLineY - 10;
+      const sectionTitleHeight = 18;
+      const titleTableGap = 6;
+      const rowHeight = 18;
+      const firstRowHeight = section.rows.length ? rowHeight : 0;
+      if (options.flowSections && doc.y > doc.page.margins.top) doc.y += 10;
+      if (!options.flowSections || doc.y + sectionTitleHeight + titleTableGap + rowHeight + firstRowHeight > contentBottom) doc.addPage();
+      doc.x = doc.page.margins.left;
       doc
         .fillColor("#285877")
         .font("Helvetica-Bold")
         .fontSize(12)
-        .text(section.title);
-      doc.moveDown(0.35);
+        .text(section.title, doc.page.margins.left, doc.y, { lineBreak: false });
+      doc.y += titleTableGap;
       const widths = Array.from(
         { length: section.headers.length },
         () => pageWidth / section.headers.length,
@@ -563,14 +573,15 @@ const pdf = (
       };
       row(section.headers, true);
       for (const values of section.rows) {
-        if (doc.y + 24 > doc.page.height - doc.page.margins.bottom) {
+        if (doc.y + rowHeight > contentBottom) {
           doc.addPage();
+          doc.x = doc.page.margins.left;
           doc
             .font("Helvetica-Bold")
             .fontSize(11)
             .fillColor("#285877")
-            .text(`${title} (continuação)`);
-          doc.moveDown(0.3);
+            .text(`${title} (continuação)`, doc.page.margins.left, doc.y, { lineBreak: false });
+          doc.y += titleTableGap;
           row(section.headers, true);
         }
         row(values, false);
@@ -589,18 +600,19 @@ const pdf = (
       index += 1
     ) {
       doc.switchToPage(index);
-      const y = doc.page.height - doc.page.margins.bottom - 12;
+      const lineY = doc.page.height - doc.page.margins.bottom - 18;
+      const textY = lineY + 4;
       doc
-        .moveTo(doc.page.margins.left, y - 8)
-        .lineTo(doc.page.width - doc.page.margins.right, y - 8)
+        .moveTo(doc.page.margins.left, lineY)
+        .lineTo(doc.page.width - doc.page.margins.right, lineY)
         .strokeColor("#AAB7C0")
         .stroke();
       doc
         .fillColor("#607D8B")
         .font("Helvetica")
         .fontSize(8)
-        .text("OSGestor", doc.page.margins.left, y, { lineBreak: false });
-      doc.text(`Página ${index + 1}`, 0, y, {
+        .text("OSGestor", doc.page.margins.left, textY, { lineBreak: false });
+      doc.text(`Página ${index + 1}`, 0, textY, {
         width: doc.page.width - doc.page.margins.right,
         align: "right",
         lineBreak: false,
@@ -716,11 +728,12 @@ export async function exportEntradasPdf(
     },
     {
       title: "Recebimento por Ponto",
-      headers: ["Ponto", "Entradas relacionadas", "Litros recebidos"],
+      headers: ["Ponto", "Entradas relacionadas", "Litros recebidos", "Litros distribuídos"],
       rows: report.por_ponto.map((item: any) => [
         item.codigo,
         String(item.entradas),
         quantity.format(item.litros),
+        quantity.format(item.litros_distribuidos),
       ]),
     },
     {
@@ -732,7 +745,7 @@ export async function exportEntradasPdf(
       title: "Evolução temporal",
       headers: ["Período", "Entradas", "Litros NF", "Valor NF"],
       rows: report.evolucao.map((item: any) => [
-        item.periodo,
+        item.periodo.length === 7 ? `${item.periodo.slice(5)}/${item.periodo.slice(0, 4)}` : `${item.periodo.slice(8, 10)}/${item.periodo.slice(5, 7)}/${item.periodo.slice(0, 4)}`,
         String(item.entradas),
         quantity.format(item.litros_nf),
         money.format(item.valor_nf),
@@ -759,6 +772,7 @@ export async function exportEntradasPdf(
       `Valor NF: ${money.format(report.summary.valor_nf)}`,
     ],
     sections,
+    { flowSections: true },
   );
 }
 

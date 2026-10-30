@@ -1,0 +1,84 @@
+services:
+  restore-env-guard:
+    image: alpine:3.22
+    environment:
+      RESTORE_DB_NAME: ${RESTORE_DB_NAME:-osgestor_restore_test}
+      DB_HOST: ${RESTORE_DB_HOST:-postgres}
+      DB_PORT: ${RESTORE_DB_PORT:-5432}
+      AUTH_COOKIE_NAME: ${RESTORE_AUTH_COOKIE_NAME:-osgestor_restore_session}
+      DOCKER_RESTORE_LOCAL: ${DOCKER_RESTORE_LOCAL:-true}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ "$${RESTORE_DB_NAME}" != "osgestor_restore_test" ] || [ "$${DB_HOST}" != "postgres" ] || [ "$${DB_PORT}" != "5432" ] || [ "$${AUTH_COOKIE_NAME}" != "osgestor_restore_session" ] || [ "$${DOCKER_RESTORE_LOCAL}" != "true" ]; then
+          echo 'Configuração restaurada recusada.' >&2
+          exit 1
+        fi
+        echo 'Configuração restaurada validada.'
+    networks:
+      - private
+
+  backend-restore:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: osgestor_restore_test
+      DB_USER: ${POSTGRES_USER:?Defina POSTGRES_USER em .env.docker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD em .env.docker}
+      CORS_ORIGINS: http://127.0.0.1:8081
+      AUTH_COOKIE_SECURE: false
+      AUTH_COOKIE_NAME: osgestor_restore_session
+      DOCKER_RESTORE_LOCAL: "true"
+      RESTORE_DB_GUARD: osgestor_restore_test
+    command: ["node", "scripts/docker-restore-start.mjs"]
+    expose:
+      - "3000"
+    networks:
+      - private
+    depends_on:
+      restore-env-guard:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+
+  frontend-restore:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.restore
+    ports:
+      - "127.0.0.1:8081:80"
+    networks:
+      - public
+      - private
+    depends_on:
+      backend-restore:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ | grep -q 'root'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+
+networks:
+  public:
+    driver: bridge
+  private:
+    external: true
+    name: osgestor_private

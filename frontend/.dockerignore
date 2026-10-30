@@ -1,0 +1,34 @@
+# Configurações locais e variáveis que poderiam ser incorporadas ao bundle Vite.
+.env
+.env.*
+*.local
+
+# Dependências e artefatos gerados.
+node_modules/
+dist/
+build/
+coverage/
+
+# Logs, temporários e metadados locais.
+*.log
+logs/
+tmp/
+temp/
+.cache/
+.vite/
+*.tmp
+*.temp
+
+# Possíveis credenciais e certificados locais.
+*credential*
+*secret*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Arquivos de editor e sistema.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

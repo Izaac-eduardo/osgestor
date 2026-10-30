@@ -40,6 +40,22 @@ function where(filters: EntradasRelatorioFilters, values: string[]): string {
 
 const base = `FROM abastecimento_entradas e JOIN abastecimento_produtos p ON p.id=e.produto_id`;
 
+function distributedWhere(filters: EntradasRelatorioFilters, values: string[], aliases: { activity: string; entry: string; entryProduct: string; point: string; includeInvoice: boolean }): string {
+  const { activity, entry, entryProduct, point, includeInvoice } = aliases;
+  const conditions: string[] = [...(includeInvoice ? ['d2.tipo_destino = \'PONTO\''] : []), `${activity}.excluido_at IS NULL`];
+  if (includeInvoice) conditions.push(`${activity}.produto_id = ${entry}.produto_id`);
+  const bind = (value: string) => { values.push(value); return `$${values.length}`; };
+  const start = date(filters.data_inicio, 'data_inicio'); const end = date(filters.data_fim, 'data_fim');
+  if (start) conditions.push(`${activity}.data_hora >= ${bind(`${start}T00:00:00`)}`);
+  if (end) conditions.push(`${activity}.data_hora < (${bind(`${end}T00:00:00`)}::timestamp + interval '1 day')`);
+  if (filters.produto_id) conditions.push(`${entry}.produto_id = ${bind(assertUuid(filters.produto_id, 'produto_id'))}`);
+  if (filters.produto_codigo?.trim()) conditions.push(`${entryProduct}.codigo = ${bind(filters.produto_codigo.trim().toUpperCase())}`);
+  if (includeInvoice && filters.numero_nf?.trim()) conditions.push(`${entry}.numero_nf ILIKE ${bind(`%${filters.numero_nf.trim()}%`)}`);
+  if (!includeInvoice && filters.numero_nf?.trim()) conditions.push('FALSE');
+  if (filters.ponto_id) conditions.push(`${point}.ponto_id = ${bind(assertUuid(filters.ponto_id, 'ponto_id'))}`);
+  return conditions.join(' AND ');
+}
+
 async function destinations(ids: string[]): Promise<Map<string, EntradaRelatorioItem['destinos']>> {
   const result = new Map<string, EntradaRelatorioItem['destinos']>();
   if (!ids.length) return result;
@@ -55,10 +71,15 @@ export async function getRelatorioEntradas(filters: EntradasRelatorioFilters = {
   const page = Math.max(1, Number(filters.page ?? 1) || 1); const limit = unlimited ? 0 : Math.min(100, Math.max(1, Number(filters.limit ?? 25) || 25));
   const values: string[] = []; const clause = where(filters, values); const query = (sql: string, params = values) => pool.query(sql, params);
   const pointClause = clause.replaceAll('p.codigo', 'ep.codigo');
+  const linkedValues: string[] = [];
+  const importedValues: string[] = [];
+  const linkedClause = distributedWhere(filters, linkedValues, { activity: 'a', entry: 'e2', entryProduct: 'ep2', point: 'd2', includeInvoice: true }).replace(/\$(\d+)/g, (_, index) => `$${Number(index) + values.length}`);
+  const importedOffset = values.length + linkedValues.length;
+  const importedClause = distributedWhere(filters, importedValues, { activity: 'a2', entry: 'a2', entryProduct: 'fp2', point: 'b2', includeInvoice: false }).replace(/\$(\d+)/g, (_, index) => `$${Number(index) + importedOffset}`);
   const [summary, products, points, evolution, count] = await Promise.all([
     query(`SELECT COUNT(*)::text entradas,COALESCE(SUM(e.litros_nf),0)::text litros_nf,COALESCE(SUM(e.valor_total_nf),0)::text valor_nf ${base} ${clause}`),
     query(`SELECT p.id produto_id,p.codigo produto,p.nome,COUNT(*)::text quantidade,COALESCE(SUM(e.litros_nf),0)::text litros_nf,COALESCE(SUM(e.valor_total_nf),0)::text valor_nf,CASE WHEN SUM(SUM(e.litros_nf)) OVER()=0 THEN 0 ELSE SUM(e.litros_nf)/SUM(SUM(e.litros_nf)) OVER()*100 END::text percentual_litros,CASE WHEN SUM(SUM(e.valor_total_nf)) OVER()=0 THEN 0 ELSE SUM(e.valor_total_nf)/SUM(SUM(e.valor_total_nf)) OVER()*100 END::text percentual_valor ${base} ${clause} GROUP BY p.id,p.codigo,p.nome ORDER BY SUM(e.litros_nf) DESC,p.codigo`),
-    query(`SELECT p.id ponto_id,p.codigo,p.nome,COUNT(DISTINCT e.id)::text entradas,COALESCE(SUM(d.litros),0)::text litros FROM abastecimento_entrada_destinos d JOIN abastecimento_entradas e ON e.id=d.entrada_id JOIN abastecimento_produtos ep ON ep.id=e.produto_id JOIN abastecimento_pontos p ON p.id=d.ponto_id ${pointClause ? `${pointClause} AND` : 'WHERE'} d.tipo_destino='PONTO' GROUP BY p.id,p.codigo,p.nome ORDER BY SUM(d.litros) DESC,p.codigo`, values),
+    query(`SELECT p.id ponto_id,p.codigo,p.nome,COUNT(DISTINCT e.id)::text entradas,COALESCE(SUM(d.litros),0)::text litros,COALESCE(MAX(dist.litros_distribuidos),0)::text litros_distribuidos FROM abastecimento_entrada_destinos d JOIN abastecimento_entradas e ON e.id=d.entrada_id JOIN abastecimento_produtos ep ON ep.id=e.produto_id JOIN abastecimento_pontos p ON p.id=d.ponto_id LEFT JOIN (SELECT distributed.ponto_id,SUM(distributed.litros) litros_distribuidos FROM (SELECT d2.ponto_id,a.litros FROM abastecimento_entrada_destinos d2 JOIN abastecimento_entradas e2 ON e2.id=d2.entrada_id JOIN abastecimento_produtos ep2 ON ep2.id=e2.produto_id JOIN abastecimentos a ON a.entrada_destino_id=d2.id WHERE ${linkedClause} UNION ALL SELECT b2.ponto_id,a2.litros FROM abastecimentos a2 JOIN abastecimento_bicos b2 ON b2.codigo=a2.bico_codigo_original AND b2.produto_id=a2.produto_id JOIN abastecimento_produtos fp2 ON fp2.id=a2.produto_id WHERE ${importedClause} AND a2.entrada_destino_id IS NULL AND a2.origem_sistema='POLIFROTA' AND b2.codigo IN (SELECT codigo FROM abastecimento_bicos GROUP BY codigo HAVING COUNT(DISTINCT ponto_id)=1)) distributed GROUP BY distributed.ponto_id) dist ON dist.ponto_id=p.id ${pointClause ? `${pointClause} AND` : 'WHERE'} d.tipo_destino='PONTO' GROUP BY p.id,p.codigo,p.nome ORDER BY SUM(d.litros) DESC,p.codigo`, [...values, ...linkedValues, ...importedValues]),
     query(`SELECT to_char(date_trunc('${periodo === 'mes' ? 'month' : 'day'}',e.data_entrada),'${periodo === 'mes' ? 'YYYY-MM' : 'YYYY-MM-DD'}') periodo,COUNT(*)::text entradas,COALESCE(SUM(e.litros_nf),0)::text litros_nf,COALESCE(SUM(e.valor_total_nf),0)::text valor_nf ${base} ${clause} GROUP BY date_trunc('${periodo === 'mes' ? 'month' : 'day'}',e.data_entrada) ORDER BY date_trunc('${periodo === 'mes' ? 'month' : 'day'}',e.data_entrada)`),
     query(`SELECT COUNT(*)::text total ${base} ${clause}`),
   ]);
@@ -68,5 +89,5 @@ export async function getRelatorioEntradas(filters: EntradasRelatorioFilters = {
   const items = rows.map(row => { const itemDestinations = destinationMap.get(String(row.id)) ?? []; return { id: String(row.id), data_entrada: String(row.data_entrada), numero_nf: String(row.numero_nf), produto_id: String(row.produto_id), produto_codigo: String(row.produto_codigo), produto_nome: String(row.produto_nome), litros_nf: numberValue(row.litros_nf), valor_total_nf: numberValue(row.valor_total_nf), total_distribuido: itemDestinations.reduce((sum, item) => sum + item.litros, 0), destinos: itemDestinations }; });
   const total = Number(count.rows[0]?.total ?? 0);
   const direct = directRows.reduce((sum, row) => sum + numberValue(row.litros), 0);
-  return { summary: { entradas: Number(summary.rows[0]?.entradas ?? 0), litros_nf: numberValue(summary.rows[0]?.litros_nf ?? 0), valor_nf: numberValue(summary.rows[0]?.valor_nf ?? 0) }, por_produto: products.rows.map(row => ({ ...row, quantidade: Number(row.quantidade), litros_nf: numberValue(row.litros_nf), valor_nf: numberValue(row.valor_nf), percentual_litros: numberValue(row.percentual_litros), percentual_valor: numberValue(row.percentual_valor) })), por_ponto: points.rows.map(row => ({ ...row, entradas: Number(row.entradas), litros: numberValue(row.litros) })), por_frota_direta: directRows.map(row => ({ frota_id: row.frota_id, codigo: row.codigo, litros: numberValue(row.litros) })), total_frota_direta: direct, evolucao: evolution.rows.map(row => ({ periodo: row.periodo, entradas: Number(row.entradas), litros_nf: numberValue(row.litros_nf), valor_nf: numberValue(row.valor_nf) })), items, pagination: { page, limit: unlimited ? total : limit, total, total_pages: unlimited ? (total ? 1 : 0) : Math.ceil(total / limit) } };
+  return { summary: { entradas: Number(summary.rows[0]?.entradas ?? 0), litros_nf: numberValue(summary.rows[0]?.litros_nf ?? 0), valor_nf: numberValue(summary.rows[0]?.valor_nf ?? 0) }, por_produto: products.rows.map(row => ({ ...row, quantidade: Number(row.quantidade), litros_nf: numberValue(row.litros_nf), valor_nf: numberValue(row.valor_nf), percentual_litros: numberValue(row.percentual_litros), percentual_valor: numberValue(row.percentual_valor) })), por_ponto: points.rows.map(row => ({ ...row, entradas: Number(row.entradas), litros: numberValue(row.litros), litros_distribuidos: numberValue(row.litros_distribuidos) })), por_frota_direta: directRows.map(row => ({ frota_id: row.frota_id, codigo: row.codigo, litros: numberValue(row.litros) })), total_frota_direta: direct, evolucao: evolution.rows.map(row => ({ periodo: row.periodo, entradas: Number(row.entradas), litros_nf: numberValue(row.litros_nf), valor_nf: numberValue(row.valor_nf) })), items, pagination: { page, limit: unlimited ? total : limit, total, total_pages: unlimited ? (total ? 1 : 0) : Math.ceil(total / limit) } };
 }

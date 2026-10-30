@@ -1,8 +1,9 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)]
+  [Parameter(Mandatory=$false)]
   [ValidatePattern('^[0-9a-f]{40}$')]
-  [string]$ExpectedCommit,
+  [string]$ExpectedCommit = '',
+  [switch]$Daily,
   [switch]$CheckOnly,
   [string]$CredentialFile = 'C:\Users\User\Documents\osgestor\.env',
   [ValidateRange(5,300)]
@@ -19,6 +20,8 @@ $FrontendRoot = Join-Path $RealRoot 'frontend'
 $LogRoot = 'C:\Users\User\Documents\osgestor-logs'
 $BackendPort = 3000
 $FrontendPort = 5173
+$BackendHealthUrl = 'http://127.0.0.1:3000/health'
+$FrontendHealthUrl = 'http://127.0.0.1:5173/'
 $Node = 'C:\Program Files\nodejs\node.exe'
 $Npm = 'C:\Program Files\nodejs\npm.cmd'
 $RunLog = $null
@@ -77,9 +80,9 @@ function Wait-BackendReady([int]$TimeoutSec, [string]$LogPath, [string]$ErrorLog
   $lastError = 'nenhuma resposta recebida'
   do {
     try {
-      $response = Invoke-WebRequest -UseBasicParsing 'http://localhost:3000/health' -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
+      $response = Invoke-WebRequest -UseBasicParsing $BackendHealthUrl -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
       $payload = $response.Content | ConvertFrom-Json
-      if ($response.StatusCode -eq 200 -and $payload.status -eq 'ok' -and $payload.message -eq 'API OSGestor está funcionando.') {
+      if ($response.StatusCode -eq 200 -and $payload.status -eq 'ok') {
         return $true
       }
       $lastError = "resposta inválida (HTTP $($response.StatusCode)): $($response.Content)"
@@ -99,7 +102,7 @@ function Wait-FrontendReady([int]$TimeoutSec, [string]$LogPath, [string]$ErrorLo
   $lastError = 'nenhuma resposta recebida'
   do {
     try {
-      $response = Invoke-WebRequest -UseBasicParsing 'http://localhost:5173/' -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
+      $response = Invoke-WebRequest -UseBasicParsing $FrontendHealthUrl -TimeoutSec ([Math]::Max(1, [Math]::Min(5, $PollIntervalSec + 1)))
       if ($response.StatusCode -eq 200 -and $response.Content.Length -gt 0) { return $true }
       $lastError = "resposta inválida (HTTP $($response.StatusCode))"
     } catch {
@@ -119,13 +122,18 @@ if (-not (Test-Path -LiteralPath $Node -PathType Leaf)) { Stop-WithError "Node.j
 if (-not (Test-Path -LiteralPath $Npm -PathType Leaf)) { Stop-WithError "npm ausente: $Npm" }
 New-Item -ItemType Directory -Force -Path $LogRoot | Out-Null
 $RunLog = Join-Path $LogRoot ("startup-exclusao-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-Write-RunLog "START worktree=$RealRoot expectedCommit=$ExpectedCommit checkOnly=$CheckOnly"
+Write-RunLog "START worktree=$RealRoot expectedCommit=$ExpectedCommit daily=$Daily checkOnly=$CheckOnly"
 
-$actualCommit = (& git -C $RealRoot rev-parse HEAD).Trim()
+if (-not $Daily) {
+  if ([string]::IsNullOrWhiteSpace($ExpectedCommit)) { Stop-WithError 'ExpectedCommit obrigatorio fora do modo diario.' }
+  $actualCommit = (& git -C $RealRoot rev-parse HEAD).Trim()
 if ($actualCommit -ne $ExpectedCommit) { Stop-WithError "commit incorreto: $actualCommit. Esperado: $ExpectedCommit" }
 if ((& git -C $RealRoot branch --show-current).Trim() -ne 'main') { Stop-WithError 'branch incorreta; a inicialização exige a branch main.' }
 if ((git -C $RealRoot status --porcelain)) { Stop-WithError 'worktree não está limpo; publique uma versão commitada antes de iniciar.' }
-Write-RunLog "COMMIT_OK $actualCommit"
+  Write-RunLog "COMMIT_OK $actualCommit"
+} else {
+  Write-RunLog 'DAILY_MODE git validation skipped'
+}
 
 $viteConfig = Get-Content -Raw -LiteralPath (Join-Path $FrontendRoot 'vite.config.ts')
 if ($viteConfig -notmatch "host:\s*'0\.0\.0\.0'" -or $viteConfig -notmatch "port:\s*5173" -or $viteConfig -notmatch "'/abastecimento':\s*'http://localhost:3000'") { Stop-WithError 'proxy/host/porta do frontend não confirmados.' }
@@ -153,11 +161,11 @@ Write-Output '[1/5] Validações de Git, diretório e segurança concluídas.'
 Write-Output '[2/5] Validação do banco de dados concluída.'
 Write-Output '[3/5] Verificando backend...'
 if($backendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev') -WorkingDirectory $RealRoot -RedirectStandardOutput $backendLog -RedirectStandardError $backendErr|Out-Null;Write-RunLog "BACKEND_START log=$backendLog";Write-Output 'Backend iniciado; aguardando /health...'} else {Write-Output 'Backend oficial já está em execução; reutilizando-o.'}
-Wait-BackendReady -TimeoutSec $BackendTimeoutSec -LogPath $backendLog -ErrorLogPath $backendErr
+$null = Wait-BackendReady -TimeoutSec $BackendTimeoutSec -LogPath $backendLog -ErrorLogPath $backendErr
 Write-Output 'Backend respondendo com conteúdo válido.'
 Write-Output '[4/5] Verificando frontend...'
 if($frontendOwners.Count -eq 0){Start-Process -FilePath $Npm -ArgumentList @('run','dev','--','--host','0.0.0.0') -WorkingDirectory $FrontendRoot -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErr|Out-Null;Write-RunLog "FRONTEND_START log=$frontendLog";Write-Output 'Frontend iniciado; aguardando HTTP...'} else {Write-Output 'Frontend oficial já está em execução; reutilizando-o.'}
-Wait-FrontendReady -TimeoutSec $FrontendTimeoutSec -LogPath $frontendLog -ErrorLogPath $frontendErr
+$null = Wait-FrontendReady -TimeoutSec $FrontendTimeoutSec -LogPath $frontendLog -ErrorLogPath $frontendErr
 Write-Output 'Frontend respondendo.'
 Write-Output '[5/5] Verificação final...'
 Write-RunLog 'START_OK backend=3000 frontend=5173';Write-Output 'START_OK';Write-Output "OS Gestor disponível em: http://localhost:5173`nLogs: $LogRoot"

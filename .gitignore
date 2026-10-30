@@ -2,6 +2,14 @@
 .env.*
 !.env.example
 !.env.test.example
+!.env.docker.example
+!.env.prod.example
+
+# Produção e backups nunca devem ser versionados.
+/backups/
+*.dump
+*.sql.gz
+*.tar
 
 node_modules/
 dist/
@@ -21,3 +29,12 @@ Thumbs.db
 
 # Dados operacionais internos
 /docs/regularizacao-categorias-setembro-2026.csv
+
+# Relatorios PDF gerados localmente
+/docs/relatorio-entradas-teste-2026-09.pdf
+
+# Documentacao interna de backup e recuperacao
+/docs/backup-recovery-migration-038.md
+
+# Script interno de regularizacao de dados
+/scripts/regularizar-categorias-setembro.ts

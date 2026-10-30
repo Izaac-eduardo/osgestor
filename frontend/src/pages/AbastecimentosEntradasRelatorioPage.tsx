@@ -309,6 +309,7 @@ function ReportContent({
                     <th>Ponto</th>
                     <th>Entradas</th>
                     <th>Litros recebidos</th>
+                    <th>Litros distribuídos</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -322,6 +323,7 @@ function ReportContent({
                       </td>
                       <td>{item.entradas}</td>
                       <td>{formatQuantity(item.litros)} L</td>
+                      <td>{formatQuantity(item.litros_distribuidos)} L</td>
                     </tr>
                   ))}
                 </tbody>
