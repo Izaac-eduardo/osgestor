@@ -31,6 +31,45 @@ const average = (value: { media?: number | null; media_unidade?: string | null }
   value.media === null || value.media === undefined || !value.media_unidade
     ? "—"
     : `${value.media.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${value.media_unidade}`;
+type TerceiroPdfRow = {
+  terceiro_id: string;
+  terceiro: string;
+  placa: string;
+  quantidade: number;
+  litros: number;
+  valor: number;
+};
+const roundedSum = (left: number, right: number): number =>
+  Math.round((left + right) * 10000) / 10000;
+export const buildTerceirosPdfRows = (items: TerceiroPdfRow[]): string[][] => {
+  const groups = new Map<string, { terceiro: string; rows: TerceiroPdfRow[] }>();
+  for (const item of items) {
+    const group = groups.get(item.terceiro_id) ?? { terceiro: item.terceiro, rows: [] };
+    group.rows.push({ ...item, placa: item.placa?.trim() || "Não informada" });
+    groups.set(item.terceiro_id, group);
+  }
+  const rows: string[][] = [];
+  let totalQuantidade = 0;
+  let totalLitros = 0;
+  let totalValor = 0;
+  for (const group of groups.values()) {
+    let quantidade = 0;
+    let litros = 0;
+    let valor = 0;
+    for (const item of group.rows) {
+      quantidade += item.quantidade;
+      litros = roundedSum(litros, item.litros);
+      valor = roundedSum(valor, item.valor);
+      rows.push([group.terceiro, item.placa, String(item.quantidade), quantity.format(item.litros), money.format(item.valor)]);
+    }
+    rows.push([`Subtotal: ${group.terceiro}`, "", String(quantidade), quantity.format(litros), money.format(valor)]);
+    totalQuantidade += quantidade;
+    totalLitros = roundedSum(totalLitros, litros);
+    totalValor = roundedSum(totalValor, valor);
+  }
+  rows.push(["TOTAL GERAL", "", String(totalQuantidade), quantity.format(totalLitros), money.format(totalValor)]);
+  return rows;
+};
 const dateLabel = (value: string | undefined): string =>
   value ? value.split("-").reverse().join("/") : "Todos";
 const periodLabel = (start?: string, end?: string): string =>
@@ -628,7 +667,7 @@ export const renderAbastecimentosPdfForTest = pdf;
 export async function exportAbastecimentosPdf(
   filters: RelatorioAbastecimentosFilters,
 ): Promise<Buffer> {
-  const report: any = await getRelatorioAbastecimentos(filters);
+  const report: any = await getRelatorioAbastecimentos(filters, { detalharTerceiros: true });
   const sections: PdfSection[] = [
     {
       title: "Distribuição por Produto",
@@ -671,13 +710,8 @@ export async function exportAbastecimentosPdf(
     },
     {
       title: "Terceiros",
-      headers: ["Terceiro", "Abastecimentos", "Litros", "Valor"],
-      rows: report.por_terceiro.map((item: any) => [
-        item.terceiro,
-        String(item.quantidade),
-        quantity.format(item.litros),
-        money.format(item.valor),
-      ]),
+      headers: ["Terceiro", "Placa", "Abastecimentos", "Litros", "Valor"],
+      rows: buildTerceirosPdfRows(report.por_terceiro),
     },
     {
       title: "Destinações Especiais",

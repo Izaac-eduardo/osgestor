@@ -3,6 +3,7 @@ import { AbastecimentoServiceError, assertUuid } from './abastecimentos-base.ser
 import { getConsumoFrota } from './abastecimentos-consumo-frota.service.js';
 
 export interface RelatorioAbastecimentosFilters { data_inicio?: string; data_fim?: string; obra_id?: string; busca?: string; produto?: string; tipo_destinatario?: string; periodo?: string }
+export interface RelatorioAbastecimentosOptions { detalharTerceiros?: boolean }
 type MediaUnidade = 'km/L' | 'L/h';
 const types = ['FROTA', 'TERCEIRO', 'ESPECIAL', 'EXTERNA'] as const;
 const periods = ['dia', 'mes'] as const;
@@ -49,7 +50,7 @@ async function mediasPorFrota(filters: RelatorioAbastecimentosFilters) {
   return result;
 }
 
-export async function getRelatorioAbastecimentos(filters: RelatorioAbastecimentosFilters = {}) {
+export async function getRelatorioAbastecimentos(filters: RelatorioAbastecimentosFilters = {}, options: RelatorioAbastecimentosOptions = {}) {
   if (filters.periodo && !periods.includes(filters.periodo as typeof periods[number])) throw new AbastecimentoServiceError(400, 'periodo deve ser dia ou mes.');
   const values: string[] = []; const clause = where(filters, values); const query = (sql: string) => pool.query(sql, values); const withCondition = (condition: string) => clause ? `${clause} AND ${condition}` : `WHERE ${condition}`;
   const evolutionPeriod = filters.periodo === 'mes' ? "to_char(date_trunc('month',a.data_hora),'YYYY-MM')" : "to_char(date_trunc('day',a.data_hora),'YYYY-MM-DD')";
@@ -58,7 +59,9 @@ export async function getRelatorioAbastecimentos(filters: RelatorioAbastecimento
     query(`SELECT p.codigo produto,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${clause} GROUP BY p.codigo ORDER BY SUM(a.litros) DESC,p.codigo`),
     query(`SELECT o.id obra_id,o.nome obra,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor,CASE WHEN SUM(SUM(a.litros)) OVER()=0 THEN 0 ELSE SUM(a.litros)/SUM(SUM(a.litros)) OVER()*100 END::numeric percentual_litros ${from} ${clause} GROUP BY o.id,o.nome ORDER BY SUM(a.litros) DESC,o.nome`),
     query(`SELECT f.id frota_id,f.codigo frota,COALESCE(f.placa,f.codigo) placa,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='FROTA'")} GROUP BY f.id,f.codigo,f.placa ORDER BY SUM(a.litros) DESC,f.codigo`),
-    query(`SELECT t.id terceiro_id,t.nome terceiro,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='TERCEIRO'")} GROUP BY t.id,t.nome ORDER BY SUM(a.litros) DESC,t.nome`),
+    query(options.detalharTerceiros
+      ? `SELECT t.id terceiro_id,t.nome terceiro,COALESCE(NULLIF(BTRIM(a.placa_original),''),'Não informada') placa,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='TERCEIRO'")} GROUP BY t.id,t.nome,NULLIF(BTRIM(a.placa_original),'') ORDER BY t.nome,NULLIF(BTRIM(a.placa_original),'') NULLS LAST`
+      : `SELECT t.id terceiro_id,t.nome terceiro,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='TERCEIRO'")} GROUP BY t.id,t.nome ORDER BY SUM(a.litros) DESC,t.nome`),
     query(`SELECT COALESCE(d.codigo,d.nome) destinacao,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${withCondition("a.tipo_destinatario='ESPECIAL'")} GROUP BY d.id,d.codigo,d.nome ORDER BY SUM(a.litros) DESC,d.codigo`),
     query(`SELECT ${evolutionPeriod} periodo,COUNT(*)::text quantidade,COALESCE(SUM(a.litros),0)::text litros,COALESCE(SUM(a.valor_total),0)::text valor ${from} ${clause} GROUP BY date_trunc('${filters.periodo === 'mes' ? 'month' : 'day'}',a.data_hora) ORDER BY date_trunc('${filters.periodo === 'mes' ? 'month' : 'day'}',a.data_hora)`),
     mediasPorFrota(filters),
