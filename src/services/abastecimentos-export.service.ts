@@ -531,12 +531,13 @@ const pdf = (
       if (options.flowSections && doc.y > doc.page.margins.top) doc.y += 10;
       if (!options.flowSections || doc.y + sectionTitleHeight + titleTableGap + rowHeight + firstRowHeight > contentBottom) doc.addPage();
       doc.x = doc.page.margins.left;
+      const titleY = doc.y;
       doc
         .fillColor("#285877")
         .font("Helvetica-Bold")
         .fontSize(12)
-        .text(section.title, doc.page.margins.left, doc.y, { lineBreak: false });
-      doc.y += titleTableGap;
+        .text(section.title, doc.page.margins.left, titleY, { lineBreak: false });
+      doc.y = titleY + sectionTitleHeight + titleTableGap;
       const widths = Array.from(
         { length: section.headers.length },
         () => pageWidth / section.headers.length,
@@ -576,12 +577,13 @@ const pdf = (
         if (doc.y + rowHeight > contentBottom) {
           doc.addPage();
           doc.x = doc.page.margins.left;
+          const continuationTitleY = doc.y;
           doc
             .font("Helvetica-Bold")
             .fontSize(11)
             .fillColor("#285877")
-            .text(`${title} (continuação)`, doc.page.margins.left, doc.y, { lineBreak: false });
-          doc.y += titleTableGap;
+            .text(`${title} (continuação)`, doc.page.margins.left, continuationTitleY, { lineBreak: false });
+          doc.y = continuationTitleY + sectionTitleHeight + titleTableGap;
           row(section.headers, true);
         }
         row(values, false);
