@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import * as XLSX from 'xlsx';
 import { app } from '../src/app.js';
 import { pool } from '../src/config/database.js';
-import { buildPreviewItem, type ImportacaoContext } from '../src/services/abastecimentos-import.service.js';
+import { buildPreviewItem, importacaoCounts, type ImportacaoContext } from '../src/services/abastecimentos-import.service.js';
 import type { PoliFrotaAbastecimentoNormalizado } from '../src/imports/polifrota.js';
 import { authenticateHttpFixture, httpHeaders } from './helpers/http-auth.js';
 
@@ -75,4 +75,23 @@ test('preview e confirmação sintética não duplicam e não confirmam dados re
     await auth.cleanup();
     await pool.end();
   }
+});
+
+test('matching de terceiro usa placa/frota exatas com normalizacao consistente e nao depende do nome', () => {
+  const thirdId = '66666666-6666-4666-8666-666666666666';
+  const base = context({ terceiroIdentificacoes: [{ terceiro_id: thirdId, identificacao_normalizada: 'aes-0379', status: 'ATIVO' }] });
+  const first = buildPreviewItem(row({ placaOriginal: ' aes-0379 ', placaNormalizada: 'AES0379', frotaOriginal: 'codigo-diferente', frotaNormalizada: 'CODIGODIFERENTE' }), base);
+  const second = buildPreviewItem(row({ identificadorExterno: '900002', placaOriginal: 'AES0379', placaNormalizada: 'AES0379', frotaOriginal: null, frotaNormalizada: null }), base);
+  assert.equal(first.tipo_destinatario, 'TERCEIRO');
+  assert.equal(first.terceiro_id, thirdId);
+  assert.equal(second.tipo_destinatario, 'TERCEIRO');
+  assert.equal(second.terceiro_id, thirdId);
+});
+
+test('contagens nao tratam flags antigas de itens importados como pendencias', () => {
+  const imported = buildPreviewItem(row(), context({ importedIds: new Set(['900001']) }));
+  assert.equal(imported.status_preview, 'JA_IMPORTADO');
+  assert.equal(imported.pendencias.obra, false);
+  assert.equal(importacaoCounts([imported]).pendentes, 0);
+  assert.equal(importacaoCounts([imported]).pendentesDestinatario, 0);
 });

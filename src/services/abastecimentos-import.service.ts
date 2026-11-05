@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeFleetCode, normalizePlate } from '../utils/frotas.js';
+import { normalizeTerceiroIdentificacao } from '../imports/terceiros.js';
 import { parsePoliFrotaAbastecimentos, type PoliFrotaAbastecimentoNormalizado, type PoliFrotaProduto } from '../imports/polifrota.js';
 import { pool } from '../config/database.js';
 import { recordAudit } from './audit.service.js';
@@ -34,8 +35,10 @@ function resolveFleet(row: PoliFrotaAbastecimentoNormalizado, context: Importaca
 }
 
 function resolveThirdParty(row: PoliFrotaAbastecimentoNormalizado, context: ImportacaoContext): { tipo: DestinatarioTipo | null; id: string | null; reason?: string } {
-  const values = [row.frotaNormalizada, row.placaNormalizada].filter((value): value is string => Boolean(value));
-  const matches = (context.terceiroIdentificacoes ?? []).filter(item => values.includes(item.identificacao_normalizada));
+  const values = [row.placaOriginal, row.frotaOriginal]
+    .map(value => normalizeTerceiroIdentificacao(value))
+    .filter((value): value is string => Boolean(value));
+  const matches = (context.terceiroIdentificacoes ?? []).filter(item => values.includes(normalizeTerceiroIdentificacao(item.identificacao_normalizada) ?? ''));
   const ids = [...new Set(matches.map(item => item.terceiro_id))];
   if (ids.length === 1) return { tipo: 'TERCEIRO', id: ids[0]! };
   if (ids.length > 1) return { tipo: null, id: null, reason: 'CONFLITO_TERCEIRO_IDENTIFICACAO' };
@@ -46,13 +49,15 @@ export function buildPreviewItem(row: PoliFrotaAbastecimentoNormalizado, context
   const produtoId = context.produtoIds[row.produtoDetectado] ?? null;
   const motivos = row.diagnosticos.filter(item => item.nivel === 'ERRO').map(item => item.codigo);
   let tipo: DestinatarioTipo | null = null; let frotaId: string | null = null; let terceiroId: string | null = null; let especialId: string | null = null;
-  const fleet = resolveFleet(row, context);
-  if (fleet.tipo === 'FROTA' || fleet.reason === 'CONFLITO_FROTA_PLACA' || fleet.reason === 'FROTA_AMBIGUA') {
-    tipo = fleet.tipo; frotaId = fleet.id; if (fleet.reason) motivos.push(fleet.reason);
-  } else {
-    const isPirulito = [row.placaNormalizada, row.frotaNormalizada].some(value => value === 'PIRULITO');
-    if (isPirulito && context.especialId) { tipo = 'ESPECIAL'; especialId = context.especialId; }
-    else { const third = resolveThirdParty(row, context); tipo = third.tipo; terceiroId = third.id; if (third.reason) motivos.push(third.reason); }
+  const isPirulito = [row.placaNormalizada, row.frotaNormalizada].some(value => value === 'PIRULITO');
+  const third = resolveThirdParty(row, context);
+  if (isPirulito && context.especialId) { tipo = 'ESPECIAL'; especialId = context.especialId; }
+  else if (third.tipo === 'TERCEIRO') { tipo = 'TERCEIRO'; terceiroId = third.id; }
+  else {
+    const fleet = resolveFleet(row, context);
+    if (fleet.tipo === 'FROTA' || fleet.reason === 'CONFLITO_FROTA_PLACA' || fleet.reason === 'FROTA_AMBIGUA') {
+      tipo = fleet.tipo; frotaId = fleet.id; if (fleet.reason) motivos.push(fleet.reason);
+    } else { tipo = third.tipo; terceiroId = third.id; if (third.reason) motivos.push(third.reason); }
   }
   if (context.duplicateIds.has(row.identificadorExterno)) motivos.push('DUPLICIDADE_NO_ARQUIVO');
   const imported = context.importedIds.has(row.identificadorExterno);
@@ -60,8 +65,8 @@ export function buildPreviewItem(row: PoliFrotaAbastecimentoNormalizado, context
   if (imported) motivos.push('JA_IMPORTADO');
   if (!produtoId && row.produtoDetectado === 'FORA_ESCOPO') motivos.push('PRODUTO_FORA_ESCOPO');
   if (!produtoId && row.produtoDetectado === 'DESCONHECIDO') motivos.push('PRODUTO_DESCONHECIDO');
-  const obra = substitution ? false : true;
-  const destinatario = substitution ? false : !tipo;
+  const obra = imported || substitution ? false : true;
+  const destinatario = imported || substitution ? false : !tipo;
   if (obra) motivos.push('OBRA_PENDENTE');
   if (destinatario) motivos.push('DESTINATARIO_PENDENTE');
   const erro = motivos.some(reason => ['DATA_AUSENTE', 'DATA_INVALIDA', 'LITROS_AUSENTE', 'LITROS_INVALIDO', 'VALORTOTAL_AUSENTE', 'VALORTOTAL_INVALIDO', 'DUPLICIDADE_NO_ARQUIVO', 'PRODUTO_FORA_ESCOPO', 'PRODUTO_DESCONHECIDO'].includes(reason));
@@ -84,7 +89,66 @@ async function importContext(): Promise<ImportacaoContext> {
 const rowFromItem = (row: PreviewItem): Record<string, unknown> => ({ ...row, payload_normalizado: { ...row, resolucao: resolutionOf(row) } });
 const itemFromDb = (row: Record<string, any>): PreviewItem => ({ ...(row.payload_normalizado as PreviewItem), id: row.id, status_preview: row.status_preview, substituicao_abastecimento_id: row.substituicao_abastecimento_id ?? (row.payload_normalizado as PreviewItem).substituicao_abastecimento_id ?? null, substituicao_origem_sistema: row.substituicao_origem_sistema ?? (row.payload_normalizado as PreviewItem).substituicao_origem_sistema ?? null, substituicao_identificador_principal: row.substituicao_identificador_principal ?? (row.payload_normalizado as PreviewItem).substituicao_identificador_principal ?? null, pendencias: row.pendencias });
 const substitutionStatuses = ['SUBSTITUICAO', 'SUBSTITUICAO_JA_REGISTRADA'];
-const counts = (items: PreviewItem[]) => ({ total: items.length, prontos: items.filter(item => item.status_preview === 'PRONTO').length, pendentesObra: items.filter(item => item.status_preview === 'PENDENTE_OBRA' && item.pendencias.destinatario === false).length, pendentesDestinatario: items.filter(item => item.status_preview === 'PENDENTE_DESTINATARIO' || item.pendencias.destinatario).length, foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length, erros: items.filter(item => item.status_preview === 'ERRO').length, jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length, substituicoes: items.filter(item => item.status_preview === 'SUBSTITUICAO').length, substituicoesJaRegistradas: items.filter(item => item.status_preview === 'SUBSTITUICAO_JA_REGISTRADA').length, importados: items.filter(item => item.status_preview === 'IMPORTADO').length, pendentes: items.filter(item => !['PRONTO', 'IMPORTADO', 'JA_IMPORTADO', ...substitutionStatuses].includes(item.status_preview)).length });
+const terminalStatuses = ['IMPORTADO', 'JA_IMPORTADO', ...substitutionStatuses];
+export const importacaoCounts = (items: PreviewItem[]) => ({
+  total: items.length,
+  prontos: items.filter(item => item.status_preview === 'PRONTO').length,
+  pendentesObra: items.filter(item => !terminalStatuses.includes(item.status_preview) && item.pendencias.obra).length,
+  pendentesDestinatario: items.filter(item => !terminalStatuses.includes(item.status_preview) && item.pendencias.destinatario).length,
+  foraEscopo: items.filter(item => item.status_preview === 'FORA_ESCOPO').length,
+  erros: items.filter(item => item.status_preview === 'ERRO').length,
+  jaImportados: items.filter(item => item.status_preview === 'JA_IMPORTADO').length,
+  substituicoes: items.filter(item => item.status_preview === 'SUBSTITUICAO').length,
+  substituicoesJaRegistradas: items.filter(item => item.status_preview === 'SUBSTITUICAO_JA_REGISTRADA').length,
+  importados: items.filter(item => item.status_preview === 'IMPORTADO').length,
+  pendentes: items.filter(item => !terminalStatuses.includes(item.status_preview) && (item.pendencias.obra || item.pendencias.destinatario)).length,
+});
+const counts = importacaoCounts;
+
+async function syncAlreadyImportedStatuses(importId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rows = await client.query<{ id: string }>(`
+      SELECT i.id
+      FROM abastecimento_importacao_itens i
+      WHERE i.importacao_id = $1
+        AND i.status_preview NOT IN ('IMPORTADO', 'JA_IMPORTADO', 'SUBSTITUICAO', 'SUBSTITUICAO_JA_REGISTRADA')
+        AND EXISTS (
+          SELECT 1 FROM abastecimentos a
+          WHERE a.origem_sistema = 'POLIFROTA'
+            AND a.identificador_externo = i.identificador_externo
+        )
+      FOR UPDATE
+    `, [importId]);
+    for (const row of rows.rows) {
+      await client.query(`
+        UPDATE abastecimento_importacao_itens
+        SET status_preview = 'JA_IMPORTADO',
+            pendencias = '{"obra":false,"destinatario":false,"motivos":["JA_IMPORTADO"]}'::jsonb,
+            payload_normalizado = jsonb_set(
+              jsonb_set(payload_normalizado, '{status_preview}', '"JA_IMPORTADO"'::jsonb),
+              '{pendencias}', '{"obra":false,"destinatario":false,"motivos":["JA_IMPORTADO"]}'::jsonb
+            )
+        WHERE id = $1
+      `, [row.id]);
+    }
+    const remaining = await client.query<{ status_preview: string }>('SELECT status_preview FROM abastecimento_importacao_itens WHERE importacao_id = $1', [importId]);
+    if (remaining.rows.length > 0 && remaining.rows.every(row => terminalStatuses.includes(row.status_preview))) {
+      await client.query("UPDATE abastecimento_importacoes SET status='CONCLUIDA', finalizada_at=COALESCE(finalizada_at, now()), updated_at=now() WHERE id=$1 AND status IN ('ANALISANDO','PREVIA','ERRO')", [importId]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function refreshAlreadyImportedStatuses(importId: string): Promise<void> {
+  await syncAlreadyImportedStatuses(uuid(importId, 'importacao_id'));
+}
 
 type ImportAuditContext = { id: string; arquivo_nome: string; arquivo_sha256: string; origem_sistema: string };
 const itemAuditSnapshot = (item: PreviewItem): Record<string, unknown> => ({
@@ -132,6 +196,7 @@ export async function getImportacao(id: string) { const importId = uuid(id, 'id'
 export async function listImportacoesEmAndamento(): Promise<ImportacaoEmAndamento[]> {
   const headers = await pool.query<{ id: string; arquivo_nome: string; arquivo_sha256: string; status: string; created_at: string }>("SELECT id,arquivo_nome,arquivo_sha256,status,created_at FROM abastecimento_importacoes WHERE origem_sistema='POLIFROTA' AND status IN ('ANALISANDO','PREVIA','ERRO') ORDER BY created_at DESC");
   if (!headers.rows.length) return [];
+  await Promise.all(headers.rows.map(header => syncAlreadyImportedStatuses(header.id)));
   const items = await pool.query<{ importacao_id: string; status_preview: PreviewStatus; pendencias: PreviewItem['pendencias']; payload_normalizado: Record<string, unknown>; substituicao_abastecimento_id: string | null; substituicao_origem_sistema: string | null; substituicao_identificador_principal: string | null }>('SELECT importacao_id,status_preview,pendencias,payload_normalizado,substituicao_abastecimento_id,substituicao_origem_sistema,substituicao_identificador_principal FROM abastecimento_importacao_itens WHERE importacao_id=ANY($1::uuid[]) ORDER BY linha_original,id', [headers.rows.map(row => row.id)]);
   const grouped = new Map<string, PreviewItem[]>();
   for (const item of items.rows) { const list = grouped.get(item.importacao_id) ?? []; list.push(itemFromDb(item)); grouped.set(item.importacao_id, list); }

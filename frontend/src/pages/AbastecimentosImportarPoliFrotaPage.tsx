@@ -80,22 +80,17 @@ function previewCounts(items: PoliFrotaPreviewItem[]) {
     prontos: items.filter((item) => item.status_preview === "PRONTO").length,
     pendentes: items.filter(
       (item) =>
-        ![
-          "PRONTO",
-          "IMPORTADO",
-          "JA_IMPORTADO",
-          "SUBSTITUICAO",
-          "SUBSTITUICAO_JA_REGISTRADA",
-        ].includes(item.status_preview),
+        !["IMPORTADO", "JA_IMPORTADO", "SUBSTITUICAO", "SUBSTITUICAO_JA_REGISTRADA"].includes(item.status_preview) &&
+        (item.pendencias.obra || item.pendencias.destinatario),
     ).length,
     pendentesObra: items.filter(
       (item) =>
-        item.status_preview === "PENDENTE_OBRA" &&
-        !item.pendencias.destinatario,
+        !["IMPORTADO", "JA_IMPORTADO", "SUBSTITUICAO", "SUBSTITUICAO_JA_REGISTRADA"].includes(item.status_preview) &&
+        item.pendencias.obra,
     ).length,
     pendentesDestinatario: items.filter(
       (item) =>
-        item.status_preview === "PENDENTE_DESTINATARIO" ||
+        !["IMPORTADO", "JA_IMPORTADO", "SUBSTITUICAO", "SUBSTITUICAO_JA_REGISTRADA"].includes(item.status_preview) &&
         item.pendencias.destinatario,
     ).length,
     foraEscopo: items.filter((item) => item.status_preview === "FORA_ESCOPO")
@@ -542,10 +537,7 @@ export function AbastecimentosImportarPoliFrotaPage() {
             />
             <Summary
               label="Pendências"
-              value={
-                (preview.counts.pendentesObra || 0) +
-                (preview.counts.pendentesDestinatario || 0)
-              }
+              value={preview.counts.pendentes}
               tone="warning"
             />
             <Summary
