@@ -8,7 +8,7 @@ export const serviceClassifications=['INTERNO','TERCEIRO','INDETERMINADO'] as co
 export type ServiceClassification=typeof serviceClassifications[number]
 export const classificationOrigins=['LEGADO','IMPORTACAO','MANUAL','REVISAO'] as const
 export type ClassificationOrigin=typeof classificationOrigins[number]
-export interface ServiceOrder{id:string;numero_os:string;obra_id:string;obra_codigo:string;obra_nome:string;frota_id:string|null;prefixo_frota_id:string|null;frota_prefixo:string;frota_numero:number|null;frota_codigo:string;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null;total_mao_obra_interna:string;total_servicos_terceiros:string;total_produtos:string;total_os:string;created_at:string;updated_at:string}
+export interface ServiceOrder{id:string;numero_os:string;obra_id:string|null;obra_codigo:string|null;obra_nome:string|null;frota_id:string|null;prefixo_frota_id:string|null;frota_prefixo:string|null;frota_numero:number|null;frota_codigo:string|null;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null;total_mao_obra_interna:string;total_servicos_terceiros:string;total_produtos:string;total_os:string;created_at:string;updated_at:string}
 export interface OrderEmployee{id:string;nome:string;matricula:string|null;cargo:string|null;status:'ATIVO'|'INATIVO'}
 export interface ServiceExecution{id:string;servico_os_id:string;funcionario_id:string;funcionario_nome:string;inicio:string;fim:string;duracao_minutos:number;created_at:string;updated_at:string}
 export interface OrderService{id:string;ordem_servico_id:string;descricao:string;valor:number;classificacao_servico:ServiceClassification;classificacao_origem:ClassificationOrigin;categoria_gerencial:string|null;subcategoria_gerencial:string|null;descricao_editada_manualmente?:boolean;categoria_gerencial_editada_manualmente?:boolean;execucoes:ServiceExecution[];created_at:string;updated_at:string}
@@ -19,7 +19,7 @@ export interface ServiceCategoryOption{value:string}
 export interface OrderFilters{numero_os?:string;frota_codigo?:string;frota_numero?:string;obra_id?:string;prefixo_frota_id?:string;status?:OrderStatus|'';natureza_os?:OrderNature|'';categoria?:string;categoria_servico?:OrderCategory|'';data_inicio?:string;data_fim?:string}
 export interface ProjectOption{id:string;codigo:string;nome:string;status:'ATIVA'|'INATIVA'}
 export interface FleetPrefixOption{id:string;codigo:string;descricao:string|null;status:'ATIVO'|'INATIVO'}
-export interface OrderPayload{numero_os:number;obra_id:string;frota_id:string|null;prefixo_frota_id:string|null;frota_numero:number|null;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null}
+export interface OrderPayload{numero_os:number;obra_id:string|null;frota_id:string|null;prefixo_frota_id:string|null;frota_numero:number|null;natureza_os:OrderNature;categoria_servico:OrderCategory|null;prestador_terceiro:string|null;data_abertura:string;data_fechamento:string|null;status:OrderStatus;observacoes:string|null}
 export type CreateOrderPayload=Omit<OrderPayload,'status'>&{status?:OrderStatus}
 export type UpdateOrderPayload=OrderPayload
 export interface EmployeeLinkPayload{funcionario_id:string}

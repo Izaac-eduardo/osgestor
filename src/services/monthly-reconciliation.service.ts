@@ -44,7 +44,7 @@ export interface MonthlyReconciliationReport {
   results: ReconciliationResult[];
 }
 
-interface DbOrder { id: string; numero_os: string; obra_id: string; frota_id: string | null; natureza_os: string; categoria_servico: string | null; status: string; status_original: string | null; status_origem: string | null; observacoes: string | null; }
+interface DbOrder { id: string; numero_os: string; obra_id: string | null; frota_id: string | null; natureza_os: string; categoria_servico: string | null; status: string; status_original: string | null; status_origem: string | null; observacoes: string | null; }
 interface DbItem { id: string; ordem_servico_id: string; descricao: string; quantidade?: string; unidade?: string; valor_unitario?: string; valor?: string; classificacao_servico?: string; classificacao_origem?: string; codigo_poli: string | null; fingerprint_contexto: string | null; hash_conteudo: string | null; }
 interface DbExecution { id: string; ordem_servico_id: string; servico_os_id: string | null; funcionario_id: string; inicio: string; fim: string; fingerprint_contexto: string | null; hash_conteudo: string | null; }
 interface DbOverride { ordem_servico_id: string; campo: 'natureza_os' | 'obra_id' | 'status' | 'frota_id'; valor_origem: unknown; valor_override: unknown; frota_id_override: string | null; }
@@ -201,24 +201,19 @@ function classify(result: ReconciliationResult, isNew: boolean): ReconciliationC
 export function classifyReconciliation(parsed: ParsedOs, snapshot: Snapshot | undefined): ReconciliationResult {
   const result: ReconciliationResult = { numeroOs: parsed.numeroOs, classification: 'NO_CHANGE', differences: [], blockers: [], reviews: [], safeUpdates: [], protectedOverrides: [] };
   if (!snapshot) {
-    if (parsed.pendencias.some(value => value.startsWith('OBRA_PENDENTE') || value.startsWith('OBRA_AMBIGUA'))) result.blockers.push({ reasonCode: 'UNRESOLVED_WORK', description: 'Obra obrigatória não resolvida.' });
     if (parsed.pendencias.some(value => value.startsWith('FROTA_PENDENTE'))) result.blockers.push({ reasonCode: 'UNRESOLVED_FLEET', description: 'Frota obrigatória não resolvida.' });
     result.classification = classify(result, true);
     return result;
   }
   const order = snapshot.order;
-  const obraOverride = overrideFor(snapshot, 'obra_id');
   const frotaOverride = overrideFor(snapshot, 'frota_id');
   const frotaOverrideTarget = frotaOverride?.frota_id_override ?? (typeof frotaOverride?.valor_override === 'string' ? frotaOverride.valor_override : undefined);
   const frotaOverrideProtected = Boolean(frotaOverrideTarget && order.frota_id === frotaOverrideTarget);
-  const obraOverrideProtected = Boolean(obraOverride && typeof obraOverride.valor_override === 'string' && order.obra_id === obraOverride.valor_override);
   result.audit = { sourceItemCounts: { products: parsed.itens.filter(item => item.tipo === 'PRODUTO').length, services: parsed.itens.filter(item => item.tipo === 'SERVICO').length }, currentItemCounts: { products: snapshot.products.length, services: snapshot.services.length }, currentNatureza: order.natureza_os, sourceNatureza: parsed.natureza ?? null, currentStatus: order.status, sourceStatus: parsed.status ?? null };
-  if (parsed.pendencias.some(value => value.startsWith('OBRA_PENDENTE') || value.startsWith('OBRA_AMBIGUA'))) result.blockers.push({ reasonCode: 'UNRESOLVED_WORK', description: 'Obra externa não resolvida com segurança.' });
   if (parsed.pendencias.some(value => value.startsWith('FROTA_PENDENTE'))) result.blockers.push({ reasonCode: 'UNRESOLVED_FLEET', description: 'Frota externa não resolvida com segurança.' });
   compareField(result, snapshot, 'status', order.status, parsed.status, Boolean(parsed.status && statusSafe(order.status, parsed.status)), 'STATUS_CONFLICT', 'Transição de status homologada e progressiva.');
   compareField(result, snapshot, 'natureza_os', order.natureza_os, parsed.natureza, false, 'NATURE_CONFLICT', 'Divergência histórica de natureza exige revisão.');
   compareField(result, snapshot, 'obra_id', order.obra_id, parsed.obraId, Boolean(parsed.obraId), 'OBRA_CONFLICT', 'Referência de obra resolvida diretamente ou por alias persistente.');
-  if (obraOverrideProtected) result.blockers = result.blockers.filter(value => value.reasonCode !== 'UNRESOLVED_WORK');
   if (frotaOverrideProtected) result.blockers = result.blockers.filter(value => value.reasonCode !== 'UNRESOLVED_FLEET');
   if (frotaOverrideProtected && (!parsed.frotaId || parsed.frotaId !== order.frota_id)) {
     result.protectedOverrides.push({ field: 'frota_id', sourceValue: parsed.frotaId ?? null, currentValue: order.frota_id, valorOrigem: frotaOverride!.valor_origem, valorOverride: frotaOverrideTarget });
