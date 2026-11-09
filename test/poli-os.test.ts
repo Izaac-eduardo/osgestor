@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { addPending, findFleetId, parsePoliOs, classifyItemType, classifyImportedService, classifyImportedServiceForDescription, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, isPreventiveReviewService, isRastreamentoDeFrota, mapStatus, naturezaExclusivaDosServicos, productUnit, matchObraId, refreshNaturezaFromServiceClassifications, resolveManualStatus } from '../src/imports/poli-os.js';
+import { addPending, findFleetId, parsePoliOs, matchPreview, classifyItemType, classifyImportedService, classifyImportedServiceForDescription, classifyNatureza, classifyCategory, classifyCategoryWithNatureza, isPreventiveReviewService, isRastreamentoDeFrota, mapStatus, naturezaExclusivaDosServicos, productUnit, matchObraId, refreshNaturezaFromServiceClassifications, resolveManualStatus } from '../src/imports/poli-os.js';
 import { normalizeSearchText } from '../src/utils/text.js';
 import { normalizeFleetCode } from '../src/utils/frotas.js';
 import { nextObraCodigo } from '../src/services/obras.service.js';

@@ -272,7 +272,7 @@ export async function resolve(request: Request, response: Response): Promise<voi
   const decidedEm = new Date().toISOString();
   const decididoPor = request.authUser?.id ?? null;
   if (requestedFleet) manualResolucoes.push({ campo: 'frotaId', valorOrigem: item.frotaId ?? null, identificadorOriginal: item.frotaOriginal, valorSelecionado: selectedFleet as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
-  if (requestedObra && !clearObra) manualResolucoes.push({ campo: 'obraId', valorOrigem: previousObraId, identificadorOriginal: item.parecerOriginal, valorSelecionado: selectedObra as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
+  if (requestedObra && !clearObra) manualResolucoes.push({ campo: 'obraId', valorOrigem: previousObraId, identificadorOriginal: String(item.numeroOs), valorSelecionado: selectedObra as string, arquivoOrigem: item.origem, importacaoId: tokenOf(request), numeroOs: item.numeroOs, decisao: 'APROVAR', decididoEm: decidedEm, decididoPor });
   item.manualResolucoes = manualResolucoes;
   if (body.status !== undefined) resolveManualStatus(item, body.status as string);
   item.pendencias = [];

@@ -7,7 +7,6 @@ import { buildOsUpdateDiff, loadExistingOs, loadExistingOsUsing } from '../servi
 import type { OsUpdateDiff } from '../services/sincronizacao-os.service.js';
 import { findValidNaturezaConfirmation } from '../services/natureza-confirmacoes.service.js';
 import type { ClassificacaoOrigem, ClassificacaoServico } from '../types/servicos-os.js';
-import { listExternalObraIdentifiers, resolveExternalObraIdentifier, VEGA_OBRA_ORIGIN, type ExternalObraIdentifier } from '../services/obra-identificadores.service.js';
 import {
   buildExecutionContentHash,
   buildExecutionContextFingerprint,
@@ -29,6 +28,16 @@ const norm=normalizeSearchText;
 const num=(v:unknown)=>{if(typeof v==='number')return Number.isFinite(v)?v:0;const n=Number(String(v??'').trim().replace(/\./g,'').replace(',','.'));return Number.isFinite(n)?n:0};
 const dateOnly=(v:unknown)=>{if(typeof v==='number'&&Number.isFinite(v)){const parsed=XLSX.SSF.parse_date_code(v);if(parsed)return `${String(parsed.y).padStart(4,'0')}-${String(parsed.m).padStart(2,'0')}-${String(parsed.d).padStart(2,'0')}`;}const value=String(v??'').trim();const m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(value);if(m)return `${m[3]}-${m[2]}-${m[1]}`;const iso=/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(value);return iso?`${iso[1]}-${iso[2]}-${iso[3]}`:value};
 const localDateTime=(d:string,t:string)=>{const m=/(\d{2})\/(\d{2})\/(\d{4})/.exec(d);return m?`${m[3]}-${m[2]}-${m[1]}T${t}:00`:d+'T'+t+':00'};
+type VegaAnnotation = { kind: 'PROBLEMA' | 'PARECER'; value: string };
+const annotationFromRow=(row:unknown[]):VegaAnnotation|undefined=>{
+  const cells=row.map((value,index)=>({index,text:String(value??'').replace(/\s+/g,' ').trim()})).filter(value=>value.text);
+  const match=cells.find(value=>/^(?:PROBLEMA|PARECER(?:\s+TECNICO)?(?:\.\.\.)?)\s*:/i.test(norm(value.text)));
+  if(!match)return undefined;
+  // A different column is allowed, but item rows must not be treated as annotations.
+  if(match.index!==0 && ((row[3]!==null&&row[3]!==undefined&&String(row[3]).trim()!=='') || (row[5]!==null&&row[5]!==undefined&&String(row[5]).trim()!=='') || num(row[0])>0))return undefined;
+  const separator=match.text.indexOf(':');
+  return { kind: /^PROBLEMA\s*:/i.test(norm(match.text))?'PROBLEMA':'PARECER', value: match.text.slice(separator+1).trim() };
+};
 export const normalizePlate=(v:unknown)=>norm(v).replace(/[\s-]/g,'');
 export const normalizeModel=(v:unknown)=>norm(v).replace(/[\s-]/g,'');
 export function matchObraId(obraText:string|null,obras:Array<{id:string;codigo:string;nome:string}>){const key=norm(obraText);if(!key)return undefined;const matches=obras.filter(x=>norm(x.codigo)===key||norm(x.nome)===key);return matches.length===1?matches[0]!.id:undefined;}
@@ -164,7 +173,7 @@ export function parsePoliOs(buffer:Buffer,filename:string,importMetadata: PoliIm
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){const row=rows[rowIndex]!;if(isOsRow(row)){if(o)out.push(o);const launcherCode=textAt(row,layout.launcherCodeColumn)||null,launcherName=textAt(row,layout.launcherNameColumn)||null,fechamento=layout.fechamentoColumn===undefined?undefined:(dateOnly(row[layout.fechamentoColumn])||null);o={numeroOs:num(row[0]),data:dateOnly(row[6]),dataFechamento:fechamento,cliente:textAt(row,layout.clienteColumn)||null,frotaOriginal:textAt(row,layout.placaColumn)||textAt(row,layout.veiculoColumn)||null,parecerOriginal:null,funcionarioAbertura:launcherCode,funcionarioAberturaCodigo:launcherCode,funcionarioAberturaNome:launcherName,problema:null,status:undefined,statusOriginal:null,statusOrigem:null,itens:[],execucoes:[],statusPreview:'REQUER_REVISAO',pendencias:[],origem:filename};last=undefined;continue}if(!o)continue;
    const statusOriginal=String(row[8]??'');if(statusOriginal.trim()){o.statusOriginal=statusOriginal.trim();const mappedStatus=mapStatus(statusOriginal);o.status=mappedStatus;o.statusOrigem=mappedStatus?'AUTOMATICO':null;}const description=textAt(row,5),code=textAt(row,3),executionText=executionTextFromRow(row),hasExecution=Boolean(executionText);if(description){const technicianName=textAt(row,layout.technicianNameColumn)||undefined,technicianCode=technicianName?textAt(row,layout.technicianCodeColumn)||undefined:undefined,tipo=classifyItemType(description,hasExecution),classification=tipo==='SERVICO'?classifyImportedServiceForDescription(description,code):undefined;const managerCategory=classifyPoliItem({ codigo_poli: code||undefined, tipo });const sequenciaImportacao=o.itens.length+1;last={codigo:code||undefined,codigo_poli:code||undefined,descricao:description,quantidade:num(row[layout.quantityColumn])||1,valorUnitario:num(row[layout.unitValueColumn]),desconto:num(row[layout.discountColumn]),total:num(row[layout.totalColumn]),unidade:tipo==='SERVICO'?'UN':productUnit(description),tipo,tecnicoOriginal:technicianName,tecnicoCodigoOriginal:technicianCode,origemLinha:rowIndex+1,sequenciaImportacao,...classification,classificacao_servico_original:classification?.classificacao_servico,categoria_gerencial:managerCategory.categoria_gerencial,subcategoria_gerencial:managerCategory.subcategoria_gerencial,origem_classificacao:managerCategory.origem_classificacao};last.fingerprintContexto=buildItemContextFingerprint(importMetadata,o.numeroOs,tipo,sequenciaImportacao);last.hashConteudo=buildItemContentHash(last);o.itens.push(last);}
    const match=/Inicio em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) Termino em (\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2})/i.exec(norm(executionText));if(match&&last?.tipo==='SERVICO'){const classification=classifyImportedService(last.codigo);last.classificacao_servico=classification.classificacao_servico;last.classificacao_servico_original=classification.classificacao_servico;last.classificacao_origem=classification.classificacao_origem;const serviceItemIndex=o.itens.length-1;if(last.tecnicoOriginal&&norm(last.tecnicoOriginal)!=='IZAAC EDUARDO'){const sequenciaImportacao=o.execucoes.length+1;const servicoSequenciaImportacao=last.sequenciaImportacao ?? serviceItemIndex+1;const execution:ParsedExecucao={funcionarioOriginal:last.tecnicoOriginal,inicio:localDateTime(match[1]!,match[2]!),fim:localDateTime(match[3]!,match[4]!),serviceItemIndex,origemLinha:rowIndex+1,sequenciaImportacao,servicoSequenciaImportacao};execution.fingerprintContexto=buildExecutionContextFingerprint(importMetadata,o.numeroOs,sequenciaImportacao,servicoSequenciaImportacao);execution.hashConteudo=buildExecutionContentHash(execution);o.execucoes.push(execution);}}
-   const annotation=textAt(row,0);if(/^PROBLEMA\s*:/i.test(annotation)){const problem=annotation.replace(/^PROBLEMA\s*:/i,'').trim();if(!/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+(?:\s+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+)?$/.test(problem))o.problema=o.problema?o.problema+'\n'+problem:problem;}else if(/^PARECER/i.test(annotation))o.parecerOriginal=annotation.replace(/^PARECER[^:]*:/i,'').trim();if(/^TOTAL ORDEM/i.test(norm(row.map(value=>String(value??'')).join(' '))))o.totalOrigem=num(row[layout.totalColumn]);
+   const annotation=annotationFromRow(row);if(annotation?.kind==='PROBLEMA'){const problem=annotation.value;if(!/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+(?:\s+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2})+)?$/.test(problem))o.problema=o.problema?o.problema+'\n'+problem:problem;}else if(annotation?.kind==='PARECER')o.parecerOriginal=annotation.value;if(/^TOTAL ORDEM/i.test(norm(row.map(value=>String(value??'')).join(' '))))o.totalOrigem=num(row[layout.totalColumn]);
   }if(o)out.push(o);
  }
  for(const item of out){item.categoriaServico=classifyCategory(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao));item.natureza=item.itens.some(x=>x.tipo==='SERVICO'&&isRastreamentoDeFrota(x.descricao))?'TERCEIRO':classifyNatureza(item.problema,item.execucoes[0]?.funcionarioOriginal??null,item.itens.map(x=>x.descricao).join(' '),item.itens.some(x=>x.tipo==='SERVICO'),item.itens.some(x=>x.tipo==='PRODUTO'),item.status,item.execucoes.length>0,item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.tecnicoOriginal??''));refreshNaturezaFromServiceClassifications(item);const electricianCategory=classifyCategoryWithNatureza(item.itens.filter(x=>x.tipo==='SERVICO').map(x=>x.descricao),item.natureza);if(electricianCategory==='ELETRICA')item.categoriaServico=electricianCategory;}return out;
@@ -179,16 +188,10 @@ export async function matchPreview(items:ParsedOs[], options: PoliParserOptions 
  }catch{}
  let employees:{id:string;nome:string}[]=[];
  try{employees=(await pool.query<{id:string;nome:string}>('SELECT id,nome FROM funcionarios')).rows;}catch{}
- let obraAliases:ExternalObraIdentifier[]=[];
- try{obraAliases=await listExternalObraIdentifiers(VEGA_OBRA_ORIGIN);}catch{}
- let obras:{id:string;codigo:string;nome:string}[]=[];
- try{obras=(await pool.query<{id:string;codigo:string;nome:string}>('SELECT id,codigo,nome FROM obras')).rows;}catch{}
  for(const o of items){
   o.pendencias=[];
   refreshServiceClassificationPending(o.pendencias,o.itens);
   if(!o.status)addPending(o.pendencias,'STATUS_PENDENTE');
-  const obra=norm(o.parecerOriginal);
-  if(obra){try{const resolved=await resolveExternalObraIdentifier(o.parecerOriginal,obras,obraAliases,VEGA_OBRA_ORIGIN);if(resolved)o.obraId=o.obraId??resolved;}catch{/* obra is optional for maintenance orders */}}
   if(!o.frotaId){const fleetMatch=findFleetMatchWithAliasPrecedence(o.frotaOriginal,fleets,externalFleetIdentifiers,aliasOrigins);if(fleetMatch){o.frotaId=fleetMatch.id;o.frotaAliasOrigem=fleetMatch.aliasOrigin??null;}}
   if(!o.frotaId)addPending(o.pendencias,'FROTA_PENDENTE');
   for(const e of o.execucoes){const h=employees.filter(x=>norm(x.nome)===norm(e.funcionarioOriginal));if(h.length===1)e.funcionarioId=e.funcionarioId??h[0]!.id;else addPending(o.pendencias,h.length?'FUNCIONARIO_AMBIGUO':'FUNCIONARIO_PENDENTE');}

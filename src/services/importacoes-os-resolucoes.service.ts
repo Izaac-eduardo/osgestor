@@ -50,9 +50,11 @@ export async function recoverManualResolutions(
   }
   let recovered = 0;
   for (const item of items) {
+    // Frota is recovered from its own source field. Obras use the stable O.S.
+    // number for new resolutions; legacy records keyed by Parecer are ignored.
     const candidates: Array<{ campo: ResolutionField; original: string | null | undefined }> = [
       { campo: 'frotaId', original: item.frotaOriginal },
-      { campo: 'obraId', original: item.parecerOriginal },
+      { campo: 'obraId', original: String(item.numeroOs) },
     ];
     for (const candidate of candidates) {
       const normalized = normalizeResolutionIdentifier(candidate.campo, candidate.original);

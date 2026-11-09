@@ -459,7 +459,7 @@ export function ImportarOsPage() {
                     <strong>O.S. {order.numeroOs}</strong>
                     <small>
                       {order.frotaOriginal ?? "Frota não informada"} ·{" "}
-                      {order.parecerOriginal ?? "Obra pendente"}
+                      {order.obraId ? "Obra associada" : "Sem obra"}
                     </small>
                   </span>
                   <span
@@ -606,6 +606,7 @@ export function ImportarOsPage() {
                     <p>
                       <b>Problema:</b> {order.problema ?? "—"}
                     </p>
+                    {order.parecerOriginal && <p><b>Parecer Técnico (origem):</b> {order.parecerOriginal}</p>}
                     <div className="import-pending">
                       <b>Pendências:</b>{" "}
                       {order.pendencias.length
