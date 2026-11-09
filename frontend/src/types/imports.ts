@@ -102,3 +102,14 @@ export interface ImportResult {
   pendentes: number;
   falhas: Array<{ numeroOs: number; motivo: string }>;
 }
+export type IncrementalPreviewCategory = "NOVA" | "SEM_ALTERACOES" | "STATUS_ALTERADO" | "ITENS_ADICIONADOS" | "ITENS_ALTERADOS" | "NATUREZA_DIVERGENTE" | "REVISAO_MANUAL";
+export interface IncrementalPreviewOrder {
+  numeroOs: number; ordemServicoId: string | null; categoria: IncrementalPreviewCategory; categorias: IncrementalPreviewCategory[]; statusPreview: ImportStatus;
+  statusAtual: string | null; statusPoli: string | null; naturezaAtual: string | null; naturezaPoli: string | null; dataFechamento: string | null; dataFechamentoDesconhecida: boolean;
+  itensNovos: Array<{ tipo: "PRODUTO" | "SERVICO"; codigoPoli: string | null; descricao: string; quantidade: number; unidade: string; valorUnitario: number; valorTotal: number; evidencia: string; confianca: string }>;
+  itensAmbiguos: Array<{ tipo: "PRODUTO" | "SERVICO"; descricao: string }>;
+  itensAusentes: Array<{ tipo: "PRODUTO" | "SERVICO"; id: string; descricao: string; quantidade: number; unidade: string; valorUnitario: number; motivo: string }>;
+  alteracoes: Array<{ chave: string; tipo: string; atual: string | null; proposto: string; confianca: string; selecionavel: boolean }>;
+  divergencias: string[]; confianca: string; revisaoManual: boolean; evidencia: { origem: string; linhas: number[]; statusOriginal: string | null; quantidadeItensFonte: number };
+}
+export interface IncrementalPreview { somenteLeitura: true; filename: string; total: number; counts: Record<IncrementalPreviewCategory, number>; novosItens: number; itensAmbiguos: number; conflitosStatus: number; orders: IncrementalPreviewOrder[]; }

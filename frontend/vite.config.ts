@@ -25,6 +25,8 @@ export default defineConfig({
       '/dashboard': 'http://localhost:3000',
       '/importacoes-os': 'http://localhost:3000',
       '/abastecimento': 'http://localhost:3000',
+      '/contabilidade': 'http://localhost:3000',
+      '/manutencao-financeira': 'http://localhost:3000',
     },
   },
 })

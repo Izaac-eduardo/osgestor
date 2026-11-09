@@ -22,7 +22,7 @@ type OrdemServicoStatus = (typeof ordemServicoStatuses)[number];
 export interface OrdemServico {
   id: string;
   numero_os: string;
-  obra_id: string;
+  obra_id: string | null;
   frota_id: string | null;
   prefixo_frota_id: string | null;
   frota_numero: number | null;
@@ -40,8 +40,8 @@ export interface OrdemServico {
 }
 
 export interface OrdemServicoResumo extends OrdemServico {
-  obra_codigo: string;
-  obra_nome: string;
+  obra_codigo: string | null;
+  obra_nome: string | null;
   frota_prefixo: string;
   frota_codigo: string;
   total_mao_obra_interna: string;
@@ -52,7 +52,7 @@ export interface OrdemServicoResumo extends OrdemServico {
 
 interface OrdemServicoFields {
   numero_os: number;
-  obra_id: string;
+  obra_id: string | null;
   frota_id: string | null;
   prefixo_frota_id: string | null;
   frota_numero: number | null;
@@ -103,7 +103,7 @@ interface RelationshipResult {
 
 interface NaturezaChangeResult {
   natureza_os: OrdemServicoNatureza;
-  obra_id: string;
+  obra_id: string | null;
   status: OrdemServicoStatus;
   possui_funcionarios: boolean;
   possui_servicos: boolean;
@@ -217,7 +217,7 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
 
   return {
     numero_os: requiredPositiveInteger(body.numero_os, 'numero_os'),
-    obra_id: requiredUuid(body.obra_id, 'obra_id'),
+    obra_id: body.obra_id === undefined || body.obra_id === null || body.obra_id === '' ? null : requiredUuid(body.obra_id, 'obra_id'),
     frota_id: body.frota_id === undefined || body.frota_id === null || body.frota_id === '' ? null : requiredUuid(body.frota_id, 'frota_id'),
     prefixo_frota_id: body.frota_id ? null : requiredUuid(body.prefixo_frota_id, 'prefixo_frota_id'),
     frota_numero: body.frota_id ? null : requiredPositiveInteger(body.frota_numero, 'frota_numero', 2147483647),
@@ -231,7 +231,7 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
   };
 };
 
-const validateRelationships = async (obraId: string, frotaId: string | null, prefixoFrotaId: string | null): Promise<void> => {
+const validateRelationships = async (obraId: string | null, frotaId: string | null, prefixoFrotaId: string | null): Promise<void> => {
   const result = await pool.query<RelationshipResult>(
     `SELECT
        EXISTS (SELECT 1 FROM obras WHERE id = $1) AS obra_existe,
@@ -240,7 +240,7 @@ const validateRelationships = async (obraId: string, frotaId: string | null, pre
     [obraId, frotaId, prefixoFrotaId],
   );
   const relationships = result.rows[0]!;
-  if (!relationships.obra_existe) {
+  if (obraId !== null && !relationships.obra_existe) {
     throw new OrdemServicoServiceError(400, 'A obra informada não existe.');
   }
   if (frotaId && !relationships.frota_existe) throw new OrdemServicoServiceError(400, 'A frota informada não existe.');

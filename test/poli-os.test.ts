@@ -32,8 +32,9 @@ test('persistência da sincronização tipa parâmetros opcionais e evita 42P08'
   assert.match(orderUpdateSql, /status=\$1::varchar\(30\)/);
   assert.match(orderUpdateSql, /categoria_servico=\$2::varchar\(50\)/);
   assert.match(orderUpdateSql, /observacoes=\$3::text/);
-  assert.match(orderUpdateSql, /WHEN \$1::varchar\(30\)='FINALIZADA' AND status IS DISTINCT FROM \$1::varchar\(30\)/);
-  assert.match(orderUpdateSql, /WHERE id=\$4::uuid/);
+  assert.match(orderUpdateSql, /data_fechamento=\$4::date/);
+  assert.doesNotMatch(orderUpdateSql, /CURRENT_DATE/);
+  assert.match(orderUpdateSql, /WHERE id=\$5::uuid/);
   const diff = buildOsUpdateDiff(syncParsed({ status: 'FINALIZADA', categoriaServico: 'BORRACHARIA', problema: null }), syncCurrent({ status: 'FINALIZADA', categoria: 'OUTROS', problema: null }));
   assert.equal(diff.estado, 'ATUALIZACAO_DISPONIVEL');
   assert.equal(diff.categoria?.atual, 'OUTROS');

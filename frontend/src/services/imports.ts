@@ -6,6 +6,7 @@ import type {
   ImportResult,
   ImportServiceClassificationPayload,
   NaturezaConfirmacao,
+  IncrementalPreview,
 } from "../types/imports";
 const friendlyPreviewError = (error: unknown): never => {
   if (axios.isAxiosError(error)) {
@@ -23,6 +24,10 @@ const friendlyPreviewError = (error: unknown): never => {
   }
   throw error;
 };
+export async function incrementalPreview(file: File) {
+  const form = new FormData(); form.append("arquivo", file);
+  return (await api.post<IncrementalPreview>("/importacoes-os/sincronizacao-previa", form)).data;
+}
 export async function analyzeImport(file: File) {
   const form = new FormData();
   form.append("arquivo", file);

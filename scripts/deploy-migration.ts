@@ -8,6 +8,9 @@ const allowedVersions = new Map([
   ['036', '036_reclassificacao_produto_servico.sql'],
   ['037', '037_integridade_reclassificacao_produto_servico.sql'],
   ['038', '038_edicao_manual_servicos_categorias.sql'],
+  ['039', '039_os_manutencao_sem_obra.sql'],
+  ['040', '040_importacoes_contabeis.sql'],
+  ['041', '041_salarios_base_oficina.sql'],
 ]);
 const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051']);
 
@@ -21,7 +24,7 @@ if (!preview && !apply) throw new Error('Use exatamente um modo: --preview ou --
 if (preview === apply) throw new Error('Use exatamente um modo: --preview ou --apply.');
 if (!database) throw new Error('Informe explicitamente --database=NOME.');
 if (!allowedDatabases.has(database)) throw new Error(`Banco alvo não autorizado: ${database}.`);
-if (!version || !allowedVersions.has(version)) throw new Error('Informe --version=036, --version=037 ou --version=038.');
+if (!version || !allowedVersions.has(version)) throw new Error('Informe --version=036, --version=037, --version=038, --version=039, --version=040 ou --version=041.');
 if (apply && confirmedTarget !== database) throw new Error('O modo --apply exige --confirm-target com o mesmo nome do banco alvo.');
 if (process.env.DB_NAME && process.env.DB_NAME !== database) throw new Error(`DB_NAME (${process.env.DB_NAME}) diverge de --database (${database}).`);
 
@@ -87,7 +90,7 @@ try {
       try {
         await ensureControlTable(client);
         await client.query(stripTransactionWrapper(sql));
-        await client.query('INSERT INTO schema_migrations(version,file_name,checksum_sha256) VALUES($1,$2,$3)', [fileName, fileName, checksum]);
+        await client.query('INSERT INTO schema_migrations(version,file_name,checksum_sha256,applied_by) VALUES($1,$2,$3,current_user)', [fileName, fileName, checksum]);
         await client.query('COMMIT');
       } catch (error) {
         await client.query('ROLLBACK');

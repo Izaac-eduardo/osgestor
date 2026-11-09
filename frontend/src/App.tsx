@@ -20,6 +20,8 @@ import { LoginPage } from './pages/LoginPage'
 import { PasswordChangeRoute, ProtectedRoute, PublicRoute } from './components/RouteGuards'
 import { AdminUsersPage } from './pages/AdminUsersPage'
 import { AdminRoute } from './components/AdminRoute'
+import { ManutencaoFinanceiraPage } from './pages/ManutencaoFinanceiraPage'
+import { ImportarContabilidadePage } from './pages/ImportarContabilidadePage'
 
 export default function App() {
   return <Routes>
@@ -33,6 +35,8 @@ export default function App() {
         <Route path="funcionarios" element={<FuncionariosPage />} />
         <Route path="frotas" element={<FrotasPage />} />
         <Route path="relatorios" element={<RelatoriosPage />} />
+        <Route path="manutencao" element={<ManutencaoFinanceiraPage />} />
+        <Route path="importar-contabilidade" element={<ImportarContabilidadePage />} />
         <Route path="importar-os" element={<ImportarOsPage />} />
         <Route path="abastecimentos/historico" element={<AbastecimentosHistoricoPage />} />
         <Route path="abastecimentos/relatorios" element={<AbastecimentosRelatoriosPage />} />

@@ -12,6 +12,7 @@ import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
 import {
   analyzeImport,
+  incrementalPreview,
   confirmImport,
   confirmNatureza,
   getImportPreview,
@@ -22,7 +23,7 @@ import {
 } from "../services/imports";
 import { getProjects } from "../services/projects";
 import { getFleets } from "../services/fleets";
-import type { ImportOrder, ImportResult } from "../types/imports";
+import type { ImportOrder, ImportResult, IncrementalPreview, IncrementalPreviewCategory } from "../types/imports";
 import type { ServiceClassification } from "../types/orders";
 import type { Project } from "../types/projects";
 import type { Fleet } from "../types/fleets";
@@ -81,7 +82,24 @@ export function ImportarOsPage() {
     [fleetSearch, setFleetSearch] = useState<Record<number, string>>({}),
     [naturezaMotivos, setNaturezaMotivos] = useState<Record<number, string>>(
       {},
-    );
+    ),
+    [incremental, setIncremental] = useState<IncrementalPreview | null>(null),
+    [incrementalFilter, setIncrementalFilter] = useState<IncrementalPreviewCategory | "TODAS">("TODAS"),
+    [incrementalSearch, setIncrementalSearch] = useState(""),
+    [incrementalSelections, setIncrementalSelections] = useState<Record<string, boolean>>({});
+  const runIncrementalPreview = async () => {
+    if (!file || busy) return;
+    setBusy(true); setError("");
+    try { setIncremental(await incrementalPreview(file)); setIncrementalSelections({}); }
+    catch (e) { setError(e instanceof Error ? e.message : "Não foi possível gerar a prévia incremental."); }
+    finally { setBusy(false); }
+  };
+  const visibleIncremental = useMemo(() => {
+    const query = incrementalSearch.trim();
+    return (incremental?.orders ?? []).filter(order => (incrementalFilter === "TODAS" || order.categorias.includes(incrementalFilter)) && (!query || String(order.numeroOs).includes(query)));
+  }, [incremental, incrementalFilter, incrementalSearch]);
+  const selectedIncremental = useMemo(() => Object.entries(incrementalSelections).filter(([, selected]) => selected).map(([key]) => key), [incrementalSelections]);
+  const selectedOrders = useMemo(() => new Set((incremental?.orders ?? []).filter(order => order.alteracoes.some(change => selectedIncremental.includes(change.chave))).map(order => order.numeroOs)), [incremental, selectedIncremental]);
   const counts = useMemo(
     () => ({
       all: items.length,
@@ -334,8 +352,21 @@ export function ImportarOsPage() {
           )}{" "}
           Analisar arquivo
         </button>
+        <button className="button button--secondary" disabled={!file || busy} onClick={() => void runIncrementalPreview()}>
+          {busy ? <LoaderCircle className="spin" size={17} /> : <FileSpreadsheet size={17} />} Prévia incremental (somente leitura)
+        </button>
         {error && <p className="form-api-error">{error}</p>}
       </section>
+      {incremental && (
+        <section className="import-list incremental-preview" aria-label="Prévia de sincronização incremental">
+          <header><div><h2>Prévia de sincronização incremental</h2><p>Somente leitura: nenhuma O.S., item, status ou valor foi alterado no banco.</p></div></header>
+          <div className="stats-grid incremental-preview__stats">{(["NOVA", "SEM_ALTERACOES", "STATUS_ALTERADO", "ITENS_ADICIONADOS", "ITENS_ALTERADOS", "NATUREZA_DIVERGENTE", "REVISAO_MANUAL"] as IncrementalPreviewCategory[]).map(category => <StatCard key={category} label={label(category)} value={String(incremental.counts[category] ?? 0)} icon={category === "REVISAO_MANUAL" ? AlertTriangle : FileSpreadsheet} tone={category === "REVISAO_MANUAL" ? "amber" : undefined} />)}</div>
+          <div className="incremental-preview__toolbar"><input aria-label="Buscar O.S. na prévia incremental" placeholder="Buscar número da O.S." value={incrementalSearch} onChange={event => setIncrementalSearch(event.target.value)} /><select aria-label="Filtrar prévia incremental" value={incrementalFilter} onChange={event => setIncrementalFilter(event.target.value as IncrementalPreviewCategory | "TODAS")}><option value="TODAS">Todas as categorias</option>{(["NOVA", "SEM_ALTERACOES", "STATUS_ALTERADO", "ITENS_ADICIONADOS", "ITENS_ALTERADOS", "NATUREZA_DIVERGENTE", "REVISAO_MANUAL"] as IncrementalPreviewCategory[]).map(category => <option key={category} value={category}>{label(category)}</option>)}</select></div>
+          <div className="incremental-preview__rows">{visibleIncremental.map(order => <article key={order.numeroOs} className="incremental-preview__row"><div><strong>O.S. {order.numeroOs}</strong><span className={`import-badge import-badge--${order.revisaoManual ? "requer_revisao" : "pronta"}`}>{order.categorias.map(label).join(" · ")}</span></div><p>Status: {order.statusAtual ?? "—"} → {order.statusPoli ?? "—"} · Natureza: {order.naturezaAtual ?? "desconhecida"} → {order.naturezaPoli ?? "desconhecida"}</p><p>{order.itensNovos.length} item(ns) potencialmente novo(s), {order.itensAmbiguos.length} ambíguo(s), {order.itensAusentes.length} item(ns) ausente(s) na exportação. {order.dataFechamentoDesconhecida && "Fechamento não informado pelo POLI; permanece desconhecido."}</p><div className="incremental-preview__changes">{order.alteracoes.map(change => <label key={change.chave} className={change.selecionavel ? "" : "incremental-preview__change--blocked"}><input type="checkbox" disabled={!change.selecionavel} checked={Boolean(incrementalSelections[change.chave])} onChange={event => setIncrementalSelections(current => ({ ...current, [change.chave]: event.target.checked }))} /><span><strong>{label(change.tipo)} — {change.confianca}</strong><small>{change.atual ?? "ausente"} → {change.proposto}</small>{!change.selecionavel && <small>Não selecionável: exige revisão ou é apenas potencial.</small>}</span></label>)}</div>{order.divergencias.length > 0 && <small>Revisão: {order.divergencias.join(", ")}</small>}</article>)}</div>
+          {visibleIncremental.length === 0 && <p className="incremental-preview__empty">Nenhuma O.S. corresponde ao filtro.</p>}
+          <section className="incremental-review"><h3>Revisão final da preparação</h3><p>O.S. afetadas: {selectedOrders.size} · alterações selecionadas: {selectedIncremental.length}</p><p>Esta é apenas uma preparação da sincronização. Nenhuma alteração será gravada no banco de dados.</p><p>Itens ambíguos, alterações de valores, cancelamentos e registros protegidos permanecem bloqueados para seleção.</p></section>
+        </section>
+      )}
       {items.length > 0 && (
         <>
           <div className="stats-grid">

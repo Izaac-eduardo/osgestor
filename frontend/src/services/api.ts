@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
+const configuredApiUrl = (import.meta as ImportMeta & { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL?.trim()
 
 export const api = axios.create({baseURL:configuredApiUrl || undefined,withCredentials:true,headers:{'Content-Type':'application/json'}})
 api.interceptors.request.use(config=>{

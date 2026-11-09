@@ -45,9 +45,10 @@ const prepareSheet = (
   headerRow.font = { bold: true };
   headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
   headerRow.eachCell((cell) => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAF7' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF244A64' } };
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   });
-  sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).font = { bold: true, size: 14, color: { argb: 'FF244A64' } };
   widths.forEach((width, index) => {
     sheet.getColumn(index + 1).width = width;
   });
@@ -57,6 +58,8 @@ const prepareSheet = (
     to: { row: headerRowNumber, column: headers.length },
   };
   sheet.views = [{ state: 'frozen', ySplit: headerRowNumber }];
+  sheet.pageSetup = { paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  sheet.pageSetup.printTitlesRow = `${headerRowNumber}:${headerRowNumber}`;
   return { sheet, headerRowNumber };
 };
 
@@ -99,6 +102,8 @@ export async function exportGastosPorVeiculoExcel(filters: RelatorioFilters): Pr
       item.quantidade_os,
     ]);
   }
+  const vehicleTotal = sheet.addRow(['TOTAL', '', '', data.reduce((sum, item) => sum + item.total_mao_obra_interna, 0), data.reduce((sum, item) => sum + item.total_servicos_terceiros, 0), data.reduce((sum, item) => sum + item.total_produtos, 0), data.reduce((sum, item) => sum + item.total_gasto, 0), data.reduce((sum, item) => sum + item.quantidade_os, 0)]);
+  vehicleTotal.font = { bold: true };
   for (let column = 4; column <= 7; column += 1) {
     sheet.getColumn(column).numFmt = currencyFormat;
   }
@@ -117,6 +122,7 @@ export async function exportGastosPorObraExcel(filters: RelatorioFilters): Promi
     [
       { label: 'Período', value: periodText(filters) },
       { label: 'Obra', value: displayFilters.obra },
+      { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
     ],
@@ -137,6 +143,8 @@ export async function exportGastosPorObraExcel(filters: RelatorioFilters): Promi
       item.quantidade_os,
     ]);
   }
+  const projectTotal = sheet.addRow(['TOTAL', '', data.reduce((sum, item) => sum + item.total_mao_obra_interna, 0), data.reduce((sum, item) => sum + item.total_servicos_terceiros, 0), data.reduce((sum, item) => sum + item.total_produtos, 0), data.reduce((sum, item) => sum + item.total_gasto, 0), data.reduce((sum, item) => sum + item.quantidade_os, 0)]);
+  projectTotal.font = { bold: true };
   for (let column = 3; column <= 6; column += 1) {
     sheet.getColumn(column).numFmt = currencyFormat;
   }
@@ -155,6 +163,7 @@ export async function exportOsPorSemanaExcel(filters: RelatorioFilters): Promise
     [
       { label: 'Período', value: periodText(filters) },
       { label: 'Obra', value: displayFilters.obra },
+      { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
       { label: 'Status', value: filterValue(filters.status, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },
@@ -171,6 +180,8 @@ export async function exportOsPorSemanaExcel(filters: RelatorioFilters): Promise
       item.quantidade_os,
     ]);
   }
+  const weekTotal = sheet.addRow(['TOTAL', '', '', data.reduce((sum, item) => sum + item.quantidade_os, 0)]);
+  weekTotal.font = { bold: true };
   sheet.getColumn(1).numFmt = '0';
   sheet.getColumn(2).numFmt = '0';
   sheet.getColumn(3).numFmt = 'dd/mm/yyyy';

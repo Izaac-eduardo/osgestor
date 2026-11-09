@@ -15,6 +15,9 @@ import { buildOsUpdateDiff, loadExistingOs } from '../services/sincronizacao-os.
 import { NaturezaConfirmacaoError, registerNaturezaConfirmation, revokeNaturezaConfirmation } from '../services/natureza-confirmacoes.service.js';
 import { persistManualResolutions, recoverManualResolutions } from '../services/importacoes-os-resolucoes.service.js';
 
+const incrementalCategories = ['NOVA', 'SEM_ALTERACOES', 'STATUS_ALTERADO', 'ITENS_ADICIONADOS', 'ITENS_ALTERADOS', 'NATUREZA_DIVERGENTE', 'REVISAO_MANUAL'] as const;
+type IncrementalCategory = typeof incrementalCategories[number];
+
 const tokenOf = (request: Request) => typeof request.params.token === 'string' ? request.params.token : '';
 const notFoundMessage = 'Prévia expirada ou não encontrada.';
 const upload = (request: Request): Buffer => {
@@ -110,6 +113,61 @@ export async function analyze(request: Request, response: Response): Promise<voi
       message: error instanceof Error ? error.message : String(error),
     });
     response.status(400).json({ code: schemaError ? 'SCHEMA_INCOMPATIBLE' : 'IMPORT_ANALYSIS_FAILED', message });
+  }
+}
+
+export async function incrementalPreview(request: Request, response: Response): Promise<void> {
+  try {
+    const filename = String((request as Request & { file?: { originalname: string } }).file?.originalname ?? request.body?.filename ?? 'upload.xls');
+    const extension = path.extname(filename).toLowerCase();
+    if (extension !== '.xls' && extension !== '.xlsx') { response.status(400).json({ message: 'Apenas arquivos .xls ou .xlsx são aceitos.' }); return; }
+    const buffer = upload(request);
+    const metadata = buildPoliImport(buffer, filename, 'DIARIA', 'POLI');
+    const parsed = parsePoliOs(buffer, filename, metadata);
+    const items = await matchPreview(parsed, { origemSistema: metadata.origemSistema, readOnly: true });
+    const orders = items.map(item => {
+      const diff = item.diff;
+      const divergencias = diff?.divergencias ?? [];
+      const hasRelevantDifference = Boolean(diff && (diff.estado !== 'SEM_ALTERACOES' || diff.status || diff.categoria || diff.natureza || diff.problema || diff.dataFechamento || diff.novosProdutos.length || diff.novosServicos.length || diff.produtosAlterados.length || diff.servicosAlterados.length || diff.produtosAusentes.length || diff.servicosAusentes.length || diff.produtosAmbiguos.length || diff.servicosAmbiguos.length || diff.novasExecucoes.length || diff.divergencias.length));
+      const semAlteracoes = Boolean(diff && !hasRelevantDifference);
+      const categorias: IncrementalCategory[] = [];
+      if (!diff) categorias.push('NOVA');
+      else {
+        if (diff.estado === 'SEM_ALTERACOES') categorias.push('SEM_ALTERACOES');
+        if (diff.status) categorias.push('STATUS_ALTERADO');
+        if (diff.novosProdutos.length || diff.novosServicos.length) categorias.push('ITENS_ADICIONADOS');
+        if (diff.produtosAlterados.length || diff.servicosAlterados.length) categorias.push('ITENS_ALTERADOS');
+        if (diff.natureza) categorias.push('NATUREZA_DIVERGENTE');
+        if (diff.divergencias.length || item.statusPreview === 'REQUER_REVISAO') categorias.push('REVISAO_MANUAL');
+        if (!categorias.length) categorias.push(hasRelevantDifference ? 'REVISAO_MANUAL' : 'SEM_ALTERACOES');
+      }
+      const alteracoes = [
+        ...(diff?.status ? [{ chave: `${item.numeroOs}:STATUS`, tipo: 'STATUS' as const, atual: diff.status.atual, proposto: diff.status.novo, confianca: diff.status.novo === 'CANCELADA' || diff.status.atual === 'CANCELADA' ? 'REVISAO' : 'PROVAVEL', selecionavel: diff.status.novo !== 'CANCELADA' && diff.status.atual !== 'CANCELADA' }] : []),
+        ...(diff?.novosProdutos ?? []).map((value, index) => ({ chave: `${item.numeroOs}:PRODUTO:${index}`, tipo: 'PRODUTO' as const, atual: null, proposto: `${value.descricao} | ${value.quantidade} ${value.unidade} | R$ ${value.valorUnitario.toFixed(2)}`, confianca: 'POTENCIAL', selecionavel: false })),
+        ...(diff?.novosServicos ?? []).map((value, index) => ({ chave: `${item.numeroOs}:SERVICO:${index}`, tipo: 'SERVICO' as const, atual: null, proposto: `${value.descricao} | R$ ${value.total.toFixed(2)}`, confianca: 'POTENCIAL', selecionavel: false })),
+        ...(diff?.produtosAlterados ?? []).map((value, index) => ({ chave: `${item.numeroOs}:VALOR_PRODUTO:${index}`, tipo: 'VALOR_PRODUTO' as const, atual: `${value.atual.descricao} | ${value.atual.quantidade} ${value.atual.unidade} | R$ ${value.atual.valorUnitario.toFixed(2)}`, proposto: `${value.novo.descricao} | ${value.novo.quantidade} ${value.novo.unidade} | R$ ${value.novo.valorUnitario.toFixed(2)}`, confianca: 'REVISAO', selecionavel: false })),
+        ...(diff?.servicosAlterados ?? []).map((value, index) => ({ chave: `${item.numeroOs}:VALOR_SERVICO:${index}`, tipo: 'VALOR_SERVICO' as const, atual: `${value.atual.descricao} | R$ ${value.atual.valor.toFixed(2)}`, proposto: `${value.novo.descricao} | R$ ${value.novo.total.toFixed(2)}`, confianca: 'REVISAO', selecionavel: false })),
+        ...(diff?.problema ? [{ chave: `${item.numeroOs}:PROBLEMA`, tipo: 'PROBLEMA' as const, atual: diff.problema.atual, proposto: diff.problema.novo ?? '', confianca: 'REVISAO', selecionavel: false }] : []),
+        ...(diff?.natureza ? [{ chave: `${item.numeroOs}:NATUREZA`, tipo: 'NATUREZA' as const, atual: diff.natureza.atual, proposto: diff.natureza.novo, confianca: divergencias.includes('NATUREZA_SEM_EVIDENCIA_FORTE') ? 'REVISAO' : 'PROVAVEL', selecionavel: !divergencias.includes('NATUREZA_SEM_EVIDENCIA_FORTE') }] : []),
+      ];
+      const itensAusentes = [
+        ...(diff?.produtosAusentes ?? []).map(value => ({ tipo: 'PRODUTO' as const, id: value.id, descricao: value.descricao, quantidade: value.quantidade, unidade: value.unidade, valorUnitario: value.valorUnitario, motivo: 'Não aparece na exportação atual; preservado para revisão.' })),
+        ...(diff?.servicosAusentes ?? []).map(value => ({ tipo: 'SERVICO' as const, id: value.id, descricao: value.descricao, quantidade: 1, unidade: 'UN', valorUnitario: value.valor, motivo: 'Não aparece na exportação atual; preservado para revisão.' })),
+      ];
+      const itensNovos = [
+        ...(diff?.novosProdutos ?? []).map(value => ({ tipo: value.tipo, codigoPoli: value.codigo_poli ?? value.codigo ?? null, descricao: value.descricao, quantidade: value.quantidade, unidade: value.unidade, valorUnitario: value.valorUnitario, valorTotal: value.total, evidencia: 'Não houve correspondência consumível no banco; origem, sequência e fingerprint foram preservados.', confianca: 'ALTA' as const })),
+        ...(diff?.novosServicos ?? []).map(value => ({ tipo: value.tipo, codigoPoli: value.codigo_poli ?? value.codigo ?? null, descricao: value.descricao, quantidade: value.quantidade, unidade: value.unidade, valorUnitario: value.valorUnitario, valorTotal: value.total, evidencia: 'Não houve correspondência consumível no banco; origem, sequência e fingerprint foram preservados.', confianca: 'ALTA' as const })),
+      ];
+      const itensAmbiguos = [...(diff?.produtosAmbiguos ?? []), ...(diff?.servicosAmbiguos ?? [])];
+      const conflitoStatus = Boolean(diff?.status && ['CANCELADA', diff.status.atual].includes('CANCELADA'));
+      const dataFechamentoDesconhecida = item.status === 'FINALIZADA' && item.dataFechamento == null;
+      if (semAlteracoes) { categorias.length = 0; categorias.push('SEM_ALTERACOES'); }
+      return { numeroOs: item.numeroOs, ordemServicoId: diff?.ordemServicoId ?? null, categoria: categorias[0], categorias, statusPreview: item.statusPreview, statusAtual: diff?.status?.atual ?? diff?.statusAtual ?? null, statusPoli: diff?.status?.novo ?? item.status ?? null, naturezaAtual: diff?.natureza?.atual ?? diff?.naturezaAtual ?? null, naturezaPoli: diff?.natureza?.novo ?? item.natureza ?? null, dataFechamento: item.dataFechamento ?? null, dataFechamentoDesconhecida, itensNovos: itensAmbiguos.length ? [] : itensNovos, itensAmbiguos, itensAusentes, alteracoes, divergencias, confianca: divergencias.length || item.statusPreview === 'REQUER_REVISAO' ? 'REVISAR' : 'ALTA', revisaoManual: Boolean(conflitoStatus || divergencias.length || item.statusPreview === 'REQUER_REVISAO' || hasRelevantDifference && !semAlteracoes), evidencia: { origem: filename, linhas: item.itens.map(value => value.origemLinha).filter((value): value is number => value !== undefined), statusOriginal: item.statusOriginal, quantidadeItensFonte: item.itens.length } };
+    });
+    const counts = Object.fromEntries(incrementalCategories.map(category => [category, orders.filter(item => item.categorias.includes(category)).length])) as Record<IncrementalCategory, number>;
+    response.json({ somenteLeitura: true, filename, total: orders.length, counts, novosItens: orders.reduce((sum, item) => sum + item.itensNovos.length, 0), itensAmbiguos: orders.reduce((sum, item) => sum + item.itensAmbiguos.length, 0), conflitosStatus: orders.filter(item => item.categorias.includes('STATUS_ALTERADO')).length, orders });
+  } catch (error) {
+    response.status(400).json({ message: error instanceof Error ? error.message : 'Não foi possível gerar a prévia incremental.' });
   }
 }
 export async function getPreview(request: Request, response: Response): Promise<void> {
@@ -218,7 +276,6 @@ export async function resolve(request: Request, response: Response): Promise<voi
   item.manualResolucoes = manualResolucoes;
   if (body.status !== undefined) resolveManualStatus(item, body.status as string);
   item.pendencias = [];
-  if (!item.obraId) addPending(item.pendencias, 'OBRA_PENDENTE');
   if (!item.frotaId) addPending(item.pendencias, 'FROTA_PENDENTE');
   if (!item.natureza) addPending(item.pendencias, 'NATUREZA_PENDENTE');
   if (!item.status) addPending(item.pendencias, 'STATUS_PENDENTE');
@@ -326,7 +383,7 @@ export async function confirm(request: Request, response: Response): Promise<voi
   const client=await pool.connect();
   try {
     for (const item of selected) { try {
-      if (!item.obraId || !item.frotaId || !item.natureza || !item.status) throw new Error('Dados obrigatórios ausentes na prévia.');
+      if (!item.frotaId || !item.natureza || !item.status) throw new Error('Dados obrigatórios ausentes na prévia.');
       await client.query('BEGIN');
       const importacao = (await client.query<{ arquivo_nome: string; origem_sistema: string; hash_arquivo: string }>(
         'SELECT arquivo_nome,origem_sistema,hash_arquivo FROM importacoes_os WHERE id=$1 FOR UPDATE', [token],
@@ -335,7 +392,7 @@ export async function confirm(request: Request, response: Response): Promise<voi
       if ((await client.query('SELECT 1 FROM ordens_servico WHERE numero_os=$1',[item.numeroOs])).rowCount) { await client.query('ROLLBACK'); result.jaCadastradas++; continue; }
       const lancadorCodigo = item.funcionarioAberturaCodigo ?? item.funcionarioAbertura ?? null;
       const lancadorFuncionarioId = await resolveLancadorFuncionarioId(lancadorCodigo, client);
-      const insertedOrder = await client.query<{ id: string }>('INSERT INTO ordens_servico (numero_os,obra_id,frota_id,prefixo_frota_id,frota_numero,natureza_os,categoria_servico,prestador_terceiro,lancador_codigo_original,lancador_nome_original,lancador_funcionario_id,data_abertura,status,status_original,status_origem,observacoes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id',[item.numeroOs,item.obraId,item.frotaId,frota.prefixo_frota_id,frota.numero===null?null:Number(frota.numero),item.natureza,item.categoriaServico??null,item.natureza==='TERCEIRO'?item.prestadorTerceiro??null:null,lancadorCodigo?.trim()||null,item.funcionarioAberturaNome?.trim()||null,lancadorFuncionarioId,item.data||new Date().toISOString().slice(0,10),item.status,item.statusOriginal,item.statusOrigem,item.problema]);
+      const insertedOrder = await client.query<{ id: string }>('INSERT INTO ordens_servico (numero_os,obra_id,frota_id,prefixo_frota_id,frota_numero,natureza_os,categoria_servico,prestador_terceiro,lancador_codigo_original,lancador_nome_original,lancador_funcionario_id,data_abertura,data_fechamento,status,status_original,status_origem,observacoes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id',[item.numeroOs,item.obraId,item.frotaId,frota.prefixo_frota_id,frota.numero===null?null:Number(frota.numero),item.natureza,item.categoriaServico??null,item.natureza==='TERCEIRO'?item.prestadorTerceiro??null:null,lancadorCodigo?.trim()||null,item.funcionarioAberturaNome?.trim()||null,lancadorFuncionarioId,item.data,item.dataFechamento??null,item.status,item.statusOriginal,item.statusOrigem,item.problema]);
       const serviceIdsByItemIndex = new Map<number, string>();
       const serviceIds: string[] = [];
       for(const [itemIndex, service] of item.itens.entries()) {
@@ -375,6 +432,7 @@ export async function confirm(request: Request, response: Response): Promise<voi
           frota_id: item.frotaId,
           natureza_os: item.natureza,
           categoria_servico: item.categoriaServico ?? null,
+          data_fechamento: item.dataFechamento ?? null,
           status: item.status,
           observacoes: item.problema,
           servicos_count: item.itens.filter(value => value.tipo === 'SERVICO').length,

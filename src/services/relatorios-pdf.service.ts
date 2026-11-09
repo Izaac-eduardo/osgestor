@@ -67,9 +67,10 @@ const periodText = (filters: RelatorioFilters): string => {
 
 const filterValue = (value: string | undefined, empty: string): string => value ?? empty;
 
-const commonFilters = (filters: RelatorioFilters, obraLabel: string): Array<{ label: string; value: string }> => [
+const commonFilters = (filters: RelatorioFilters, obraLabel: string, fleetLabel = 'Todas'): Array<{ label: string; value: string }> => [
   { label: 'Período', value: periodText(filters) },
   { label: 'Obra', value: obraLabel },
+  { label: 'Frota', value: fleetLabel },
 ];
 
 const fitText = (doc: PDFKit.PDFDocument, text: string, width: number): string => {
@@ -133,8 +134,9 @@ const generatePdf = <T>(options: PdfOptions<T>): Promise<Buffer> => new Promise(
   };
 
   doc.addPage();
-  doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(20).text('OSGestor');
-  doc.fontSize(14).text(`Relatório de ${options.title}`);
+  doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(20).text('OS Gestor');
+  doc.fillColor('#E67E22').fontSize(11).text('Itaipu Engenharia');
+  doc.fillColor(colors.primary).fontSize(14).text(`Relatório de ${options.title}`);
   doc.moveDown(0.3);
   doc.fillColor(colors.muted).font('Helvetica').fontSize(9)
     .text(`Data de geração: ${generationDate()}`);
@@ -205,8 +207,7 @@ export async function exportGastosPorVeiculoPdf(filters: RelatorioFilters): Prom
     title: 'Gastos por Veículo',
     orientation: 'landscape',
     filters: [
-      ...commonFilters(filters, displayFilters.obra),
-      { label: 'Prefixo da Frota', value: displayFilters.prefixoFrota },
+      ...commonFilters(filters, displayFilters.obra, displayFilters.prefixoFrota),
       { label: 'Número da Frota', value: filterValue(filters.frota_numero, 'Todos') },
       { label: 'Natureza', value: filterValue(filters.natureza_os, 'Todas') },
       { label: 'Categoria', value: filterValue(filters.categoria ?? filters.categoria_servico, 'Todas') },

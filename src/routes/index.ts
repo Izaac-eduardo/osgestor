@@ -16,6 +16,8 @@ import { requireMutationOrigin } from '../middleware/origin-protection.js';
 import { requirePasswordChangeComplete } from '../middleware/authorization.js';
 import { adminUsersRoutes } from './admin-users.routes.js';
 import { auditRoutes } from './audit.routes.js';
+import { contabilidadeImportRoutes } from './contabilidade-import.routes.js';
+import { manutencaoFinanceiraRoutes } from './manutencao-financeira.routes.js';
 
 export const routes = Router();
 routes.use('/auth', authRoutes);
@@ -38,6 +40,8 @@ routes.get('/dashboard/resumo', dashboardController);
 routes.use('/importacoes-os', importacoesOsRoutes);
 routes.use('/abastecimento', abastecimentoRoutes);
 routes.use('/abastecimento/importacoes', abastecimentosImportRoutes);
+routes.use('/contabilidade/importacoes', contabilidadeImportRoutes);
+routes.use('/manutencao-financeira', manutencaoFinanceiraRoutes);
 
 routes.get('/health', (_request, response) => {
   response.status(200).json({ status: 'ok', message: 'API OSGestor está funcionando.' });

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
+void React
 import axios from 'axios'
 import { Clock3, Plus, SquarePen, Trash, X } from 'lucide-react'
 import { ConfirmDialog } from '../ConfirmDialog'
@@ -9,6 +10,7 @@ import type {
   OrderEmployee, OrderService, ServiceExecution, ServiceExecutionPayload,
 } from '../../types/orders'
 import { formatDate, formatWorkDuration } from '../../utils/formatters'
+import { calculateWorkDurationMinutes } from '../../utils/work-duration'
 
 type Props = {
   orderId: string
@@ -66,8 +68,8 @@ export function ServiceExecutions({ orderId, service, employees, onRefresh }: Pr
               <span><strong>{execution.funcionario_nome}</strong><small>{formatDate(execution.inicio)} · {execution.inicio.slice(11,16)} → {execution.fim.slice(11,16)}</small></span>
       <strong>{formatWorkDuration(execution.duracao_minutos)}</strong>
               <span className="item-actions">
-                <button className="icon-button" aria-label="Editar período" title="Editar período" onClick={() => setEditing(execution)}><SquarePen size={16} aria-hidden="true"/></button>
-                <button className="icon-button icon-button--danger" aria-label="Excluir período" title="Excluir período" onClick={() => setRemoving(execution)}><Trash size={16} aria-hidden="true"/></button>
+                <button className="icon-button" type="button" aria-label="Editar período" title="Editar período" onClick={() => setEditing(execution)}><SquarePen size={16} aria-hidden="true"/></button>
+                <button className="icon-button icon-button--danger" type="button" aria-label="Excluir período" title="Excluir período" onClick={() => setRemoving(execution)}><Trash size={16} aria-hidden="true"/></button>
               </span>
             </div>
           ))
@@ -100,18 +102,25 @@ function ExecutionForm({ execution, employees, busy, error, onClose, onSave }: {
   const [day, setDay] = useState(execution?.inicio.slice(0,10) ?? '')
   const [start, setStart] = useState(execution?.inicio.slice(11,16) ?? '')
   const [end, setEnd] = useState(execution?.fim.slice(11,16) ?? '')
-  const minutes = day && start && end
-    ? (new Date(`${day}T${end}`).getTime() - new Date(`${day}T${start}`).getTime()) / 60000
-    : 0
-  return <div className="nested-backdrop"><form className="item-form" onSubmit={(event) => {event.preventDefault();onSave({funcionario_id:employee,inicio:`${day}T${start}`,fim:`${day}T${end}`})}}>
-    <header><h3>{execution ? 'Editar período de trabalho' : 'Adicionar período de trabalho'}</h3><button className="icon-button" type="button" onClick={onClose}><X/></button></header>
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const minutes = calculateWorkDurationMinutes(day, start, end)
+  const submit = () => {
+    if (!employee) return setValidationError('Selecione o funcionário.')
+    if (!day) return setValidationError('Informe a data do período.')
+    if (!start || !end) return setValidationError('Informe o início e o término do período.')
+    if (minutes <= 0) return setValidationError('O término deve ser posterior ao início.')
+    setValidationError(null)
+    onSave({ funcionario_id: employee, inicio: `${day}T${start}`, fim: `${day}T${end}` })
+  }
+  return <div className="nested-backdrop"><div className="item-form" role="dialog" aria-modal="true" aria-labelledby="execution-form-title">
+    <header><h3 id="execution-form-title">{execution ? 'Editar período de trabalho' : 'Adicionar período de trabalho'}</h3><button className="icon-button" type="button" onClick={onClose}><X/></button></header>
     <main>
       <label>Funcionário<select required value={employee} onChange={(event)=>setEmployee(event.target.value)}><option value="">Selecione</option>{employees.map((item)=><option key={item.id} value={item.id}>{item.nome}</option>)}</select></label>
       <label>Data<input required type="date" value={day} onChange={(event)=>setDay(event.target.value)}/></label>
       <div className="item-form__measurements"><label>Início<input required type="time" value={start} onChange={(event)=>setStart(event.target.value)}/></label><label>Término<input required type="time" value={end} onChange={(event)=>setEnd(event.target.value)}/></label></div>
       <div className="item-preview"><span>Duração</span><strong>{minutes > 0 ? formatWorkDuration(minutes) : '—'}</strong></div>
-      {error && <p className="form-api-error" role="alert">{error}</p>}
+      {(validationError || error) && <p className="form-api-error" role="alert">{validationError || error}</p>}
     </main>
-    <footer><button className="button button--secondary" disabled={busy} type="button" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={busy || minutes <= 0}>{busy ? 'Salvando...' : 'Salvar período'}</button></footer>
-  </form></div>
+    <footer><button className="button button--secondary" disabled={busy} type="button" onClick={onClose}>Cancelar</button><button className="button button--primary" disabled={busy} type="button" onClick={submit}>{busy ? 'Salvando...' : 'Salvar período'}</button></footer>
+  </div></div>
 }

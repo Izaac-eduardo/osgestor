@@ -9,10 +9,11 @@ import { RelatorioFilters, RelatorioServiceError } from '../services/relatorios.
 const queryText = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
 
-const reportFilters = (request: Request): RelatorioFilters => ({
+export const reportFilters = (request: Request): RelatorioFilters => ({
   obra_id: queryText(request.query.obra_id),
   prefixo_frota_id: queryText(request.query.prefixo_frota_id),
   frota_numero: queryText(request.query.frota_numero),
+  frota_codigo: queryText(request.query.frota_codigo),
   data_inicio: queryText(request.query.data_inicio),
   data_fim: queryText(request.query.data_fim),
   natureza_os: queryText(request.query.natureza_os),

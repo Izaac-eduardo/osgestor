@@ -16,7 +16,7 @@ export async function getTerceirosCategorias(filters: TerceirosCategoriasFilters
   const { values, clause } = where(filters);
   const items = `SELECT s.id, s.ordem_servico_id, s.valor, s.codigo_poli, s.descricao, s.categoria_gerencial, s.subcategoria_gerencial, s.origem_classificacao,
       os.numero_os, os.data_abertura, o.codigo obra_codigo, o.nome obra_nome, COALESCE(pf.codigo || os.frota_numero::text, 'SEM FROTA') frota
-    FROM servicos_os s JOIN ordens_servico os ON os.id=s.ordem_servico_id JOIN obras o ON o.id=os.obra_id
+    FROM servicos_os s JOIN ordens_servico os ON os.id=s.ordem_servico_id LEFT JOIN obras o ON o.id=os.obra_id
     LEFT JOIN prefixos_frota pf ON pf.id=os.prefixo_frota_id WHERE ${clause}`;
   const [summary, categories] = await Promise.all([
     pool.query<{ total: string; classified: string; unclassified: string; without_provenance: string; total_os: string; classified_os: string }>(
@@ -50,7 +50,7 @@ export async function getTerceirosCategoriaItens(filters: TerceirosCategoriasFil
   const normalizedSize = Math.min(100, Math.max(1, Math.floor(pageSize)));
   values.push(categoria, String((normalizedPage - 1) * normalizedSize), String(normalizedSize));
   const categoryClause = ` AND COALESCE(s.categoria_gerencial,'NAO_CLASSIFICADOS') = $${values.length - 2}`;
-  const base = `FROM servicos_os s JOIN ordens_servico os ON os.id=s.ordem_servico_id JOIN obras o ON o.id=os.obra_id LEFT JOIN prefixos_frota pf ON pf.id=os.prefixo_frota_id WHERE ${clause}${categoryClause}`;
+  const base = `FROM servicos_os s JOIN ordens_servico os ON os.id=s.ordem_servico_id LEFT JOIN obras o ON o.id=os.obra_id LEFT JOIN prefixos_frota pf ON pf.id=os.prefixo_frota_id WHERE ${clause}${categoryClause}`;
   const result = await pool.query(`SELECT s.codigo_poli, s.descricao, s.subcategoria_gerencial, s.valor, os.numero_os, os.data_abertura, o.codigo obra_codigo, o.nome obra_nome, COALESCE(pf.codigo || os.frota_numero::text, 'SEM FROTA') frota ${base} ORDER BY s.valor DESC, os.numero_os DESC OFFSET $${values.length - 1} LIMIT $${values.length}`, values);
   const count = await pool.query<{ total: string }>(`SELECT COUNT(*)::text total ${base}`, values.slice(0, -2));
   return { page: normalizedPage, page_size: normalizedSize, total: Number(count.rows[0]?.total ?? 0), items: result.rows };

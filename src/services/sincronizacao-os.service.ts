@@ -17,7 +17,7 @@ export class SynchronizationConflictError extends Error {
 export interface ExistingOsSnapshot {
   id: string;
   numeroOs: number;
-  obraId: string;
+  obraId: string | null;
   obra: string | null;
   frotaId: string | null;
   frotaOverrideId?: string | null;
@@ -45,24 +45,30 @@ export interface ExistingOsSnapshot {
 export interface SyncDiffItem<T> { atual: T; novo: T; }
 export interface OsUpdateDiff {
   numeroOs: number;
+  ordemServicoId?: string;
+  statusAtual?: string;
+  naturezaAtual?: string | null;
   estado: SyncPreviewState;
   status?: SyncDiffItem<string>;
   categoria?: SyncDiffItem<string | null>;
   natureza?: SyncDiffItem<string>;
   problema?: SyncDiffItem<string | null>;
+  dataFechamento?: SyncDiffItem<string | null>;
   novosServicos: ParsedItem[];
   servicosAlterados: Array<{ atual: ExistingOsSnapshot['servicos'][number]; novo: ParsedItem }>;
   novosProdutos: ParsedItem[];
   produtosAlterados: Array<{ atual: ExistingOsSnapshot['produtos'][number]; novo: ParsedItem }>;
+  servicosAusentes: ExistingOsSnapshot['servicos'];
+  produtosAusentes: ExistingOsSnapshot['produtos'];
+  servicosAmbiguos: ParsedItem[];
+  produtosAmbiguos: ParsedItem[];
   novasExecucoes: ParsedExecucao[];
   divergencias: string[];
   avisos: string[];
   podeAtualizarAutomaticamente: boolean;
 }
 
-export const orderUpdateSql = `UPDATE ordens_servico SET status=$1::varchar(30),categoria_servico=$2::varchar(50),observacoes=$3::text,
-         data_fechamento=CASE WHEN $1::varchar(30)='FINALIZADA' AND status IS DISTINCT FROM $1::varchar(30) AND data_fechamento IS NULL THEN CURRENT_DATE ELSE data_fechamento END
-       WHERE id=$4::uuid`;
+export const orderUpdateSql = `UPDATE ordens_servico SET status=$1::varchar(30),categoria_servico=$2::varchar(50),observacoes=$3::text,data_fechamento=$4::date WHERE id=$5::uuid`;
 
 const text = (value: string | null | undefined): string => normalizeSearchText(value ?? '');
 const money = (value: number): string => value.toFixed(2);
@@ -140,12 +146,17 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   const problema = text(incomingProblem) !== text(current.problema) && incomingProblem ? { atual: current.problema, novo: incomingProblem } : undefined;
   if (problema && current.problema) divergencias.push('PROBLEMA_DIVERGENTE');
 
+  const dataFechamento = parsed.dataFechamento !== undefined && parsed.dataFechamento !== current.dataFechamento
+    ? { atual: current.dataFechamento, novo: parsed.dataFechamento } : undefined;
+  if (dataFechamento && current.dataFechamento !== null && dataFechamento.novo !== null) divergencias.push('DATA_FECHAMENTO_CONFLITANTE');
+
   if (parsed.obraId && parsed.obraId !== current.obraId) avisos.push('OBRA_DIVERGENTE_NAO_SUBSTITUIR');
   if (parsed.frotaId && parsed.frotaId !== current.frotaId) avisos.push('FROTA_DIVERGENTE_NAO_SUBSTITUIR');
 
   const servicePool = [...current.servicos];
   const novosServicos: ParsedItem[] = [];
   const servicosAlterados: OsUpdateDiff['servicosAlterados'] = [];
+  const servicosAmbiguos: ParsedItem[] = [];
   const incomingServices = parsed.itens.filter(value => value.tipo === 'SERVICO');
   const equivalentServices = new Set<ParsedItem>();
   for (const existing of servicePool) {
@@ -159,6 +170,7 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   }
   for (const item of incomingServices) {
     if (equivalentServices.has(item)) continue;
+    if (servicePool.filter(value => serviceKey(value) === serviceKey({ descricao: item.descricao, valor: item.total })).length > 1) { servicosAmbiguos.push(item); divergencias.push('SERVICO_CORRESPONDENCIA_AMBIGUA'); continue; }
     const exact = servicePool.find((value) => serviceKey(value) === serviceKey({ descricao: item.descricao, valor: item.total }));
     if (exact?.categoriaGerencialManual && exact.categoriaGerencial !== (item.categoria_gerencial ?? null)) {
       divergencias.push('CATEGORIA_GERENCIAL_MANUAL_CONFLITANTE');
@@ -175,10 +187,12 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   const productPool = [...current.produtos];
   const novosProdutos: ParsedItem[] = [];
   const produtosAlterados: OsUpdateDiff['produtosAlterados'] = [];
+  const produtosAmbiguos: ParsedItem[] = [];
   const reclassificacoes = current.reclassificacoes ?? [];
   for (const item of parsed.itens.filter(value => value.tipo === 'PRODUTO')) {
     if (reclassificacoes.some(value => matchesReclassification(item, value))) continue;
     const candidate = { descricao: item.descricao, quantidade: item.quantidade, unidade: item.unidade, valorUnitario: item.valorUnitario };
+    if (productPool.filter(value => productKey(value) === productKey(candidate)).length > 1) { produtosAmbiguos.push(item); divergencias.push('PRODUTO_CORRESPONDENCIA_AMBIGUA'); continue; }
     if (consume(productPool, productKey, candidate)) continue;
     const equivalent = productPool.find(value => equivalentProduct(value, item));
     if (equivalent) { avisos.push('PRODUTO_EQUIVALENTE_UN_L'); productPool.splice(productPool.indexOf(equivalent), 1); continue; }
@@ -196,14 +210,19 @@ export function buildOsUpdateDiff(parsed: ParsedOs, current: ExistingOsSnapshot,
   if (servicosAlterados.length) divergencias.push('SERVICO_ALTERADO');
   if (novosServicos.length && current.servicos.length) divergencias.push('SERVICO_NAO_EQUIVALENTE');
   if (produtosAlterados.length) divergencias.push('PRODUTO_ALTERADO');
+  const servicosAusentes = servicePool;
+  const produtosAusentes = productPool;
+  if (servicosAusentes.length) divergencias.push('SERVICO_AUSENTE_NA_FONTE');
+  if (produtosAusentes.length) divergencias.push('PRODUTO_AUSENTE_NA_FONTE');
 
   const safeStatus = !status || statusSafety(status.atual, status.novo) === 'safe';
   const safeCategory = !categoria || current.categoria === null || (current.categoria === 'OUTROS' && specificCategory(incomingCategory));
   const safeNature = !natureza || divergencias.every(value => value !== 'NATUREZA_SEM_EVIDENCIA_FORTE');
   const safeProblem = !problema || !current.problema;
-  const canUpdate = !divergencias.length && safeStatus && safeCategory && safeNature && safeProblem;
-  const hasChanges = Boolean(status || categoria || natureza || problema || novosServicos.length || servicosAlterados.length || novosProdutos.length || produtosAlterados.length || novasExecucoes.length || divergencias.length);
-  return { numeroOs: parsed.numeroOs, estado: !hasChanges ? 'SEM_ALTERACOES' : canUpdate ? 'ATUALIZACAO_DISPONIVEL' : 'REQUER_REVISAO', status, categoria, natureza, problema, novosServicos, servicosAlterados, novosProdutos, produtosAlterados, novasExecucoes, divergencias, avisos, podeAtualizarAutomaticamente: canUpdate };
+  const safeDate = !dataFechamento || current.dataFechamento === null;
+  const canUpdate = !divergencias.length && safeStatus && safeCategory && safeNature && safeProblem && safeDate;
+  const hasChanges = Boolean(status || categoria || natureza || problema || dataFechamento || novosServicos.length || servicosAlterados.length || novosProdutos.length || produtosAlterados.length || servicosAusentes.length || produtosAusentes.length || novasExecucoes.length || divergencias.length);
+  return { numeroOs: parsed.numeroOs, ordemServicoId: current.id, statusAtual: current.status, naturezaAtual: current.natureza, estado: !hasChanges ? 'SEM_ALTERACOES' : canUpdate ? 'ATUALIZACAO_DISPONIVEL' : 'REQUER_REVISAO', status, categoria, natureza, problema, dataFechamento, novosServicos, servicosAlterados, novosProdutos, produtosAlterados, servicosAusentes, produtosAusentes, servicosAmbiguos, produtosAmbiguos, novasExecucoes, divergencias, avisos, podeAtualizarAutomaticamente: canUpdate };
 }
 
 export async function loadExistingOs(numeroOs: number): Promise<ExistingOsSnapshot | undefined> {
@@ -235,14 +254,14 @@ async function importAuditContext(client: { query: typeof pool.query }, importac
   return result.rows[0] ?? null;
 }
 
-export async function loadExistingOsUsing(db: { query: typeof pool.query }, numeroOs: number): Promise<ExistingOsSnapshot | undefined> {
-  const order = await db.query<{ id: string; numero_os: string; obra_id: string; obra: string; frota_id: string | null; frota: string | null; natureza_os: string; categoria_servico: string | null; status: string; observacoes: string | null; data_abertura: string; data_fechamento: string | null; updated_at: string }>(
+export async function loadExistingOsUsing(db: { query: typeof pool.query }, numeroOs: number, options: { forUpdate?: boolean } = {}): Promise<ExistingOsSnapshot | undefined> {
+  const order = await db.query<{ id: string; numero_os: string; obra_id: string | null; obra: string | null; frota_id: string | null; frota: string | null; natureza_os: string; categoria_servico: string | null; status: string; observacoes: string | null; data_abertura: string; data_fechamento: string | null; updated_at: string }>(
     `SELECT os.id, os.numero_os, os.obra_id, o.nome obra, os.frota_id,
             COALESCE(f.codigo, pf.codigo || os.frota_numero::text) frota,
             os.natureza_os, os.categoria_servico, os.status, os.observacoes, os.data_abertura, os.data_fechamento, os.updated_at
-       FROM ordens_servico os JOIN obras o ON o.id=os.obra_id
+       FROM ordens_servico os LEFT JOIN obras o ON o.id=os.obra_id
        LEFT JOIN frotas f ON f.id=os.frota_id LEFT JOIN prefixos_frota pf ON pf.id=os.prefixo_frota_id
-      WHERE os.numero_os=$1 FOR UPDATE OF os`, [numeroOs]);
+      WHERE os.numero_os=$1${options.forUpdate === false ? '' : ' FOR UPDATE OF os'}`, [numeroOs]);
   if (!order.rows[0]) return undefined;
   const row = order.rows[0];
   const services = await db.query<{ id: string; descricao: string; valor: string; categoria_gerencial: string | null; categoria_gerencial_editada_manualmente: boolean; descricao_editada_manualmente: boolean }>('SELECT id,descricao,valor,categoria_gerencial,categoria_gerencial_editada_manualmente,descricao_editada_manualmente FROM servicos_os WHERE ordem_servico_id=$1 ORDER BY created_at,id', [row.id]);
@@ -279,7 +298,8 @@ export async function synchronizeOrder(parsed: ParsedOs, actor?: AuthenticatedRe
     const nextStatus = diff.status?.novo ?? current.status;
     const nextCategory = diff.categoria?.novo ?? current.categoria;
     const nextProblem = diff.problema?.novo ?? current.problema;
-    await client.query(orderUpdateSql, [nextStatus, nextCategory, nextProblem, current.id]);
+    const nextClosingDate = diff.dataFechamento?.novo ?? current.dataFechamento;
+    await client.query(orderUpdateSql, [nextStatus, nextCategory, nextProblem, nextClosingDate, current.id]);
     for (const service of diff.novosServicos) await client.query(
       `INSERT INTO servicos_os(ordem_servico_id,descricao,valor,classificacao_servico,classificacao_origem,categoria_gerencial,subcategoria_gerencial,origem_classificacao,importacao_id,origem_linha,sequencia_importacao,codigo_poli,fingerprint_contexto,hash_conteudo)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
@@ -320,6 +340,7 @@ export async function synchronizeOrder(parsed: ParsedOs, actor?: AuthenticatedRe
             ...(diff.categoria ? ['categoria_servico'] : []),
             ...(diff.natureza ? ['natureza_os'] : []),
             ...(diff.problema ? ['observacoes'] : []),
+            ...(diff.dataFechamento ? ['data_fechamento'] : []),
             ...(diff.novosServicos.length ? ['servicos_os'] : []),
             ...(diff.novosProdutos.length ? ['produtos_os'] : []),
             ...(diff.novasExecucoes.length ? ['servicos_os_execucoes'] : []),
