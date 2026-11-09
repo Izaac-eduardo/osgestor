@@ -16,6 +16,8 @@ const validDate = (value: string) => {
   return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
 };
 const numberValue = (value: string | number | null | undefined): number => Number(value ?? 0);
+export const THIRD_PARTY_ACCOUNTING_START = '2026-11-01';
+export const usesAccountingForThirdParty = (dataAbertura: string): boolean => dataAbertura >= THIRD_PARTY_ACCOUNTING_START;
 
 const validate = (filters: DashboardFilters) => {
   if (!validDate(filters.data_inicio) || !validDate(filters.data_fim) || filters.data_inicio > filters.data_fim) throw new Error('Período inválido. Use datas no formato YYYY-MM-DD.');
@@ -48,16 +50,16 @@ export async function getDashboard(filters: DashboardFilters) {
     ? `(SELECT COALESCE(SUM(categoria_servico_item.valor) FILTER (WHERE categoria_servico_item.classificacao_servico = 'INTERNO' OR (categoria_servico_item.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'INTERNA')),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
     : '';
   const gerencialThirdParty = gerencialParameter
-    ? `(SELECT COALESCE(SUM(categoria_servico_item.valor) FILTER (WHERE categoria_servico_item.classificacao_servico = 'TERCEIRO' OR (categoria_servico_item.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter})`
+    ? `(CASE WHEN v.data_abertura >= DATE '${THIRD_PARTY_ACCOUNTING_START}' THEN 0 ELSE (SELECT COALESCE(SUM(categoria_servico_item.valor) FILTER (WHERE categoria_servico_item.classificacao_servico = 'TERCEIRO' OR (categoria_servico_item.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os categoria_servico_item WHERE categoria_servico_item.ordem_servico_id=v.id AND categoria_servico_item.categoria_gerencial=${gerencialParameter}) END)`
     : '';
   const gerencialTotal = gerencialParameter ? `(${gerencialInternal}+${gerencialThirdParty})` : '';
   const base = `WITH filtered AS (
     SELECT v.id, v.status, v.natureza_os, v.categoria_servico, v.data_abertura,
       v.obra_id, v.obra_codigo, v.obra_nome, v.frota_codigo,
       ${gerencialTotal ? gerencialInternal : 'v.total_mao_obra_interna'} total_mao_obra_interna,
-      ${gerencialTotal ? gerencialThirdParty : 'v.total_servicos_terceiros'} total_servicos_terceiros,
+      ${gerencialTotal ? gerencialThirdParty : `(CASE WHEN v.data_abertura >= DATE '${THIRD_PARTY_ACCOUNTING_START}' THEN 0 ELSE v.total_servicos_terceiros END)`} total_servicos_terceiros,
       ${gerencialTotal ? '0' : 'v.total_produtos'} total_produtos,
-      ${gerencialTotal || 'v.total_os'} total_os
+      ${gerencialTotal || `(v.total_mao_obra_interna+CASE WHEN v.data_abertura >= DATE '${THIRD_PARTY_ACCOUNTING_START}' THEN 0 ELSE v.total_servicos_terceiros END+v.total_produtos)`} total_os
     FROM vw_ordens_servico_resumo v WHERE ${where}
   ), orders AS (SELECT * FROM filtered)`;
   const hourStart = values.length + 1; const hourEnd = values.length + 2;

@@ -27,6 +27,9 @@ export class RelatorioServiceError extends Error {
   }
 }
 
+export const THIRD_PARTY_ACCOUNTING_START = '2026-11-01';
+export const usesAccountingForThirdParty = (dataAbertura: string): boolean => dataAbertura >= THIRD_PARTY_ACCOUNTING_START;
+
 interface GastosVeiculoRow {
   obra_id: string;
   obra_codigo: string;
@@ -202,10 +205,11 @@ const numeric = (value: string, field: string): number => {
 
 const financialColumns = (filters: RelatorioFilters, values: QueryValue[]): string => {
   const categoria = parseCategoriaFiltro(filters.categoria);
-  if (categoria?.origem !== 'GERENCIAL') return 'v.total_mao_obra_interna,v.total_servicos_terceiros,v.total_produtos,v.total_os';
+  const thirdPartyFromOs = `(CASE WHEN v.data_abertura >= DATE '${THIRD_PARTY_ACCOUNTING_START}' THEN 0 ELSE v.total_servicos_terceiros END)`;
+  if (categoria?.origem !== 'GERENCIAL') return `v.total_mao_obra_interna,${thirdPartyFromOs} total_servicos_terceiros,v.total_produtos,(v.total_mao_obra_interna+${thirdPartyFromOs}+v.total_produtos) total_os`;
   const parameter = `$${values.length}`;
   const internal = `(SELECT COALESCE(SUM(s.valor) FILTER (WHERE s.classificacao_servico = 'INTERNO' OR (s.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'INTERNA')),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
-  const thirdParty = `(SELECT COALESCE(SUM(s.valor) FILTER (WHERE s.classificacao_servico = 'TERCEIRO' OR (s.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter})`;
+  const thirdParty = `(CASE WHEN v.data_abertura >= DATE '${THIRD_PARTY_ACCOUNTING_START}' THEN 0 ELSE (SELECT COALESCE(SUM(s.valor) FILTER (WHERE s.classificacao_servico = 'TERCEIRO' OR (s.classificacao_servico = 'INDETERMINADO' AND v.natureza_os = 'TERCEIRO')),0) FROM servicos_os s WHERE s.ordem_servico_id=v.id AND s.categoria_gerencial=${parameter}) END)`;
   return `${internal} total_mao_obra_interna,${thirdParty} total_servicos_terceiros,0 total_produtos,(${internal}+${thirdParty}) total_os`;
 };
 

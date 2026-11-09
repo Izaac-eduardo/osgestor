@@ -4,6 +4,7 @@ import { normalizeSearchText } from '../utils/text.js';
 import { normalizeExternalFleetIdentifier } from '../services/frota-identificadores.service.js';
 
 export const CONTABILIDADE_ORIGIN = 'CONTABILIDADE';
+export const CONTABILIDADE_INICIO_OPERACAO = '2026-11-01';
 export type ContabilClassification = 'PECAS_EXTERNAS' | 'SERVICOS_TERCEIRIZADOS' | 'PENDENTE';
 export type ContabilFleetMatch = 'EXATA' | 'ALIAS' | 'PENDENTE' | 'MANUAL';
 
@@ -29,6 +30,7 @@ export interface ContabilLancamento {
   planoContasOriginal: string | null;
   categoriaContabil: string;
   classificacao: ContabilClassification;
+  valorTotalInvalido: boolean;
   fingerprint: string;
 }
 
@@ -48,7 +50,8 @@ const number = (value: unknown): number | null => {
 };
 const date = (value: unknown): { original: string | null; iso: string | null } => {
   const raw = text(value); if (!raw) return { original: null, iso: null };
-  const br = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(raw); if (br) return { original: raw, iso: `${br[3]}-${br[2]}-${br[1]}` };
+  const br = /^(\d{2})[\/-](\d{2})[\/-](\d{4})/.exec(raw); if (br) return { original: raw, iso: `${br[3]}-${br[2]}-${br[1]}` };
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(raw); if (iso) return { original: raw, iso: iso[1]! };
   const d = new Date(raw); return Number.isNaN(d.getTime()) ? { original: raw, iso: null } : { original: raw, iso: d.toISOString().slice(0, 10) };
 };
 const classify = (value: string | null): ContabilClassification => {
@@ -80,7 +83,7 @@ export function parseContabilidade(buffer: Buffer, filename = 'arquivo.xlsx'): C
         planilhaOriginal: sheetName, linhaOriginal: i + 1, dadosOriginais: original,
         controleOriginal: text(cell(row, 'controle')), dataLancamentoOriginal: lancamento.original, dataContaOriginal: conta.original, dataLancamento: lancamento.iso, dataConta: conta.iso,
         notaOriginal: text(cell(row, 'nota')), codigoProdutoOriginal: text(cell(row, 'codigoProduto')), produtoOriginal: text(cell(row, 'produto')), tipoMovimentacaoOriginal: text(cell(row, 'tipoMovimentacao')),
-        quantidade: number(cell(row, 'quantidade')), valorUnitario: number(cell(row, 'valorUnitario')), valorTotal: number(cell(row, 'valorTotal')), subcentroCodigoOriginal: text(cell(row, 'subcentroCodigo')), subcentroOriginal: text(cell(row, 'subcentro')), planoContasCodigoOriginal: text(cell(row, 'planoCodigo')), planoContasOriginal: text(cell(row, 'plano')), categoriaContabil: text(cell(row, 'plano')) ?? 'NAO_INFORMADO',
+        quantidade: number(cell(row, 'quantidade')), valorUnitario: number(cell(row, 'valorUnitario')), valorTotal: number(cell(row, 'valorTotal')), valorTotalInvalido: text(cell(row, 'valorTotal')) !== null && number(cell(row, 'valorTotal')) === null, subcentroCodigoOriginal: text(cell(row, 'subcentroCodigo')), subcentroOriginal: text(cell(row, 'subcentro')), planoContasCodigoOriginal: text(cell(row, 'planoCodigo')), planoContasOriginal: text(cell(row, 'plano')), categoriaContabil: text(cell(row, 'plano')) ?? 'NAO_INFORMADO',
       };
       output.push({ ...data, classificacao: classify(data.planoContasOriginal), fingerprint: fingerprint(original) });
     }
