@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
-import { CONTABILIDADE_INICIO_OPERACAO, parseContabilidade } from '../src/imports/contabilidade.js';
+import { CONTABILIDADE_INICIO_OPERACAO, classifyContabilSpecialStatus, parseContabilidade } from '../src/imports/contabilidade.js';
 import { usesAccountingForThirdParty } from '../src/services/relatorios.service.js';
 import { usesAccountingForThirdParty as dashboardUsesAccountingForThirdParty } from '../src/services/dashboard.service.js';
 
