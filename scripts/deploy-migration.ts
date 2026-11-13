@@ -4,10 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 
-const allowedVersions = new Map([
-  ['036', '036_reclassificacao_produto_servico.sql'],
-  ['037', '037_integridade_reclassificacao_produto_servico.sql'],
-  ['038', '038_edicao_manual_servicos_categorias.sql'],
+export const allowedVersions = new Map([
   ['039', '039_os_manutencao_sem_obra.sql'],
   ['040', '040_importacoes_contabeis.sql'],
   ['041', '041_salarios_base_oficina.sql'],
@@ -15,95 +12,73 @@ const allowedVersions = new Map([
 ]);
 const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051']);
 
-const argument = (name: string): string | undefined => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-const preview = process.argv.includes('--preview');
-const apply = process.argv.includes('--apply');
-const database = argument('database');
-const version = argument('version');
-const confirmedTarget = argument('confirm-target');
-if (!preview && !apply) throw new Error('Use exatamente um modo: --preview ou --apply.');
-if (preview === apply) throw new Error('Use exatamente um modo: --preview ou --apply.');
-if (!database) throw new Error('Informe explicitamente --database=NOME.');
-if (!allowedDatabases.has(database)) throw new Error(`Banco alvo não autorizado: ${database}.`);
-if (!version || !allowedVersions.has(version)) throw new Error('Informe --version=036, --version=037, --version=038, --version=039, --version=040, --version=041 ou --version=042.');
-if (apply && confirmedTarget !== database) throw new Error('O modo --apply exige --confirm-target com o mesmo nome do banco alvo.');
-if (process.env.DB_NAME && process.env.DB_NAME !== database) throw new Error(`DB_NAME (${process.env.DB_NAME}) diverge de --database (${database}).`);
-
-const fileName = allowedVersions.get(version)!;
-const filePath = path.resolve(process.cwd(), 'database', 'migrations', fileName);
-const sql = readFileSync(filePath, 'utf8');
-const checksum = createHash('sha256').update(sql).digest('hex');
-const pool = new Pool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 5432), database, user: process.env.DB_USER ?? 'postgres', password: process.env.DB_PASSWORD ?? '' });
-
-const stripTransactionWrapper = (value: string): string => value.replace(/^\s*BEGIN;\s*/i, '').replace(/\s*COMMIT;\s*$/i, '');
-const ensureControlTable = async (client: PoolClient) => client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
-  version VARCHAR(120) PRIMARY KEY,
-  file_name VARCHAR(255) NOT NULL,
-  checksum_sha256 CHAR(64) NOT NULL,
-  applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  applied_by VARCHAR(150) NOT NULL DEFAULT current_user,
-  CONSTRAINT schema_migrations_checksum_chk CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$')
-)`);
-
-async function main(): Promise<void> {
-try {
-  const client = await pool.connect();
-  const advisoryLock = `SELECT pg_advisory_lock(hashtextextended('osgestor:migrations', 0))`;
-  const advisoryUnlock = `SELECT pg_advisory_unlock(hashtextextended('osgestor:migrations', 0))`;
-  try {
-    if (apply) await client.query(advisoryLock);
-    const current = await client.query<{ current_database: string }>('SELECT current_database()');
-    if (current.rows[0]?.current_database !== database) throw new Error('O banco conectado não corresponde ao alvo solicitado.');
-    const controlExists = (await client.query<{ name: string | null }>("SELECT to_regclass('public.schema_migrations') AS name")).rows[0]?.name !== null;
-    const controlColumns = controlExists
-      ? (await client.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='schema_migrations' ORDER BY ordinal_position")).rows.map(row => row.column_name)
-      : [];
-    const compatibleControl = !controlExists || ['version', 'file_name', 'checksum_sha256', 'applied_at', 'applied_by'].every(column => controlColumns.includes(column));
-    if (!compatibleControl) {
-      const message = `schema_migrations existente não possui o formato controlado exigido (colunas: ${controlColumns.join(', ')}). Não será alterada automaticamente.`;
-      if (apply) throw new Error(message);
-      console.log(JSON.stringify({ mode: 'preview', database, version: fileName, status: 'blocked_control_schema', checksum, control_columns: controlColumns, message }, null, 2));
-      return;
-    }
-    if (version === '037') {
-      if (!controlExists) throw new Error('A migration 037 exige que a migration 036 esteja registrada em schema_migrations.');
-      const previous = await client.query<{ checksum_sha256: string }>(
-        `SELECT checksum_sha256 FROM schema_migrations WHERE version=$1`,
-        ['036_reclassificacao_produto_servico.sql'],
-      );
-      const previousChecksum = createHash('sha256').update(readFileSync(path.resolve(process.cwd(), 'database', 'migrations', '036_reclassificacao_produto_servico.sql'), 'utf8')).digest('hex');
-      if (previous.rows[0]?.checksum_sha256 !== previousChecksum) {
-        throw new Error('A migration 037 exige a migration 036 registrada com o checksum atual.');
-      }
-    }
-    const control = controlExists
-      ? await client.query<{ version: string; file_name: string; checksum_sha256: string }>(`SELECT version,file_name,checksum_sha256 FROM schema_migrations WHERE version=$1`, [fileName])
-      : { rows: [] as { version: string; file_name: string; checksum_sha256: string }[] };
-    const existing = control.rows[0];
-    if (existing && existing.file_name !== fileName) throw new Error(`Registro de ${fileName} aponta para arquivo diferente: ${existing.file_name}.`);
-    if (existing && existing.checksum_sha256 !== checksum) throw new Error(`Checksum incompatível para ${fileName}: aplicado=${existing.checksum_sha256}, arquivo=${checksum}.`);
-    if (existing) {
-      console.log(JSON.stringify({ mode: preview ? 'preview' : 'apply', database, version: fileName, status: 'already_applied', checksum }, null, 2));
-    } else if (preview) {
-      console.log(JSON.stringify({ mode: 'preview', database, version: fileName, status: 'pending', checksum, writes: ['migration SQL', 'schema_migrations'], control_table_exists: controlExists }, null, 2));
-    } else {
-      await client.query('BEGIN');
-      try {
-        await ensureControlTable(client);
-        await client.query(stripTransactionWrapper(sql));
-        await client.query('INSERT INTO schema_migrations(version,file_name,checksum_sha256,applied_by) VALUES($1,$2,$3,current_user)', [fileName, fileName, checksum]);
-        await client.query('COMMIT');
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      }
-      console.log(JSON.stringify({ mode: 'apply', database, version: fileName, status: 'applied', checksum }, null, 2));
-    }
-  } finally {
-    if (apply) await client.query(advisoryUnlock).catch(() => undefined);
-    client.release();
-  }
-} finally { await pool.end(); }
+export function validateArguments(args: { mode: string; database?: string; version?: string; confirmedTarget?: string; configuredDatabase?: string }) {
+  if (!['preview', 'apply'].includes(args.mode)) throw new Error('Use exatamente um modo: --preview ou --apply.');
+  if (!args.database) throw new Error('Informe explicitamente --database=NOME.');
+  if (!allowedDatabases.has(args.database)) throw new Error(`Banco alvo não autorizado: ${args.database}.`);
+  if (!args.version || !allowedVersions.has(args.version)) throw new Error('Informe --version=039, --version=040, --version=041 ou --version=042.');
+  if (args.mode === 'apply' && args.confirmedTarget !== args.database) throw new Error('O modo --apply exige --confirm-target com o mesmo nome do banco alvo.');
+  if (args.configuredDatabase && args.configuredDatabase !== args.database) throw new Error('DB_NAME diverge do banco alvo informado.');
+  return allowedVersions.get(args.version)!;
 }
 
-void main().catch(error => { console.error(error); process.exitCode = 1; });
+export function validateControlColumns(columns: string[]): void {
+  const required = ['version', 'applied_at'];
+  if (!required.every(column => columns.includes(column))) throw new Error(`schema_migrations incompatível; colunas encontradas: ${columns.join(', ')}`);
+}
+
+export function migrationChecksum(sql: string): string { return createHash('sha256').update(sql).digest('hex'); }
+export function stripTransactionWrapper(sql: string): string { return sql.replace(/^\s*BEGIN;\s*/i, '').replace(/\s*COMMIT;\s*$/i, ''); }
+
+export async function applyMigration(client: Pick<PoolClient, 'query'>, fileName: string, sql: string): Promise<void> {
+  await client.query('BEGIN');
+  try {
+    await client.query(stripTransactionWrapper(sql));
+    await client.query('INSERT INTO schema_migrations(version) VALUES($1)', [fileName]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  }
+}
+
+const argument = (name: string): string | undefined => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
+async function main(): Promise<void> {
+  const preview = process.argv.includes('--preview');
+  const apply = process.argv.includes('--apply');
+  const database = argument('database');
+  const version = argument('version');
+  const fileName = validateArguments({ mode: preview === apply ? 'invalid' : preview ? 'preview' : 'apply', database, version, confirmedTarget: argument('confirm-target'), configuredDatabase: process.env.DB_NAME });
+  const filePath = path.resolve(process.cwd(), 'database', 'migrations', fileName);
+  const sql = readFileSync(filePath, 'utf8');
+  const checksum = migrationChecksum(sql);
+  const pool = new Pool({ host: process.env.DB_HOST ?? 'localhost', port: Number(process.env.DB_PORT ?? 5432), database, user: process.env.DB_USER ?? 'postgres', password: process.env.DB_PASSWORD ?? '' });
+  try {
+    const client = await pool.connect();
+    try {
+      if (apply) await client.query("SELECT pg_advisory_lock(hashtextextended('osgestor:migrations', 0))");
+      const current = await client.query<{ current_database: string }>('SELECT current_database()');
+      if (current.rows[0]?.current_database !== database) throw new Error('O banco conectado não corresponde ao alvo solicitado.');
+      const tableExists = (await client.query<{ name: string | null }>("SELECT to_regclass('public.schema_migrations') AS name")).rows[0]?.name !== null;
+      if (!tableExists) throw new Error('schema_migrations não existe; o executor não cria nem altera sua estrutura.');
+      const columns = (await client.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='schema_migrations' ORDER BY ordinal_position")).rows.map(row => row.column_name);
+      validateControlColumns(columns);
+      const existing = await client.query<{ version: string }>('SELECT version FROM schema_migrations WHERE version=$1', [fileName]);
+      if (existing.rowCount) {
+        console.log(JSON.stringify({ mode: preview ? 'preview' : 'apply', database, version: fileName, status: 'already_applied', checksum, checksumPersistence: 'not_supported_by_legacy_schema' }, null, 2));
+      } else if (preview) {
+        console.log(JSON.stringify({ mode: 'preview', database, version: fileName, status: 'pending', checksum, checksumPersistence: 'not_supported_by_legacy_schema', writes: [], note: 'SHA-256 is calculated for review; the legacy schema has no checksum column.' }, null, 2));
+      } else {
+        await applyMigration(client, fileName, sql);
+        console.log(JSON.stringify({ mode: 'apply', database, version: fileName, status: 'applied', checksum, checksumPersistence: 'not_supported_by_legacy_schema' }, null, 2));
+      }
+    } finally {
+      if (apply) await client.query("SELECT pg_advisory_unlock(hashtextextended('osgestor:migrations', 0))").catch(() => undefined);
+      client.release();
+    }
+  } finally { await pool.end(); }
+}
+
+if (process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1]).replace(/\\/g, '/')}`).href) {
+  void main().catch(error => { console.error(error); process.exitCode = 1; });
+}
