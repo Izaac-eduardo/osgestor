@@ -10,7 +10,7 @@ export const allowedVersions = new Map([
   ['041', '041_salarios_base_oficina.sql'],
   ['042', '042_contabilidade_despesas_compartilhadas.sql'],
 ]);
-const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051']);
+const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051', 'osgestor_prod']);
 
 export function validateArguments(args: { mode: string; database?: string; version?: string; confirmedTarget?: string; configuredDatabase?: string }) {
   if (!['preview', 'apply'].includes(args.mode)) throw new Error('Use exatamente um modo: --preview ou --apply.');

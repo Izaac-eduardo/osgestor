@@ -18,6 +18,14 @@ test('valida explicitamente banco e confirmação para apply', () => {
   assert.throws(() => validateArguments({ mode: 'apply', database: 'outra', version: '039', confirmedTarget: 'outra' }), /não autorizado/);
 });
 
+test('autoriza osgestor_prod somente quando informado explicitamente e exige confirmação para apply', () => {
+  assert.equal(validateArguments({ mode: 'preview', database: 'osgestor_prod', version: '039', configuredDatabase: 'osgestor_prod' }), '039_os_manutencao_sem_obra.sql');
+  assert.throws(() => validateArguments({ mode: 'preview', version: '039' }), /database/);
+  assert.throws(() => validateArguments({ mode: 'preview', database: 'osgestor-prod', version: '039' }), /não autorizado/);
+  assert.throws(() => validateArguments({ mode: 'apply', database: 'osgestor_prod', version: '039' }), /confirm-target/);
+  assert.equal(validateArguments({ mode: 'apply', database: 'osgestor_prod', version: '039', confirmedTarget: 'osgestor_prod' }), '039_os_manutencao_sem_obra.sql');
+});
+
 test('SHA-256 é calculado sobre o SQL', () => {
   assert.equal(migrationChecksum('SELECT 1;').length, 64);
 });
