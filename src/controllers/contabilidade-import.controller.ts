@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { analisarContabilidade, ContabilidadeImportError, confirmarContabilidade, getContabilidadeImport, listContabilidadeImports, listContabilidadeItems, updateContabilidadeItem } from '../services/contabilidade-import.service.js';
+import { analisarContabilidade, ContabilidadeImportError, confirmarContabilidade, decidirDespesaCompartilhada, getContabilidadeImport, listContabilidadeImports, listContabilidadeItems, updateContabilidadeItem } from '../services/contabilidade-import.service.js';
 
 const previewToken = (value: string | string[] | undefined): string => { if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) throw new ContabilidadeImportError(400, 'token de prévia inválido.'); return value; };
 
@@ -11,3 +11,4 @@ export async function confirm(request: Request, response: Response): Promise<voi
 export async function list(_request: Request, response: Response): Promise<void> { try { response.json(await listContabilidadeImports()); } catch (error) { sendError(response, error); } }
 export async function get(request: Request, response: Response): Promise<void> { try { const importacaoId = id(request.params.id); response.json({ importacao: await getContabilidadeImport(importacaoId), itens: await listContabilidadeItems(importacaoId) }); } catch (error) { sendError(response, error); } }
 export async function update(request: Request, response: Response): Promise<void> { try { response.json(await updateContabilidadeItem(id(request.params.itemId), request.body ?? {}, request.authUser)); } catch (error) { sendError(response, error); } }
+export async function decideShared(request: Request, response: Response): Promise<void> { try { const line = Number(request.params.linhaOriginal); if (!Number.isInteger(line) || line < 1) throw new ContabilidadeImportError(400, 'linha_original inválida.'); const decision = request.body?.decisao; if (!['APROVAR', 'DESCONSIDERAR', 'AGUARDAR'].includes(decision)) throw new ContabilidadeImportError(400, 'Decisão inválida.'); const frotaId = typeof request.body?.frota_id === 'string' ? request.body.frota_id : null; response.json(await decidirDespesaCompartilhada(previewToken(request.params.id), line, decision, frotaId, request.authUser)); } catch (error) { sendError(response, error); } }

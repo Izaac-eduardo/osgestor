@@ -1,53 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
-import { CircleDollarSign, Package, Wrench } from 'lucide-react'
+import { useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
-import { StatCard } from '../components/StatCard'
-import { OrderDetailsModal } from '../components/orders/OrderDetailsModal'
-import { OrdersReportTable } from '../components/reports/OrdersReportTable'
 import { ReportsFilters } from '../components/reports/ReportsFilters'
-import { ReportsExportMenu } from '../components/reports/ReportsExportMenu'
-import { ReportSection } from '../components/reports/ReportSection'
-import { WorkshopPerformanceSection } from '../components/reports/WorkshopPerformanceSection'
-import { getCategoryFilterOptions, getProjects, getServiceOrderDetails, getServiceOrders } from '../services/orders'
-import { getWorkshopPerformance } from '../services/maintenance'
-import type { CategoryFilterOption, ProjectOption, ServiceOrder, ServiceOrderDetails } from '../types/orders'
-import type { MaintenanceFilters, WorkshopPerformance } from '../types/maintenance'
-import type { ExpensesByProject, ReportFilters } from '../types/reports'
-import { formatCurrency } from '../utils/formatters'
-
-const money = (order: ServiceOrder, key: 'total_mao_obra_interna' | 'total_servicos_terceiros' | 'total_produtos' | 'total_os') => order.status === 'CANCELADA' ? 0 : Number(order[key])
+import { MaintenanceFleetExportSection } from '../components/reports/MaintenanceFleetExportSection'
+import type { MaintenanceFilters, MaintenanceNature } from '../types/maintenance'
+import type { ReportFilters } from '../types/reports'
 
 export function RelatoriosPage() {
   const [draft, setDraft] = useState<ReportFilters>({})
   const [applied, setApplied] = useState<ReportFilters>({})
   const [periodError, setPeriodError] = useState('')
-  const [projects, setProjects] = useState<ProjectOption[]>([])
-  const [categories, setCategories] = useState<CategoryFilterOption[]>([])
-  const [orders, setOrders] = useState<ServiceOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [details, setDetails] = useState<ServiceOrderDetails | null>(null)
-  const [detailsError, setDetailsError] = useState(false)
-  const [performance, setPerformance] = useState<WorkshopPerformance | null>(null)
-  const [performanceLoading, setPerformanceLoading] = useState(false)
-
-  useEffect(() => { const controller = new AbortController(); Promise.all([getProjects(controller.signal), getCategoryFilterOptions(controller.signal)]).then(([projectOptions, categoryOptions]) => { setProjects(projectOptions); setCategories(categoryOptions) }).catch(() => undefined); return () => controller.abort() }, [])
-  useEffect(() => { const controller = new AbortController(); queueMicrotask(async () => { setLoading(true); setError(false); try { setOrders(await getServiceOrders(applied, controller.signal)) } catch { if (!controller.signal.aborted) setError(true) } finally { if (!controller.signal.aborted) setLoading(false) } }); return () => controller.abort() }, [applied])
-  useEffect(() => { const controller = new AbortController(); if (!applied.data_inicio || !applied.data_fim) { setPerformance(null); setPerformanceLoading(false); return () => controller.abort() } setPerformanceLoading(true); getWorkshopPerformance({ data_inicio: applied.data_inicio, data_fim: applied.data_fim, frota_codigo: applied.frota_codigo } satisfies MaintenanceFilters, controller.signal).then(value => { if (!controller.signal.aborted) setPerformance(value) }).catch(() => { if (!controller.signal.aborted) setPerformance(null) }).finally(() => { if (!controller.signal.aborted) setPerformanceLoading(false) }); return () => controller.abort() }, [applied])
-  const refreshPerformanceForSalary = async (ano: number, mes: number) => {
-    const start = applied.data_inicio?.slice(0, 7); const end = applied.data_fim?.slice(0, 7); const competence = `${ano}-${String(mes).padStart(2, '0')}`
-    if (!start || !end || competence < start || competence > end) return
-    const refreshed = await getWorkshopPerformance({ data_inicio: applied.data_inicio!, data_fim: applied.data_fim!, frota_codigo: applied.frota_codigo })
-    setPerformance(refreshed)
-  }
-  const summary = useMemo(() => orders.reduce((a, o) => ({ labor: a.labor + money(o, 'total_mao_obra_interna'), third: a.third + money(o, 'total_servicos_terceiros'), products: a.products + money(o, 'total_produtos'), total: a.total + money(o, 'total_os') }), { labor: 0, third: 0, products: 0, total: 0 }), [orders])
-  const byProject = useMemo(() => Array.from(orders.reduce((map, order) => { if (order.status === 'CANCELADA') return map; const current = map.get(order.obra_id) || { obra_id: order.obra_id, obra_codigo: order.obra_codigo, obra_nome: order.obra_nome, total_mao_obra_interna: 0, total_servicos_terceiros: 0, total_produtos: 0, total_gasto: 0, quantidade_os: 0 }; current.total_mao_obra_interna += Number(order.total_mao_obra_interna); current.total_servicos_terceiros += Number(order.total_servicos_terceiros); current.total_produtos += Number(order.total_produtos); current.total_gasto += Number(order.total_os); current.quantidade_os++; map.set(order.obra_id, current); return map }, new Map<string | null, ExpensesByProject>()).values()).sort((a, b) => b.total_gasto - a.total_gasto), [orders])
-  const projectRows = byProject.length ? [...byProject, { obra_id: 'TOTAL', obra_codigo: '', obra_nome: 'TOTAL', total_mao_obra_interna: summary.labor, total_servicos_terceiros: summary.third, total_produtos: summary.products, total_gasto: summary.total, quantidade_os: orders.filter(order => order.status !== 'CANCELADA').length }] : []
-  const apply = () => { if (draft.data_inicio && draft.data_fim && draft.data_fim < draft.data_inicio) { setPeriodError('A data final não pode ser anterior à data inicial.'); return } setPeriodError(''); setApplied({ ...draft }) }
-  const clear = () => { setPeriodError(''); setDraft({}); setApplied({}) }
-  const open = async (id: string) => { setSelected(id); setDetails(null); setDetailsError(false); try { setDetails(await getServiceOrderDetails(id)) } catch { setDetailsError(true) } }
-  const cards = [{ label: 'Mão de obra', value: formatCurrency(summary.labor), icon: Wrench }, { label: 'Produtos / Materiais', value: formatCurrency(summary.products), icon: Package }, { label: 'Serviços terceirizados', value: formatCurrency(summary.third), icon: CircleDollarSign }, { label: 'Total apropriado', value: formatCurrency(summary.total), icon: CircleDollarSign, tone: 'amber' as const }]
-  const performanceFilters: MaintenanceFilters = { data_inicio: applied.data_inicio || '', data_fim: applied.data_fim || '', frota_codigo: applied.frota_codigo }
-  return <><PageHeader title="Relatórios" subtitle="Análise dos valores apropriados às obras pela oficina." action={<ReportsExportMenu filters={applied} />} /><ReportsFilters draft={draft} projects={projects} categories={categories} error={periodError} onChange={setDraft} onApply={apply} onClear={clear} /><WorkshopPerformanceSection performance={performance} loading={performanceLoading} hasPeriod={Boolean(applied.data_inicio && applied.data_fim)} filters={performanceFilters} onSalarySaved={refreshPerformanceForSalary} />{error ? <section className="report-state report-state--error"><p>Não foi possível carregar o relatório.</p><button className="button button--secondary" onClick={() => setApplied({ ...applied })}>Tentar novamente</button></section> : <>{loading ? <div className="report-loading reports-stats-loading" aria-label="Carregando resumo"><span /><span /><span /></div> : <div className="reports-stats reports-stats--financial reports-stats--standalone">{cards.map(card => <StatCard key={card.label} {...card} />)}</div>}<ReportSection kind="project" title="Apropriação por obra" description="Mão de obra, terceiros, produtos e total apropriado, em ordem decrescente." rows={projectRows} loading={loading} error={false} downloads={{ excel: false, pdf: false }} downloadError="" onRetry={() => setApplied({ ...applied })} onDownload={() => undefined} showExports={false} />{!loading && <OrdersReportTable orders={orders} onOpen={id => void open(id)} />}</>}{selected && <OrderDetailsModal readOnly order={details} loading={!details && !detailsError} error={detailsError} onClose={() => setSelected(null)} onRetry={() => void open(selected)} onDelete={() => undefined} onMutated={async () => { setDetails(await getServiceOrderDetails(selected)) }} />}</>
+  const [financialNatureDraft, setFinancialNatureDraft] = useState<MaintenanceNature | undefined>()
+  const [financialNature, setFinancialNature] = useState<MaintenanceNature | undefined>()
+  const apply = () => { if (draft.data_inicio && draft.data_fim && draft.data_fim < draft.data_inicio) { setPeriodError('A data final não pode ser anterior à data inicial.'); return }; setPeriodError(''); setApplied({ ...draft }); setFinancialNature(financialNatureDraft) }
+  const clear = () => { setPeriodError(''); setDraft({}); setApplied({}); setFinancialNatureDraft(undefined); setFinancialNature(undefined) }
+  const maintenanceFilters: MaintenanceFilters = { data_inicio: applied.data_inicio || '', data_fim: applied.data_fim || '', frota_codigo: applied.frota_codigo, natureza: financialNature }
+  return <><PageHeader title="Relatórios" subtitle="Geração e exportação dos custos de manutenção da oficina." /><ReportsFilters draft={draft} financialNature={financialNatureDraft} error={periodError} onChange={setDraft} onFinancialNatureChange={setFinancialNatureDraft} onApply={apply} onClear={clear} /><MaintenanceFleetExportSection filters={maintenanceFilters} /></>
 }

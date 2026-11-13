@@ -12,3 +12,4 @@ contabilidadeImportRoutes.post('/analisar', upload.single('arquivo'), controller
 contabilidadeImportRoutes.post('/:id/confirmar', controller.confirm);
 contabilidadeImportRoutes.get('/:id', controller.get);
 contabilidadeImportRoutes.patch('/:id/itens/:itemId', controller.update);
+contabilidadeImportRoutes.patch('/:id/itens/:linhaOriginal/decisao', controller.decideShared);

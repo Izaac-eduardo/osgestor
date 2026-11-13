@@ -7,6 +7,7 @@ manutencaoFinanceiraRoutes.use(requireMethodRole());
 manutencaoFinanceiraRoutes.get('/por-frota', controller.porFrota);
 manutencaoFinanceiraRoutes.get('/totais', controller.totais);
 manutencaoFinanceiraRoutes.get('/detalhes', controller.detalhes);
+manutencaoFinanceiraRoutes.get('/despesas-compartilhadas', controller.despesasCompartilhadas);
 manutencaoFinanceiraRoutes.get('/desempenho-oficina', controller.desempenho);
 manutencaoFinanceiraRoutes.get('/salarios-base', controller.salarios);
 manutencaoFinanceiraRoutes.get('/exportar.xlsx', controller.excel);

@@ -7,6 +7,11 @@ export const CONTABILIDADE_ORIGIN = 'CONTABILIDADE';
 export const CONTABILIDADE_INICIO_OPERACAO = '2026-11-01';
 export type ContabilClassification = 'PECAS_EXTERNAS' | 'SERVICOS_TERCEIRIZADOS' | 'PENDENTE';
 export type ContabilFleetMatch = 'EXATA' | 'ALIAS' | 'PENDENTE' | 'MANUAL';
+export type ContabilDespesaCompartilhadaStatus = 'NAO_COMPARTILHADA' | 'AGUARDANDO_DECISAO' | 'APROVADA' | 'DESCONSIDERADA' | 'FORA_ESCOPO_COMBUSTIVEL';
+export type ContabilCombustivelStatus = 'FORA_ESCOPO_COMBUSTIVEL' | 'AMBIGUO' | null;
+export type ContabilDecision = 'APROVAR' | 'DESCONSIDERAR' | 'AGUARDAR';
+export function canDecideContabilSharedExpense(role: string | null | undefined): boolean { return role === 'ADMIN'; }
+export function applyContabilSharedDecision(decision: ContabilDecision): ContabilDespesaCompartilhadaStatus { return decision === 'APROVAR' ? 'APROVADA' : decision === 'DESCONSIDERAR' ? 'DESCONSIDERADA' : 'AGUARDANDO_DECISAO'; }
 
 export interface ContabilLancamento {
   planilhaOriginal: string;
@@ -30,6 +35,8 @@ export interface ContabilLancamento {
   planoContasOriginal: string | null;
   categoriaContabil: string;
   classificacao: ContabilClassification;
+  despesaCompartilhadaStatus: ContabilDespesaCompartilhadaStatus;
+  combustivelStatus: ContabilCombustivelStatus;
   valorTotalInvalido: boolean;
   fingerprint: string;
 }
@@ -60,6 +67,13 @@ const classify = (value: string | null): ContabilClassification => {
   if (v === 'CUSTO SERVICOS') return 'SERVICOS_TERCEIRIZADOS';
   return 'PENDENTE';
 };
+export function classifyContabilSpecialStatus(produto: string | null, subcentro: string | null): { despesaCompartilhadaStatus: ContabilDespesaCompartilhadaStatus; combustivelStatus: ContabilCombustivelStatus } {
+  const product = normalizeSearchText(produto ?? '').replace(/\s+/g, ' ').trim();
+  const reliableFuel = new Set(['OLEO DIESEL S10 - COMUM', 'OLEO DIESEL S500 - COMUM', 'GASOLINA COMUM VARIAS DISTRIBUIDORAS', 'ETANOL HIDRATADO COMUM']).has(product);
+  if (reliableFuel) return { despesaCompartilhadaStatus: 'FORA_ESCOPO_COMBUSTIVEL', combustivelStatus: 'FORA_ESCOPO_COMBUSTIVEL' };
+  if (normalizeSubcentro(subcentro) === 'FROTAS DIVERSAS') return { despesaCompartilhadaStatus: 'AGUARDANDO_DECISAO', combustivelStatus: null };
+  return { despesaCompartilhadaStatus: 'NAO_COMPARTILHADA', combustivelStatus: null };
+}
 const fingerprint = (row: Record<string, unknown>): string => createHash('sha256').update(JSON.stringify(row, Object.keys(row).sort())).digest('hex');
 
 export function parseContabilidade(buffer: Buffer, filename = 'arquivo.xlsx'): ContabilLancamento[] {
@@ -85,7 +99,8 @@ export function parseContabilidade(buffer: Buffer, filename = 'arquivo.xlsx'): C
         notaOriginal: text(cell(row, 'nota')), codigoProdutoOriginal: text(cell(row, 'codigoProduto')), produtoOriginal: text(cell(row, 'produto')), tipoMovimentacaoOriginal: text(cell(row, 'tipoMovimentacao')),
         quantidade: number(cell(row, 'quantidade')), valorUnitario: number(cell(row, 'valorUnitario')), valorTotal: number(cell(row, 'valorTotal')), valorTotalInvalido: text(cell(row, 'valorTotal')) !== null && number(cell(row, 'valorTotal')) === null, subcentroCodigoOriginal: text(cell(row, 'subcentroCodigo')), subcentroOriginal: text(cell(row, 'subcentro')), planoContasCodigoOriginal: text(cell(row, 'planoCodigo')), planoContasOriginal: text(cell(row, 'plano')), categoriaContabil: text(cell(row, 'plano')) ?? 'NAO_INFORMADO',
       };
-      output.push({ ...data, classificacao: classify(data.planoContasOriginal), fingerprint: fingerprint(original) });
+      const special = classifyContabilSpecialStatus(data.produtoOriginal, data.subcentroOriginal);
+      output.push({ ...data, classificacao: classify(data.planoContasOriginal), ...special, fingerprint: fingerprint({ ...original, __planilha: sheetName, __linha: i + 1 }) });
     }
   }
   if (!output.length) throw new Error(`Arquivo incompatível: nenhum relatório contábil foi encontrado em ${filename}.`);
