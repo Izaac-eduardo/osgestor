@@ -3,10 +3,11 @@ import { pool } from '../config/database.js';
 import type { AuthenticatedRequestUser } from '../types/auth.js';
 import { applyContabilSharedDecision, canDecideContabilSharedExpense, parseContabilidade, normalizeSubcentro, CONTABILIDADE_INICIO_OPERACAO, type ContabilClassification, type ContabilLancamento, type ContabilFleetMatch, type ContabilDespesaCompartilhadaStatus, type ContabilDecision } from '../imports/contabilidade.js';
 import { recordAudit } from './audit.service.js';
+import { manualDecisionBlockReasons } from '../imports/contabilidade-decision.js';
 
 export class ContabilidadeImportError extends Error { constructor(public readonly statusCode: 400 | 403 | 404 | 409, message: string) { super(message); } }
 export interface ContabilImportResumo { id: string; arquivo_nome: string; hash_arquivo: string; total: number; classificados: number; pendentes: number; pendentes_classificacao: number; pendentes_frota: number; reimportada: boolean; }
-export interface ContabilPreviewItem { linha_original: number; produto_original: string | null; subcentro_original: string | null; classificacao: ContabilClassification; frota: string | null; frota_destino: string | null; identificacao_frota: ContabilFleetMatch; valor_total: number | null; data_conta: string | null; motivo_pendencia: string | null; duplicado_no_arquivo: boolean; duplicado_em_importacao_anterior: boolean; fora_periodo_autorizado: boolean; valor_total_invalido: boolean; despesa_compartilhada_status: ContabilDespesaCompartilhadaStatus; combustivel_status: 'FORA_ESCOPO_COMBUSTIVEL' | 'AMBIGUO' | null; }
+export interface ContabilPreviewItem { linha_original: number; produto_original: string | null; subcentro_original: string | null; classificacao: ContabilClassification; frota: string | null; frota_destino: string | null; identificacao_frota: ContabilFleetMatch; valor_total: number | null; data_conta: string | null; motivo_pendencia: string | null; duplicado_no_arquivo: boolean; duplicado_em_importacao_anterior: boolean; fora_periodo_autorizado: boolean; valor_total_invalido: boolean; bloqueios_decisao: string[]; despesa_compartilhada_status: ContabilDespesaCompartilhadaStatus; combustivel_status: 'FORA_ESCOPO_COMBUSTIVEL' | 'AMBIGUO' | null; }
 export interface ContabilPreview { token: string; arquivo_nome: string; hash_arquivo: string; arquivo_ja_importado: boolean; total: number; periodo: { inicio: string | null; fim: string | null }; periodo_operacional_inicio: string; frotas_identificadas: string[]; categorias: Record<ContabilClassification, number>; duplicados: number; valor_duplicado: string; fora_periodo: number; valor_fora_periodo: string; inconsistencias: number; pendentes: number; valor_pendente_classificacao: string; valor_compartilhado_aguardando: string; valor_excluido_escopo: string; compartilhadas_aguardando: number; compartilhadas_aprovadas: number; compartilhadas_desconsideradas: number; valor_compartilhado_aprovado: string; confirmacao_bloqueada: boolean; total_elegivel: string; itens: ContabilPreviewItem[]; somente_leitura: true; }
 
 export type ContabilPreviewValueSummary = { valorPendenteClassificacao: number; valorCompartilhadoAguardando: number; valorExcluidoEscopo: number };
@@ -105,7 +106,9 @@ export async function analisarContabilidade(buffer: Buffer, arquivoNome: string)
     categories[row.classificacao] += 1;
     const pending = pendingReason(row, fleet.match, duplicate, duplicatePrevious);
     if (!pending && row.valorTotal !== null && row.despesaCompartilhadaStatus === 'NAO_COMPARTILHADA') eligible += row.valorTotal;
-    items.push({ linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, subcentro_original: row.subcentroOriginal, classificacao: row.classificacao, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido, despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus });
+    const previewItem = { linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, subcentro_original: row.subcentroOriginal, classificacao: row.classificacao, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido, bloqueios_decisao: [] as string[], despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus };
+    previewItem.bloqueios_decisao = manualDecisionBlockReasons(previewItem);
+    items.push(previewItem);
   }
   const token = createHash('sha256').update(`${hash}:${Date.now()}:${Math.random()}`).digest('hex');
   const dates = rows.map(row => row.dataConta).filter((value): value is string => Boolean(value)).sort();
@@ -139,7 +142,8 @@ export async function decidirDespesaCompartilhada(token: string, linhaOriginal: 
   if (!stored || stored.expiresAt <= Date.now()) throw new ContabilidadeImportError(404, 'Prévia contábil expirada ou não encontrada.');
   const item = stored.preview.itens.find(value => value.linha_original === linhaOriginal);
   if (!item || item.despesa_compartilhada_status === 'FORA_ESCOPO_COMBUSTIVEL') throw new ContabilidadeImportError(400, 'Item não é uma despesa compartilhada elegível para decisão.');
-  if (item.combustivel_status === 'AMBIGUO' || item.duplicado_no_arquivo || item.duplicado_em_importacao_anterior || item.fora_periodo_autorizado || item.valor_total_invalido) throw new ContabilidadeImportError(409, 'O item possui uma inconsistência que impede decisão manual.');
+  const decisionBlocks = manualDecisionBlockReasons(item);
+  if (decisionBlocks.length) throw new ContabilidadeImportError(409, `Decisão manual bloqueada: ${decisionBlocks.join(' ')}`);
   if (frotaId) { const fleet = await pool.query('SELECT 1 FROM frotas WHERE id=$1 AND status=\'ATIVO\'', [frotaId]); if (!fleet.rows[0]) throw new ContabilidadeImportError(400, 'A frota informada não existe ou está inativa.'); }
   item.despesa_compartilhada_status = applyContabilSharedDecision(decisao);
   item.frota_destino = decisao === 'APROVAR' && frotaId ? frotaId : null;
