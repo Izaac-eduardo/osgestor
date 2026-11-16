@@ -1,4 +1,5 @@
 import type { Fleet } from '../../types/fleets'
+import type { ManualDecisionBlock } from '../../../../src/imports/contabilidade-decision.js'
 
 export type SharedDecisionItem = {
   linha_original: number
@@ -7,7 +8,7 @@ export type SharedDecisionItem = {
   valor_total: number | null
   frota_destino: string | null
   despesa_compartilhada_status: string
-  bloqueios_decisao: string[]
+  bloqueios_decisao: ManualDecisionBlock[]
 }
 
 type Props = {
@@ -31,7 +32,7 @@ export function SharedDecisionSection({ items, fleets, destinations, busy, onDes
         const disabled = busy || blocked
         return <tr key={item.linha_original}>
           <td>{item.data_conta || '—'}</td>
-          <td>{item.produto_original || '—'}{blocked && <ul className="maintenance-warning" aria-label={`Motivos do bloqueio da linha ${item.linha_original}`}>{item.bloqueios_decisao.map(reason => <li key={reason}>{reason}</li>)}</ul>}</td>
+          <td>{item.produto_original || '—'}{blocked && <ul className="maintenance-warning" aria-label={`Motivos do bloqueio da linha ${item.linha_original}`}>{item.bloqueios_decisao.map(reason => <li key={reason.codigo}>{reason.mensagem}</li>)}</ul>}</td>
           <td>{item.valor_total == null ? '—' : `R$ ${item.valor_total.toFixed(2)}`}</td>
           <td><select aria-label={`Destino da linha ${item.linha_original}`} value={destinations[item.linha_original] || item.frota_destino || ''} disabled={disabled || item.despesa_compartilhada_status !== 'AGUARDANDO_DECISAO'} onChange={event => onDestinationChange(item.linha_original, event.target.value)}><option value="">Despesas compartilhadas</option>{fleets.map(fleet => <option key={fleet.id} value={fleet.id}>{fleet.codigo}{fleet.placa ? ` — ${fleet.placa}` : ''}</option>)}</select></td>
           <td>{blocked ? 'BLOQUEADO' : item.despesa_compartilhada_status}</td>

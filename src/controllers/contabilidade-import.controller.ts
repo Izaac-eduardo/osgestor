@@ -1,9 +1,10 @@
 import type { Request, Response } from 'express';
 import { analisarContabilidade, ContabilidadeImportError, confirmarContabilidade, decidirDespesaCompartilhada, getContabilidadeImport, listContabilidadeImports, listContabilidadeItems, updateContabilidadeItem } from '../services/contabilidade-import.service.js';
+import { serializeContabilidadeError } from '../imports/contabilidade-error-response.js';
 
 const previewToken = (value: string | string[] | undefined): string => { if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) throw new ContabilidadeImportError(400, 'token de prévia inválido.'); return value; };
 
-const sendError = (response: Response, error: unknown): void => { if (error instanceof ContabilidadeImportError) { response.status(error.statusCode).json({ message: error.message }); return; } console.error('Erro interno na importação contábil.'); response.status(500).json({ message: 'Erro interno do servidor.' }); };
+const sendError = (response: Response, error: unknown): void => { if (error instanceof ContabilidadeImportError) { const serialized = serializeContabilidadeError(error); response.status(serialized.status).json(serialized.body); return; } console.error('Erro interno na importação contábil.'); response.status(500).json({ code: 'INTERNAL_ERROR', message: 'Erro interno do servidor.' }); };
 const id = (value: string | string[] | undefined): string => { if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) throw new ContabilidadeImportError(400, 'id inválido.'); return value; };
 
 export async function analyze(request: Request, response: Response): Promise<void> { try { const file = (request as Request & { file?: { buffer: Buffer; originalname: string } }).file; if (!file) { response.status(400).json({ message: 'Envie um arquivo XLS ou XLSX no campo arquivo.' }); return; } response.status(200).json(await analisarContabilidade(file.buffer, file.originalname)); } catch (error) { sendError(response, error); } }

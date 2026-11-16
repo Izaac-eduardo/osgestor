@@ -3,8 +3,9 @@ import { JSDOM } from 'jsdom'
 import test from 'node:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { manualDecisionBlockReasons } from '../../../../src/imports/contabilidade-decision.js'
+import { manualDecisionBlocks } from '../../../../src/imports/contabilidade-decision.js'
 import type { Fleet } from '../../types/fleets'
+import { getImportDecisionErrorMessage } from '../../utils/import-decision-error'
 import { SharedDecisionSection, type SharedDecisionItem } from './SharedDecisionSection'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/importar-contabilidade' })
@@ -23,7 +24,7 @@ const cases = [
 test('shows each blocking reason, labels the item blocked, and disables every decision action', async () => {
   const items = cases.map((entry, index) => {
     const flags = { ...clear, ...entry.flags }
-    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: manualDecisionBlockReasons(flags) } satisfies SharedDecisionItem
+    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: manualDecisionBlocks(flags) } satisfies SharedDecisionItem
   })
   const container = document.createElement('div')
   document.body.append(container)
@@ -31,7 +32,10 @@ test('shows each blocking reason, labels the item blocked, and disables every de
   let decisions = 0
   await act(async () => root.render(<SharedDecisionSection items={items} fleets={[] as Fleet[]} destinations={{}} busy={false} onDestinationChange={() => undefined} onDecision={() => { decisions += 1 }} />))
   try {
-    for (const entry of cases) assert.ok(container.textContent?.includes(entry.expected), entry.expected)
+    for (const entry of cases) {
+      const row = container.querySelectorAll('tbody tr')[cases.indexOf(entry)]
+      assert.ok(row?.textContent?.includes(entry.expected), entry.expected)
+    }
     assert.equal(container.querySelectorAll('td').length, 30)
     assert.equal(Array.from(container.querySelectorAll('td:nth-child(5)')).every(cell => cell.textContent === 'BLOQUEADO'), true)
     const actions = Array.from(container.querySelectorAll('button'))
@@ -43,4 +47,9 @@ test('shows each blocking reason, labels the item blocked, and disables every de
     await act(async () => root.unmount())
     container.remove()
   }
+})
+
+test('displays the safe message returned by an HTTP 409 response', () => {
+  const expected = 'Decis\u00e3o manual bloqueada: Poss\u00edvel duplicidade dentro do arquivo.'
+  assert.equal(getImportDecisionErrorMessage({ response: { data: { code: 'DUPLICATE_IN_FILE', message: expected } } }, 'Fallback'), expected)
 })
