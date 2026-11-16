@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { manualDecisionBlocks } from '../src/imports/contabilidade-decision.js'
+import { MANUAL_DECISION_BLOCK_CODES as backendBlockCodes, manualDecisionBlocks } from '../src/imports/contabilidade-decision.js'
 import { serializeContabilidadeError } from '../src/imports/contabilidade-error-response.js'
+import { MANUAL_DECISION_BLOCK_CODES as frontendBlockCodes } from '../frontend/src/types/accounting-decision.ts'
 
 const clear = { combustivel_status: null, duplicado_no_arquivo: false, duplicado_em_importacao_anterior: false, fora_periodo_autorizado: false, valor_total_invalido: false }
 const cases = [
@@ -11,6 +12,10 @@ const cases = [
   ['unauthorized period', { fora_periodo_autorizado: true }, 'INVALID_ACCOUNTING_PERIOD', 'Data ausente ou anterior ao in\u00edcio da compet\u00eancia autorizada (01/11/2026).'],
   ['invalid total', { valor_total_invalido: true }, 'INVALID_TOTAL_VALUE', 'Valor total ausente ou inv\u00e1lido.'],
 ] as const
+
+test('frontend and backend expose the same blocking reason codes', () => {
+  assert.deepEqual(frontendBlockCodes, backendBlockCodes)
+})
 
 for (const [name, flags, codigo, mensagem] of cases) {
   test(`backend returns a specific safe reason for ${name}`, () => {

@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom'
 import test from 'node:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { manualDecisionBlocks } from '../../../../src/imports/contabilidade-decision.js'
+import type { ManualDecisionBlock } from '../../types/accounting-decision'
 import type { Fleet } from '../../types/fleets'
 import { getImportDecisionErrorMessage } from '../../utils/import-decision-error'
 import { SharedDecisionSection, type SharedDecisionItem } from './SharedDecisionSection'
@@ -12,19 +12,18 @@ const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http:
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, HTMLSelectElement: dom.window.HTMLSelectElement, Event: dom.window.Event, IS_REACT_ACT_ENVIRONMENT: true })
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
 
-const clear = { combustivel_status: null, duplicado_no_arquivo: false, duplicado_em_importacao_anterior: false, fora_periodo_autorizado: false, valor_total_invalido: false }
 const cases = [
-  { flags: { combustivel_status: 'AMBIGUO' }, expected: 'Combust\u00edvel com classifica\u00e7\u00e3o amb\u00edgua.' },
-  { flags: { duplicado_no_arquivo: true }, expected: 'Poss\u00edvel duplicidade dentro do arquivo.' },
-  { flags: { duplicado_em_importacao_anterior: true }, expected: 'Lan\u00e7amento j\u00e1 encontrado em importa\u00e7\u00e3o anterior.' },
-  { flags: { fora_periodo_autorizado: true }, expected: 'Data ausente ou anterior ao in\u00edcio da compet\u00eancia autorizada (01/11/2026).' },
-  { flags: { valor_total_invalido: true }, expected: 'Valor total ausente ou inv\u00e1lido.' },
+  { codigo: 'AMBIGUOUS_FUEL_CLASSIFICATION', expected: 'Combust\u00edvel com classifica\u00e7\u00e3o amb\u00edgua.' },
+  { codigo: 'DUPLICATE_IN_FILE', expected: 'Poss\u00edvel duplicidade dentro do arquivo.' },
+  { codigo: 'DUPLICATE_IN_PREVIOUS_IMPORT', expected: 'Lan\u00e7amento j\u00e1 encontrado em importa\u00e7\u00e3o anterior.' },
+  { codigo: 'INVALID_ACCOUNTING_PERIOD', expected: 'Data ausente ou anterior ao in\u00edcio da compet\u00eancia autorizada (01/11/2026).' },
+  { codigo: 'INVALID_TOTAL_VALUE', expected: 'Valor total ausente ou inv\u00e1lido.' },
 ] as const
 
 test('shows each blocking reason, labels the item blocked, and disables every decision action', async () => {
   const items = cases.map((entry, index) => {
-    const flags = { ...clear, ...entry.flags }
-    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: manualDecisionBlocks(flags) } satisfies SharedDecisionItem
+    const reason: ManualDecisionBlock = { codigo: entry.codigo, mensagem: entry.expected }
+    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: [reason] } satisfies SharedDecisionItem
   })
   const container = document.createElement('div')
   document.body.append(container)

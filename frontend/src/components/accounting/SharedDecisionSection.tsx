@@ -1,5 +1,5 @@
 import type { Fleet } from '../../types/fleets'
-import type { ManualDecisionBlock } from '../../../../src/imports/contabilidade-decision.js'
+import type { ManualDecisionBlock } from '../../types/accounting-decision'
 
 export type SharedDecisionItem = {
   linha_original: number
