@@ -9,6 +9,7 @@ export const allowedVersions = new Map([
   ['040', '040_importacoes_contabeis.sql'],
   ['041', '041_salarios_base_oficina.sql'],
   ['042', '042_contabilidade_despesas_compartilhadas.sql'],
+  ['043', '043_contabilidade_periodos_e_sobreposicao.sql'],
 ]);
 const allowedDatabases = new Set(['oficina', 'oficina_teste_fase051', 'osgestor_prod']);
 
@@ -16,7 +17,7 @@ export function validateArguments(args: { mode: string; database?: string; versi
   if (!['preview', 'apply'].includes(args.mode)) throw new Error('Use exatamente um modo: --preview ou --apply.');
   if (!args.database) throw new Error('Informe explicitamente --database=NOME.');
   if (!allowedDatabases.has(args.database)) throw new Error(`Banco alvo não autorizado: ${args.database}.`);
-  if (!args.version || !allowedVersions.has(args.version)) throw new Error('Informe --version=039, --version=040, --version=041 ou --version=042.');
+  if (!args.version || !allowedVersions.has(args.version)) throw new Error('Informe --version=039, --version=040, --version=041, --version=042 ou --version=043.');
   if (args.mode === 'apply' && args.confirmedTarget !== args.database) throw new Error('O modo --apply exige --confirm-target com o mesmo nome do banco alvo.');
   if (args.configuredDatabase && args.configuredDatabase !== args.database) throw new Error('DB_NAME diverge do banco alvo informado.');
   return allowedVersions.get(args.version)!;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
+import userEvent from '@testing-library/user-event'
 import test from 'node:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -10,6 +11,7 @@ import { SharedDecisionSection, type SharedDecisionItem } from './SharedDecision
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/importar-contabilidade' })
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, HTMLSelectElement: dom.window.HTMLSelectElement, Event: dom.window.Event, IS_REACT_ACT_ENVIRONMENT: true })
+Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} })
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
 
 const cases = [
@@ -23,13 +25,13 @@ const cases = [
 test('shows each blocking reason, labels the item blocked, and disables every decision action', async () => {
   const items = cases.map((entry, index) => {
     const reason: ManualDecisionBlock = { codigo: entry.codigo, mensagem: entry.expected }
-    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: [reason] } satisfies SharedDecisionItem
+    return { linha_original: index + 1, produto_original: `Linha ${index + 1}`, data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: [reason], duplicado_no_arquivo: false, linhas_duplicadas: [], duplicidade_revisada: false, justificativa_duplicidade: null, revisada_por: null } satisfies SharedDecisionItem
   })
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
   let decisions = 0
-  await act(async () => root.render(<SharedDecisionSection items={items} fleets={[] as Fleet[]} destinations={{}} busy={false} onDestinationChange={() => undefined} onDecision={() => { decisions += 1 }} />))
+  await act(async () => root.render(<SharedDecisionSection items={items} fleets={[] as Fleet[]} destinations={{}} busy={false} isAdmin onReviewDuplicate={() => undefined} onDestinationChange={() => undefined} onDecision={() => { decisions += 1 }} />))
   try {
     for (const entry of cases) {
       const row = container.querySelectorAll('tbody tr')[cases.indexOf(entry)]
@@ -46,6 +48,35 @@ test('shows each blocking reason, labels the item blocked, and disables every de
     await act(async () => root.unmount())
     container.remove()
   }
+})
+
+test('possible duplicate requires an ADMIN review and keeps inclusion disabled until review', async () => {
+  const candidate: SharedDecisionItem = { linha_original: 3, produto_original: 'Palheta', data_conta: '2026-11-03', valor_total: 140, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: [{ codigo: 'DUPLICATE_IN_FILE', mensagem: 'Possível duplicidade no arquivo.' }], duplicado_no_arquivo: true, linhas_duplicadas: [2, 3], duplicidade_revisada: false, justificativa_duplicidade: null, revisada_por: null }
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container); let review: string | null = null; let decisionCount = 0
+  await act(async () => root.render(<SharedDecisionSection items={[candidate]} fleets={[] as Fleet[]} destinations={{}} busy={false} isAdmin onReviewDuplicate={(_item, justification) => { review = justification }} onDestinationChange={() => undefined} onDecision={() => { decisionCount += 1 }} />))
+  try {
+    assert.match(container.textContent || '', /POSSÍVEL DUPLICIDADE/)
+    const textarea = container.querySelector('textarea')!
+    const user = userEvent.setup({ document })
+    await act(async () => user.type(textarea, 'Conferido em documentos distintos.'))
+    assert.equal(container.querySelector('button')?.disabled, false)
+    await act(async () => user.click(container.querySelector('button')!))
+    assert.equal(review, 'Conferido em documentos distintos.')
+    assert.equal(decisionCount, 0)
+  } finally { await act(async () => root.unmount()); container.remove() }
+})
+
+test('non-admin sees the review restriction but no review control', async () => {
+  const item: SharedDecisionItem = { linha_original: 3, produto_original: 'Para-brisa', data_conta: '2026-11-03', valor_total: 1000, frota_destino: null, despesa_compartilhada_status: 'AGUARDANDO_DECISAO', bloqueios_decisao: [{ codigo: 'DUPLICATE_IN_FILE', mensagem: 'Possível coincidência no arquivo.' }], duplicado_no_arquivo: true, linhas_duplicadas: [2, 3], duplicidade_revisada: false, justificativa_duplicidade: null, revisada_por: null }
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  await act(async () => root.render(<SharedDecisionSection items={[item]} fleets={[] as Fleet[]} destinations={{}} busy={false} isAdmin={false} onReviewDuplicate={() => assert.fail('Non-admin cannot review')} onDestinationChange={() => undefined} onDecision={() => assert.fail('Blocked item cannot be decided')} />))
+  try {
+    assert.match(container.textContent || '', /somente para ADMIN/i)
+    assert.equal(container.querySelector('textarea'), null)
+    assert.equal(container.querySelector('button'), null)
+  } finally { await act(async () => root.unmount()); container.remove() }
 })
 
 test('displays the safe message returned by an HTTP 409 response', () => {

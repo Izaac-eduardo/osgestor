@@ -15,7 +15,7 @@ function workbook(): Buffer {
 }
 
 test('análise contábil produz prévia sem persistir e confirmação exige token válido', async () => {
-  const preview = await analisarContabilidade(workbook(), 'preview-only.xlsx');
+  const preview = await analisarContabilidade(workbook(), 'preview-only.xlsx', { inicio: '2026-11-01', fim: '2026-11-30' });
   assert.equal(preview.somente_leitura, true);
   assert.equal(preview.total, 1);
   assert.equal(preview.pendentes, 1);
@@ -24,7 +24,7 @@ test('análise contábil produz prévia sem persistir e confirmação exige toke
 });
 
 test('arquivo contábil inválido é rejeitado sem confirmação', async () => {
-  await assert.rejects(() => analisarContabilidade(Buffer.from('arquivo inválido'), 'invalido.xlsx'), /Arquivo incompatível/);
+  await assert.rejects(() => analisarContabilidade(Buffer.from('arquivo inválido'), 'invalido.xlsx', { inicio: '2026-11-01', fim: '2026-11-30' }), /Arquivo incompatível/);
 });
 
 after(async () => { await pool.end(); });

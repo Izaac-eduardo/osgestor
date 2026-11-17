@@ -22,14 +22,14 @@ test('importador contábil classifica, preserva origem e bloqueia reimportação
   const filename = `contabil-${suffix}.xlsx`;
   let importId = '';
   try {
-    const first = await importContabilidade(buffer, filename);
+    const first = await importContabilidade(buffer, filename, { inicio: '2026-11-01', fim: '2026-11-30' });
     importId = first.id;
     assert.equal(first.total, 2); assert.equal(first.classificados, 1); assert.equal(first.pendentes, 1); assert.equal(first.pendentes_classificacao, 1); assert.equal(first.pendentes_frota, 1);
     const items = await listContabilidadeItems(first.id) as Array<Record<string, unknown>>;
     assert.equal(items[0]?.classificacao, 'PECAS_EXTERNAS'); assert.equal(items[0]?.identificacao_frota, 'ALIAS'); assert.equal(items[0]?.linha_original, 2); assert.equal((items[0]?.dados_originais as Record<string, unknown>)?.Produto, 'PEÇA');
     const corrected = await updateContabilidadeItem(String(items[1]?.id), { frota_id: fleet.id, classificacao: 'PECAS_EXTERNAS' }) as Record<string, unknown>;
     assert.equal(corrected.frota_id, fleet.id); assert.equal(corrected.classificacao, 'PECAS_EXTERNAS'); assert.equal(corrected.identificacao_frota, 'MANUAL');
-    const second = await importContabilidade(buffer, filename); assert.equal(second.reimportada, true); assert.equal(second.total, 2);
+    const second = await importContabilidade(buffer, filename, { inicio: '2026-11-01', fim: '2026-11-30' }); assert.equal(second.reimportada, true); assert.equal(second.total, 2);
   } finally {
     if (importId) { await pool.query('DELETE FROM lancamentos_contabeis WHERE importacao_id=$1', [importId]); await pool.query('DELETE FROM importacoes_contabeis WHERE id=$1', [importId]); }
     await pool.query('DELETE FROM frota_identificadores_externos WHERE identificador=$1 AND origem=\'CONTABILIDADE\'', [alias]);
