@@ -15,7 +15,7 @@ test('consolida custo efetivo e referência de mão de obra sem dupla contagem',
 
 test('mantém despesas compartilhadas aprovadas, pendentes e desconsideradas separadas', () => {
   const report = buildMaintenanceReportData([], [], { itens: [
-    { despesa_compartilhada_status: 'APROVADA', valor_total: '12.34' },
+    { despesa_compartilhada_status: 'APROVADA', valor_total: '12.34', classificacao: 'PECAS_EXTERNAS', subcentro_original: 'FROTAS DIVERSAS', data_conta: '2026-11-03', frota_id: null },
     { despesa_compartilhada_status: 'AGUARDANDO_DECISAO', valor_total: '50.00' },
     { despesa_compartilhada_status: 'DESCONSIDERADA', valor_total: '8.00' },
   ] }, filters);
@@ -26,6 +26,16 @@ test('não soma despesa aprovada alocada como compartilhada', () => {
   const report = buildMaintenanceReportData([], [], { itens: [{ despesa_compartilhada_status: 'APROVADA', valor_total: '12.34', frota_id: 'fleet-ct03', frota: 'CT03' }] }, filters);
   assert.equal(report.sharedTotals.approvedValue, 0);
   assert.equal(report.sharedTotals.approved, 0);
+});
+
+test('apresenta valor aprovado de Frotas Diversas sem somar pedágios ao resumo de custos', () => {
+  const report = buildMaintenanceReportData([], [], { itens: [
+    { despesa_compartilhada_status: 'APROVADA', classificacao: 'SERVICOS_TERCEIRIZADOS', valor_total: '3750.00', subcentro_original: 'FROTAS DIVERSAS', data_conta: '2026-11-03', frota_id: null, produto_original: 'Serviço de torno' },
+    { despesa_compartilhada_status: 'APROVADA', classificacao: 'SERVICOS_TERCEIRIZADOS', valor_total: '80807.56', subcentro_original: 'FROTAS DIVERSAS', data_conta: '2026-11-03', frota_id: null, produto_original: 'PASSAGEM PEDÁGIO' },
+    { despesa_compartilhada_status: 'APROVADA', classificacao: 'PECAS_EXTERNAS', valor_total: '500.00', subcentro_original: 'FROTAS DIVERSAS', data_conta: '2026-12-01', frota_id: null, produto_original: 'Peça futura' },
+  ] }, filters);
+  assert.equal(report.sharedTotals.approved, 1);
+  assert.equal(report.sharedTotals.approvedValue, 3750);
 });
 
 test('preserva a mesma placa no resumo e no detalhamento', () => {

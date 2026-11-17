@@ -1,5 +1,6 @@
 import { pool } from '../config/database.js';
 import type { AuthenticatedRequestUser } from '../types/auth.js';
+import { isMaintenanceTollExpense, matchesDiverseMaintenanceFilters, sumCurrencyValues } from './maintenance-accounting-eligibility.js';
 
 export class ManutencaoFinanceiraError extends Error { constructor(public readonly statusCode: 400 | 403 | 404 | 409, message: string) { super(message); } }
 export type ManutencaoNature = 'MAO_DE_OBRA_INTERNA' | 'MATERIAIS_ALMOXARIFADO' | 'PECAS_EXTERNAS' | 'SERVICOS_TERCEIRIZADOS';
@@ -19,6 +20,12 @@ const validateFilters = (filters: ManutencaoFilters): void => {
 };
 const money = (value: unknown): string => String(value ?? '0');
 const addMoney = (...values: string[]): string => { const cents = values.reduce((total, value) => { const [whole, fraction = ''] = value.split('.'); return total + BigInt(whole || '0') * 100n + BigInt((fraction + '00').slice(0, 2)); }, 0n); const sign = cents < 0n ? '-' : ''; const absolute = cents < 0n ? -cents : cents; return `${sign}${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`; };
+
+const SQL_NORMALIZED_PRODUCT = "upper(btrim(regexp_replace(translate(coalesce(l.produto_original,''), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇáàâãäéèêëíìîïóòôõöúùûüç', 'AAAAAEEEEIIIIOOOOOUUUUCAAAAAEEEEIIIIOOOOOUUUUC'), '[[:space:]]+', ' ', 'g')))";
+const SQL_TOLL_EXCLUSION = `AND ${SQL_NORMALIZED_PRODUCT} NOT LIKE '%PASSAGEM PEDAGIO%' AND ${SQL_NORMALIZED_PRODUCT} NOT LIKE '%MENSALIDADE PEDAGIO%'`;
+const SQL_NORMALIZED_SUBCENTER = "upper(btrim(regexp_replace(coalesce(l.subcentro_original,''), '[[:space:]]+', ' ', 'g')))";
+const SQL_NORMAL_ACCOUNTING_ELIGIBILITY = "((COALESCE(l.despesa_compartilhada_status,'NAO_COMPARTILHADA')='NAO_COMPARTILHADA' AND l.identificacao_frota<>'PENDENTE') OR (l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NOT NULL AND l.identificacao_frota<>'PENDENTE'))";
+const SQL_DIVERSE_ACCOUNTING_ELIGIBILITY = `l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NULL AND ${SQL_NORMALIZED_SUBCENTER}='FROTAS DIVERSAS'`;
 
 export interface DesempenhoOficinaRow { valor_servicos_internos: string | number; salario_base_informado: string | number | null; meses_no_periodo: number; meses_com_salario: number; meses_sem_salario: number; competencias_sem_salario: string[]; diferenca_gerencial_estimada: string | number | null; periodo_salarial_completo?: boolean; }
 export interface DesempenhoOficinaDetalhe { ordem_servico_id: string; numero_os: number; status: string; data_abertura: string; frota: string; descricao: string; valor: string; }
@@ -48,9 +55,17 @@ export async function getManutencaoPorFrota(filters: ManutencaoFilters): Promise
     SELECT l.frota_id, COUNT(*) FILTER (WHERE l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS'))::int lancamentos, SUM(CASE WHEN l.classificacao='PECAS_EXTERNAS' THEN l.valor_total ELSE 0 END) pecas_externas,
            SUM(CASE WHEN l.classificacao='SERVICOS_TERCEIRIZADOS' THEN l.valor_total ELSE 0 END) servicos_terceirizados
       FROM lancamentos_contabeis l JOIN frotas f ON f.id=l.frota_id
-     WHERE l.frota_id IS NOT NULL AND l.identificacao_frota<>'PENDENTE' AND (COALESCE(l.despesa_compartilhada_status,'NAO_COMPARTILHADA')='NAO_COMPARTILHADA' OR (l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NOT NULL)) AND l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS')
+     WHERE l.frota_id IS NOT NULL AND ${SQL_NORMAL_ACCOUNTING_ELIGIBILITY} ${SQL_TOLL_EXCLUSION} AND l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS')
        AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR l.frota_id=$3::uuid) AND ($4::text IS NULL OR l.classificacao=$4) AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL OR f.codigo=$6)
      GROUP BY l.frota_id
+  ), diversas AS (
+    SELECT COUNT(*)::int lancamentos,
+           COALESCE(SUM(l.valor_total) FILTER (WHERE l.classificacao='PECAS_EXTERNAS'),0)::numeric pecas_externas,
+           COALESCE(SUM(l.valor_total) FILTER (WHERE l.classificacao='SERVICOS_TERCEIRIZADOS'),0)::numeric servicos_terceirizados
+      FROM lancamentos_contabeis l
+     WHERE ${SQL_DIVERSE_ACCOUNTING_ELIGIBILITY} ${SQL_TOLL_EXCLUSION}
+       AND l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS')
+       AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL) AND ($4::text IS NULL OR l.classificacao=$4) AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL)
   ), materiais AS (
     SELECT os.frota_id,COUNT(*)::int lancamentos,SUM(COALESCE(p.valor_total_original,p.valor_total)) materiais_almoxarifado
       FROM ordens_servico os JOIN produtos_os p ON p.ordem_servico_id=os.id
@@ -70,15 +85,23 @@ export async function getManutencaoPorFrota(filters: ManutencaoFilters): Promise
          (COALESCE(cont.pecas_externas,0)+COALESCE(cont.servicos_terceirizados,0)+COALESCE(materiais.materiais_almoxarifado,0)+COALESCE(internos.mao_obra_interna,0))::numeric total_gerencial
     FROM frotas f LEFT JOIN cont ON cont.frota_id=f.id LEFT JOIN materiais ON materiais.frota_id=f.id LEFT JOIN internos ON internos.frota_id=f.id
    WHERE (cont.frota_id IS NOT NULL OR materiais.frota_id IS NOT NULL OR internos.frota_id IS NOT NULL)${filters.frota_id ? ' AND f.id=$3' : ''}${filters.frota_codigo ? ' AND f.codigo=$6' : ''}
-  ORDER BY f.codigo`, values).then(result => result.rows.map(row => ({ ...row, pecas_externas: money(row.pecas_externas), servicos_terceirizados: money(row.servicos_terceirizados), materiais_almoxarifado: money(row.materiais_almoxarifado), total_efetivo: money(row.total_efetivo), mao_obra_interna: money(row.mao_obra_interna), total_gerencial: money(row.total_gerencial) })));
+   UNION ALL
+   SELECT NULL::uuid frota_id,'Frotas Diversas'::text prefixo,NULL::text placa,diversas.lancamentos,
+          diversas.pecas_externas,diversas.servicos_terceirizados,0::numeric materiais_almoxarifado,
+          (diversas.pecas_externas+diversas.servicos_terceirizados)::numeric total_efetivo,0::numeric mao_obra_interna,
+          (diversas.pecas_externas+diversas.servicos_terceirizados)::numeric total_gerencial
+     FROM diversas WHERE diversas.lancamentos>0
+   ORDER BY prefixo`, values).then(result => result.rows.map(row => ({ ...row, pecas_externas: money(row.pecas_externas), servicos_terceirizados: money(row.servicos_terceirizados), materiais_almoxarifado: money(row.materiais_almoxarifado), total_efetivo: money(row.total_efetivo), mao_obra_interna: money(row.mao_obra_interna), total_gerencial: money(row.total_gerencial) })));
   return result;
 }
 
 export async function getManutencaoTotais(filters: ManutencaoFilters): Promise<Record<string, string>> {
   validateFilters(filters); const { values } = filterValues(filters);
   const result = await pool.query(`SELECT
-    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.classificacao='PECAS_EXTERNAS' AND (COALESCE(l.despesa_compartilhada_status,'NAO_COMPARTILHADA')='NAO_COMPARTILHADA' OR (l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NOT NULL)) AND l.identificacao_frota<>'PENDENTE' AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR l.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='PECAS_EXTERNAS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL OR f.codigo=$6)) pecas_externas,
-    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.classificacao='SERVICOS_TERCEIRIZADOS' AND (COALESCE(l.despesa_compartilhada_status,'NAO_COMPARTILHADA')='NAO_COMPARTILHADA' OR (l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NOT NULL)) AND l.identificacao_frota<>'PENDENTE' AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR l.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='SERVICOS_TERCEIRIZADOS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL OR f.codigo=$6)) servicos_terceirizados,
+    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.classificacao='PECAS_EXTERNAS' AND ${SQL_NORMAL_ACCOUNTING_ELIGIBILITY} ${SQL_TOLL_EXCLUSION} AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR l.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='PECAS_EXTERNAS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL OR f.codigo=$6)) +
+    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l WHERE ${SQL_DIVERSE_ACCOUNTING_ELIGIBILITY} AND l.classificacao='PECAS_EXTERNAS' ${SQL_TOLL_EXCLUSION} AND l.data_conta BETWEEN $1::date AND $2::date AND $3::uuid IS NULL AND ($4::text IS NULL OR $4='PECAS_EXTERNAS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND $6::text IS NULL) pecas_externas,
+    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.classificacao='SERVICOS_TERCEIRIZADOS' AND ${SQL_NORMAL_ACCOUNTING_ELIGIBILITY} ${SQL_TOLL_EXCLUSION} AND l.data_conta BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR l.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='SERVICOS_TERCEIRIZADOS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND ($6::text IS NULL OR f.codigo=$6)) +
+    (SELECT COALESCE(SUM(l.valor_total),0)::numeric FROM lancamentos_contabeis l WHERE ${SQL_DIVERSE_ACCOUNTING_ELIGIBILITY} AND l.classificacao='SERVICOS_TERCEIRIZADOS' ${SQL_TOLL_EXCLUSION} AND l.data_conta BETWEEN $1::date AND $2::date AND $3::uuid IS NULL AND ($4::text IS NULL OR $4='SERVICOS_TERCEIRIZADOS') AND ($5::text IS NULL OR $5='CONTABILIDADE') AND $6::text IS NULL) servicos_terceirizados,
     (SELECT COALESCE(SUM(COALESCE(p.valor_total_original,p.valor_total)),0)::numeric FROM ordens_servico os JOIN produtos_os p ON p.ordem_servico_id=os.id WHERE os.frota_id IS NOT NULL AND os.natureza_os IN ('INTERNA','MATERIAL') AND os.status='FINALIZADA' AND os.data_fechamento BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR os.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='MATERIAIS_ALMOXARIFADO') AND ($5::text IS NULL OR $5='OS') AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM frotas f WHERE f.id=os.frota_id AND f.codigo=$6)) AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)) materiais_almoxarifado,
     (SELECT COALESCE(SUM(s.valor),0)::numeric FROM ordens_servico os JOIN servicos_os s ON s.ordem_servico_id=os.id WHERE os.frota_id IS NOT NULL AND os.status='FINALIZADA' AND s.classificacao_servico='INTERNO' AND os.data_fechamento BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR os.frota_id=$3::uuid) AND ($4::text IS NULL OR $4='MAO_DE_OBRA_INTERNA') AND ($5::text IS NULL OR $5='OS') AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM frotas f WHERE f.id=os.frota_id AND f.codigo=$6)) AND ($4::text IS NULL OR $4='MAO_DE_OBRA_INTERNA')) mao_obra_interna`, values).then(result => result.rows[0]);
   const row = result ?? {};
@@ -89,22 +112,24 @@ export async function getManutencaoTotais(filters: ManutencaoFilters): Promise<R
 
 export async function getManutencaoDetalhes(filters: ManutencaoFilters): Promise<unknown[]> {
   validateFilters(filters); const values = [filters.data_inicio, filters.data_fim, filters.frota_id ?? null, filters.natureza ?? filters.categoria ?? null, filters.origem ?? null, filters.frota_codigo?.trim() || null]; const fleet = ' AND ($3::uuid IS NULL OR frota_id=$3::uuid) AND ($4::text IS NULL OR categoria=$4) AND ($5::text IS NULL OR origem=$5) AND ($6::text IS NULL OR f.codigo=$6)';
-  const result = await pool.query(`SELECT itens.data,itens.referencia,itens.categoria,itens.descricao,itens.quantidade,itens.unidade,itens.valor,itens.origem,itens.prestador,itens.funcionario,itens.frota_id,f.codigo frota,f.placa FROM (
-    SELECT to_char(l.data_conta,'YYYY-MM-DD') data,COALESCE(l.nota_original,l.controle_original) referencia,l.classificacao categoria,l.produto_original descricao,l.quantidade,NULL::text unidade,l.valor_total valor,'CONTABILIDADE' origem,NULL prestador,NULL funcionario,l.frota_id FROM lancamentos_contabeis l WHERE l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS') AND (COALESCE(l.despesa_compartilhada_status,'NAO_COMPARTILHADA')='NAO_COMPARTILHADA' OR (l.despesa_compartilhada_status='APROVADA' AND l.frota_id IS NOT NULL)) AND l.identificacao_frota<>'PENDENTE' AND l.data_conta BETWEEN $1::date AND $2::date
+  const result = await pool.query(`SELECT itens.data,itens.referencia,itens.categoria,itens.descricao,itens.quantidade,itens.unidade,itens.valor,itens.origem,itens.prestador,itens.funcionario,itens.frota_id,COALESCE(itens.frota_exibicao,f.codigo) frota,f.placa FROM (
+    SELECT to_char(l.data_conta,'YYYY-MM-DD') data,COALESCE(l.nota_original,l.controle_original) referencia,l.classificacao categoria,l.produto_original descricao,l.quantidade,NULL::text unidade,l.valor_total valor,'CONTABILIDADE' origem,NULL prestador,NULL funcionario,l.frota_id,CASE WHEN l.frota_id IS NULL THEN 'Frotas Diversas'::text ELSE NULL::text END frota_exibicao FROM lancamentos_contabeis l WHERE ((l.frota_id IS NOT NULL AND ${SQL_NORMAL_ACCOUNTING_ELIGIBILITY}) OR (${SQL_DIVERSE_ACCOUNTING_ELIGIBILITY})) ${SQL_TOLL_EXCLUSION} AND l.classificacao IN ('PECAS_EXTERNAS','SERVICOS_TERCEIRIZADOS') AND l.data_conta BETWEEN $1::date AND $2::date
     UNION ALL
-    SELECT to_char(os.data_fechamento,'YYYY-MM-DD'),os.numero_os::text,'MATERIAIS_ALMOXARIFADO',p.descricao,p.quantidade,p.unidade,COALESCE(p.valor_total_original,p.valor_total),'OS',NULL,NULL,os.frota_id FROM ordens_servico os JOIN produtos_os p ON p.ordem_servico_id=os.id WHERE os.status='FINALIZADA' AND os.natureza_os IN ('INTERNA','MATERIAL') AND os.frota_id IS NOT NULL AND os.data_fechamento BETWEEN $1::date AND $2::date AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)
+    SELECT to_char(os.data_fechamento,'YYYY-MM-DD'),os.numero_os::text,'MATERIAIS_ALMOXARIFADO',p.descricao,p.quantidade,p.unidade,COALESCE(p.valor_total_original,p.valor_total),'OS',NULL,NULL,os.frota_id,NULL::text FROM ordens_servico os JOIN produtos_os p ON p.ordem_servico_id=os.id WHERE os.status='FINALIZADA' AND os.natureza_os IN ('INTERNA','MATERIAL') AND os.frota_id IS NOT NULL AND os.data_fechamento BETWEEN $1::date AND $2::date AND NOT EXISTS (SELECT 1 FROM ordens_servico_item_reclassificacoes r WHERE r.produto_os_id=p.id)
     UNION ALL
-    SELECT to_char(os.data_fechamento,'YYYY-MM-DD'),os.numero_os::text,'MAO_DE_OBRA_INTERNA',s.descricao,NULL,NULL,s.valor,'OS',NULL,(SELECT string_agg(DISTINCT f.nome, ', ') FROM servicos_os_execucoes e JOIN funcionarios f ON f.id=e.funcionario_id WHERE e.servico_os_id=s.id),os.frota_id FROM ordens_servico os JOIN servicos_os s ON s.ordem_servico_id=os.id WHERE os.status='FINALIZADA' AND os.frota_id IS NOT NULL AND s.classificacao_servico='INTERNO' AND os.data_fechamento BETWEEN $1::date AND $2::date
+    SELECT to_char(os.data_fechamento,'YYYY-MM-DD'),os.numero_os::text,'MAO_DE_OBRA_INTERNA',s.descricao,NULL,NULL,s.valor,'OS',NULL,(SELECT string_agg(DISTINCT f.nome, ', ') FROM servicos_os_execucoes e JOIN funcionarios f ON f.id=e.funcionario_id WHERE e.servico_os_id=s.id),os.frota_id,NULL::text FROM ordens_servico os JOIN servicos_os s ON s.ordem_servico_id=os.id WHERE os.status='FINALIZADA' AND os.frota_id IS NOT NULL AND s.classificacao_servico='INTERNO' AND os.data_fechamento BETWEEN $1::date AND $2::date
   ) itens LEFT JOIN frotas f ON f.id=itens.frota_id WHERE 1=1${fleet} ORDER BY COALESCE(f.codigo,'SEM FROTA'),data,referencia`, values);
   return result.rows;
 }
 
 export async function getDespesasCompartilhadas(filters: ManutencaoFilters): Promise<unknown> {
   validateFilters(filters);
-  const result = await pool.query(`SELECT l.id,l.data_conta,l.nota_original,l.controle_original,l.produto_original,l.valor_total,l.classificacao,l.subcentro_original,l.despesa_compartilhada_status,l.decidido_por,l.decidido_em,l.motivo_decisao,l.frota_id,f.codigo frota,f.placa FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.data_conta BETWEEN $1::date AND $2::date AND l.despesa_compartilhada_status IN ('AGUARDANDO_DECISAO','DESCONSIDERADA','APROVADA') AND ($3::text IS NULL OR l.classificacao=$3) ORDER BY l.data_conta,l.linha_original`, [filters.data_inicio, filters.data_fim, filters.natureza ?? filters.categoria ?? null]);
-  const rows = result.rows;
+  const result = await pool.query(`SELECT l.id,l.data_conta,l.nota_original,l.controle_original,l.produto_original,l.valor_total,l.classificacao,l.subcentro_original,l.despesa_compartilhada_status,l.decidido_por,l.decidido_em,l.motivo_decisao,l.frota_id,f.codigo frota,f.placa FROM lancamentos_contabeis l LEFT JOIN frotas f ON f.id=l.frota_id WHERE l.data_conta BETWEEN $1::date AND $2::date AND l.despesa_compartilhada_status IN ('AGUARDANDO_DECISAO','DESCONSIDERADA','APROVADA') AND ($3::text IS NULL OR l.classificacao=$3) AND ($4::uuid IS NULL OR l.frota_id=$4::uuid) AND ($5::text IS NULL OR f.codigo=$5) AND ($6::text IS NULL OR $6='CONTABILIDADE') ORDER BY l.data_conta,l.linha_original`, [filters.data_inicio, filters.data_fim, filters.natureza ?? filters.categoria ?? null, filters.frota_id ?? null, filters.frota_codigo?.trim() || null, filters.origem ?? null]);
+  const rows = result.rows.map(row => ({ ...row, fora_custo_manutencao: isMaintenanceTollExpense(row.produto_original) }));
   const approved = rows.filter(row => row.despesa_compartilhada_status === 'APROVADA' && !row.frota_id);
-  return { total: rows.length, aguardando_decisao: rows.filter(row => row.despesa_compartilhada_status === 'AGUARDANDO_DECISAO').length, aprovadas: approved.length, desconsideradas: rows.filter(row => row.despesa_compartilhada_status === 'DESCONSIDERADA').length, valor_aprovado: approved.reduce((sum, row) => sum + Number(row.valor_total ?? 0), 0).toFixed(2), itens: rows };
+  const approvedMaintenance = approved.filter(row => matchesDiverseMaintenanceFilters(row, filters));
+  const approvedMaintenanceValue = sumCurrencyValues(approvedMaintenance.map(row => row.valor_total));
+  return { total: rows.length, aguardando_decisao: rows.filter(row => row.despesa_compartilhada_status === 'AGUARDANDO_DECISAO').length, aprovadas: approvedMaintenance.length, desconsideradas: rows.filter(row => row.despesa_compartilhada_status === 'DESCONSIDERADA').length, valor_aprovado: approvedMaintenanceValue, itens: rows };
 }
 
 export async function getDesempenhoOficina(filters: ManutencaoFilters): Promise<unknown> {
