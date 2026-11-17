@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isMaintenanceTollExpense, matchesDiverseMaintenanceFilters, type SharedAccountingMaintenanceRow } from '../src/services/maintenance-accounting-eligibility.js';
+import { buildAccountingMaintenanceExclusionSql, getAccountingMaintenanceExclusionReason, isMaintenanceTollExpense, matchesDiverseMaintenanceFilters, type SharedAccountingMaintenanceRow } from '../src/services/maintenance-accounting-eligibility.js';
 
 const filters = { data_inicio: '2026-11-01', data_fim: '2026-11-05' };
 const row = (produto_original: string, valor_total: number, classificacao: string, extra: Partial<SharedAccountingMaintenanceRow> = {}) => ({
@@ -54,5 +54,45 @@ test('exclui itens não aprovados, fora das classificações de manutenção ou 
 test('reconhece pedágios com variações de caixa, espaços e acentuação', () => {
   assert.equal(isMaintenanceTollExpense('  passagem   pedágio eletrônico '), true);
   assert.equal(isMaintenanceTollExpense('Mensalidade Pedagio'), true);
+  assert.equal(isMaintenanceTollExpense('Mensalidade de pedágio'), true);
   assert.equal(isMaintenanceTollExpense('Serviço de borracharia'), false);
+});
+
+test('exclui descrições contábeis específicas de frete, rastreamento e ARLA 32', () => {
+  assert.equal(getAccountingMaintenanceExclusionReason('FRETE DE PEÇAS'), 'FRETE');
+  assert.equal(getAccountingMaintenanceExclusionReason('Serviço de Frete — oficina'), 'FRETE');
+  assert.equal(getAccountingMaintenanceExclusionReason('CUSTO DE FRETE'), 'FRETE');
+  assert.equal(getAccountingMaintenanceExclusionReason('Rastreamento de frota - mensalidade'), 'RASTREAMENTO');
+  assert.equal(getAccountingMaintenanceExclusionReason('SERVIÇOS DE MONITORAMENTO VEICULAR'), 'RASTREAMENTO');
+  assert.equal(getAccountingMaintenanceExclusionReason('Mensalidade serviço de rastreamento'), 'RASTREAMENTO');
+  assert.equal(getAccountingMaintenanceExclusionReason('ARLA-32 20 L'), 'ARLA_32');
+  assert.equal(getAccountingMaintenanceExclusionReason('Aditivo Arla 32 granel'), 'ARLA_32');
+  assert.equal(getAccountingMaintenanceExclusionReason('BIOAR ARLA 32 GRANEL'), 'ARLA_32');
+  assert.equal(getAccountingMaintenanceExclusionReason('Marca Exemplo — ARLA-32 a granel'), 'ARLA_32');
+});
+
+test('preserva descrições ambíguas que podem identificar peças ou serviços legítimos', () => {
+  assert.equal(getAccountingMaintenanceExclusionReason('FILTRO ARLA 32'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('BOMBA ARLA 32'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('SENSOR ARLA 32'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('REPARO SISTEMA ARLA 32'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('REPARAÇÃO DO SISTEMA DE ARLA-32'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('Peça de reposição com frete incluso'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('Monitoramento de temperatura do motor'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('RASTREADOR VEICULAR para reposição'), null);
+  assert.equal(getAccountingMaintenanceExclusionReason('Serviço de manutenção de veículo'), null);
+});
+
+test('gera a mesma regra SQL centralizada e rejeita alias não seguro', () => {
+  const predicate = buildAccountingMaintenanceExclusionSql('l');
+  assert.match(predicate, /l\.produto_original/);
+  assert.match(predicate, /PASSAGEM PEDAGIO/);
+  assert.match(predicate, /FRETE/);
+  assert.match(predicate, /RASTREAMENTO DE FROTA/);
+  assert.match(predicate, /ARLA 32/);
+  assert.match(predicate, /LIKE '% ARLA 32 %'/);
+  assert.match(predicate, /BOMBA/);
+  assert.match(predicate, /SENSOR/);
+  assert.match(predicate, /REPARO/);
+  assert.throws(() => buildAccountingMaintenanceExclusionSql('l; DROP TABLE lancamentos_contabeis'));
 });
