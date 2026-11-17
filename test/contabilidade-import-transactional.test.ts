@@ -14,7 +14,7 @@ const requestFor = (buffer: Buffer, name: string) => ({ file: { buffer, original
 function responseCapture() { let body: any; let statusCode = 200; return { response: { status(code: number) { statusCode = code; return this; }, json(value: unknown) { body = value; return this; } } as never, get: () => ({ statusCode, body }) }; }
 function workbook(subcentro = 'TMP01', values = ['10,00', '20,00'], dates = ['05/11/2026 00:00', '06/11/2026 00:00']): Buffer { const sheet = XLSX.utils.aoa_to_sheet([['Controle', 'Data Conta', 'Total', 'SubCentro', 'Tipo de Movimentacao', 'Plano de Contas'], ['T1', dates[0], values[0], subcentro, 'Saida', 'CUSTO PECAS / OFICINA'], ['T2', dates[1], values[1], subcentro, 'Saida', 'CUSTO SERVICOS']]); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Relatorio'); return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer; }
 function reorderedWorkbook(): Buffer { const sheet = XLSX.utils.aoa_to_sheet([['Controle', 'Data Conta', 'Total', 'SubCentro', 'Tipo de Movimentacao', 'Plano de Contas'], ['T2', '06/11/2026 00:00', '20,00', 'TMP01', 'Saida', 'CUSTO SERVICOS'], ['T1', '05/11/2026 00:00', '10,00', 'TMP01', 'Saida', 'CUSTO PECAS / OFICINA']]); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Relatorio'); return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer; }
-function duplicateWorkbook(): Buffer { const sheet = XLSX.utils.aoa_to_sheet([['Data Conta', 'Nro Nota', 'Cod Produto', 'Produto', 'Quantidade', 'Valor Unitario', 'Total', 'SubCentro', 'Plano de Contas', 'Tipo Movimentacao'], ['05/05/2027', 'D1', 'P1', 'PALHETA LIMPADOR PARABRISA PVC2662 - AXOR', '1', '140,00', '140,00', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida'], ['05/05/2027', 'D1', 'P1', 'PALHETA LIMPADOR PARABRISA PVC2662 - AXOR', '1', '140,00', '140,00', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida']]); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Relatorio'); return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer; }
+function duplicateWorkbook(date = '05/05/2027'): Buffer { const sheet = XLSX.utils.aoa_to_sheet([['Data Conta', 'Nro Nota', 'Cod Produto', 'Produto', 'Quantidade', 'Valor Unitario', 'Total', 'SubCentro', 'Plano de Contas', 'Tipo Movimentacao'], [date, 'D1', 'P1', 'PALHETA LIMPADOR PARABRISA PVC2662 - AXOR', '1', '140,00', '140,00', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida'], [date, 'D1', 'P1', 'PALHETA LIMPADOR PARABRISA PVC2662 - AXOR', '1', '140,00', '140,00', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida']]); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Relatorio'); return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer; }
 function duplicateWithInvalidValueWorkbook(): Buffer { const sheet = XLSX.utils.aoa_to_sheet([['Data Conta', 'Nro Nota', 'Cod Produto', 'Produto', 'Quantidade', 'Valor Unitario', 'Total', 'SubCentro', 'Plano de Contas', 'Tipo Movimentacao'], ['05/06/2027', 'D2', 'P2', 'PALHETA REPETIDA', '1', '140,00', 'valor ruim', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida'], ['05/06/2027', 'D2', 'P2', 'PALHETA REPETIDA', '1', '140,00', 'valor ruim', 'FROTAS DIVERSAS', 'CUSTO PECAS / OFICINA', 'Saida']]); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, 'Relatorio'); return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer; }
 
 let fleetId = '';
@@ -152,30 +152,52 @@ test('duplicidade leg?tima exige revis?o ADMIN auditada e decis?o manual separad
   assert.ok(result.rows[0], 'O banco descart?vel precisa de um ADMIN de teste.');
   const admin = { ...result.rows[0], sessionId: 'test-session', tokenHash: 'test-token' } as AuthenticatedRequestUser;
   const operator = { ...admin, role: 'OPERADOR' } as AuthenticatedRequestUser;
-  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'Conferido como ocorr?ncia independente.', operator), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 403);
-  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'curto', admin), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 400);
-  const reviewed = await revisarDuplicidadeContabil(preview.token, 3, 'Conferido em documentos distintos; ocorr?ncias leg?timas.', admin);
+  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'APROVAR', null, operator), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 403);
+  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'AGUARDAR', null, admin), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 400);
+  const reviewed = await revisarDuplicidadeContabil(preview.token, 3, 'APROVAR', null, admin);
   assert.equal(reviewed.itens.find(item => item.linha_original === 3)?.duplicidade_revisada, true);
-  assert.equal(reviewed.confirmacao_bloqueada, false);
-  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'Conferido novamente sem alterar a decisao.', admin), (error: unknown) => error instanceof ContabilidadeImportError && error.code === 'DUPLICATE_REVIEW_ALREADY_DECIDED');
+  assert.equal(reviewed.itens.find(item => item.linha_original === 3)?.despesa_compartilhada_status, 'APROVADA');
+  assert.equal(reviewed.total_elegivel, '140.00');
+  assert.equal(reviewed.confirmacao_bloqueada, true, 'the other matching occurrence still needs its own ADMIN decision');
+  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'APROVAR', null, admin), (error: unknown) => error instanceof ContabilidadeImportError && error.code === 'DUPLICATE_REVIEW_ALREADY_DECIDED');
+  const reviewedPair = await revisarDuplicidadeContabil(preview.token, 2, 'APROVAR', null, admin);
+  assert.equal(reviewedPair.confirmacao_bloqueada, false);
+  assert.equal(reviewedPair.total_elegivel, '280.00');
+  const auditPair = await pool.query<{ dados_posteriores: Record<string, unknown> }>("SELECT dados_posteriores FROM auditoria WHERE entidade='revisao_duplicidade_previa' AND entidade_id=ANY($1::text[])", [[preview.token + ':2', preview.token + ':3']]);
+  assert.equal(auditPair.rows.length, 2);
+  assert.deepEqual(auditPair.rows.map(row => row.dados_posteriores.linha_original).sort(), [2, 3]);
+  assert.ok(auditPair.rows.every(row => row.dados_posteriores.arquivo_nome === fileName && row.dados_posteriores.hash_arquivo === preview.hash_arquivo && row.dados_posteriores.decisao === 'APROVAR'));
   const audit = await pool.query<{ username: string; role: string; created_at: Date; dados_posteriores: Record<string, unknown> }>("SELECT username,role,created_at,dados_posteriores FROM auditoria WHERE entidade='revisao_duplicidade_previa' AND entidade_id=$1", [preview.token + ':3']);
   assert.equal(audit.rows.length, 1);
   assert.equal(audit.rows[0]?.username, admin.username);
   assert.equal(audit.rows[0]?.role, 'ADMIN');
   assert.ok(audit.rows[0]?.created_at instanceof Date);
-  assert.equal(audit.rows[0]?.dados_posteriores.decisao, 'AUTORIZAR_OCORRENCIA_DISTINTA');
-  assert.equal(audit.rows[0]?.dados_posteriores.justificativa, 'Conferido em documentos distintos; ocorr?ncias leg?timas.');
+  assert.equal(audit.rows[0]?.dados_posteriores.decisao, 'APROVAR');
   assert.equal(audit.rows[0]?.dados_posteriores.arquivo_nome, fileName);
   assert.equal(audit.rows[0]?.dados_posteriores.hash_arquivo, preview.hash_arquivo);
   assert.equal(audit.rows[0]?.dados_posteriores.linha_original, 3);
   assert.deepEqual(audit.rows[0]?.dados_posteriores.linhas_envolvidas, [2, 3]);
-  await decidirDespesaCompartilhada(preview.token, 2, 'APROVAR', null, admin);
-  const approved = await decidirDespesaCompartilhada(preview.token, 3, 'APROVAR', null, admin);
-  assert.equal(approved.total_elegivel, '280.00');
   await assert.rejects(() => decidirDespesaCompartilhada(preview.token, 3, 'DESCONSIDERAR', null, admin), (error: unknown) => error instanceof ContabilidadeImportError && error.code === 'MANUAL_DECISION_ALREADY_SET');
   const imported = await confirmarContabilidade(preview.token, admin);
   const persisted = await pool.query<{ count: number; total: string }>('SELECT count(*)::int count,coalesce(sum(valor_total),0)::numeric(18,2)::text total FROM lancamentos_contabeis WHERE importacao_id=$1', [imported.id]);
   assert.deepEqual(persisted.rows[0], { count: 2, total: '280.00' });
+});
+
+test('revisao ADMIN permite desconsiderar somente a ocorrencia selecionada e audita a decisao', async () => {
+  const fileName = 'transacional-duplicate-disregard.xlsx';
+  const preview = await analisarContabilidade(duplicateWorkbook('05/07/2027'), fileName, { inicio: '2027-07-01', fim: '2027-07-31' });
+  const adminResult = await pool.query<{ id: string; username: string; email: string; role: 'ADMIN'; status: 'ATIVO'; must_change_password: boolean }>("SELECT id,username,email,role,status,must_change_password FROM usuarios WHERE role='ADMIN' AND status='ATIVO' LIMIT 1");
+  assert.ok(adminResult.rows[0]);
+  const admin = { ...adminResult.rows[0], sessionId: 'test-session', tokenHash: 'test-token' } as AuthenticatedRequestUser;
+  const reviewed = await revisarDuplicidadeContabil(preview.token, 3, 'DESCONSIDERAR', null, admin);
+  assert.equal(reviewed.itens.find(item => item.linha_original === 3)?.despesa_compartilhada_status, 'DESCONSIDERADA');
+  assert.equal(reviewed.itens.find(item => item.linha_original === 2)?.despesa_compartilhada_status, 'AGUARDANDO_DECISAO');
+  assert.equal(reviewed.total_elegivel, '0.00');
+  const audit = await pool.query<{ dados_posteriores: Record<string, unknown> }>("SELECT dados_posteriores FROM auditoria WHERE entidade='revisao_duplicidade_previa' AND entidade_id=$1", [preview.token + ':3']);
+  assert.equal(audit.rows.length, 1);
+  assert.equal(audit.rows[0]?.dados_posteriores.decisao, 'DESCONSIDERAR');
+  assert.equal(audit.rows[0]?.dados_posteriores.arquivo_nome, fileName);
+  assert.equal(audit.rows[0]?.dados_posteriores.linha_original, 3);
 });
 
 test('revisao ADMIN nao remove bloqueio de valor invalido', async () => {
@@ -183,7 +205,7 @@ test('revisao ADMIN nao remove bloqueio de valor invalido', async () => {
   const adminResult = await pool.query<{ id: string; username: string; email: string; role: 'ADMIN'; status: 'ATIVO'; must_change_password: boolean }>("SELECT id,username,email,role,status,must_change_password FROM usuarios WHERE role='ADMIN' AND status='ATIVO' LIMIT 1");
   assert.ok(adminResult.rows[0]);
   const admin = { ...adminResult.rows[0], sessionId: 'test-session', tokenHash: 'test-token' } as AuthenticatedRequestUser;
-  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'Conferido como ocorrencia distinta.', admin), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 409 && error.code === 'INVALID_TOTAL_VALUE');
+  await assert.rejects(() => revisarDuplicidadeContabil(preview.token, 3, 'APROVAR', null, admin), (error: unknown) => error instanceof ContabilidadeImportError && error.statusCode === 409 && error.code === 'INVALID_TOTAL_VALUE');
   assert.equal(preview.itens.find(item => item.linha_original === 3)?.duplicidade_revisada, false);
   assert.equal((await pool.query("SELECT count(*)::int count FROM auditoria WHERE entidade='revisao_duplicidade_previa' AND entidade_id=$1", [preview.token + ':3'])).rows[0]?.count, 0);
 });

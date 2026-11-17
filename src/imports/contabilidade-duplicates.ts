@@ -12,20 +12,24 @@ export type DuplicateIdentity = {
 }
 
 export function duplicateOccurrenceLines(rows: DuplicateIdentity[]): Map<number, number[]> {
-  const groups = new Map<string, number[]>()
+  const groups = new Map<string, { lines: number[]; manualDecision: boolean }>()
   for (const row of rows) {
     const key = JSON.stringify([row.dataConta, row.notaOriginal, row.codigoProdutoOriginal, row.produtoOriginal, row.quantidade, row.valorUnitario, row.valorTotal, row.subcentroOriginal, row.planoContasOriginal])
-    groups.set(key, [...(groups.get(key) ?? []), row.linhaOriginal])
+    const group = groups.get(key) ?? { lines: [], manualDecision: row.subcentroOriginal?.trim().toUpperCase() === 'FROTAS DIVERSAS' }
+    group.lines.push(row.linhaOriginal)
+    groups.set(key, group)
   }
   const repeated = new Map<number, number[]>()
-  for (const lines of groups.values()) if (lines.length > 1) for (const line of lines.slice(1)) repeated.set(line, lines)
+  for (const group of groups.values()) if (group.lines.length > 1) {
+    const candidates = group.manualDecision ? group.lines : group.lines.slice(1)
+    for (const line of candidates) repeated.set(line, group.lines)
+  }
   return repeated
 }
 
-export function duplicateReviewInputError(role: string | null | undefined, line: number, relatedLines: number[], justification: unknown): string | null {
+export function duplicateReviewInputError(role: string | null | undefined, line: number, relatedLines: number[], decision: unknown): string | null {
   if (role !== 'ADMIN') return 'DUPLICATE_REVIEW_FORBIDDEN'
   if (!Number.isInteger(line) || relatedLines.length < 2 || !relatedLines.includes(line)) return 'DUPLICATE_REVIEW_NOT_CANDIDATE'
-  const reason = typeof justification === 'string' ? justification.trim() : ''
-  if (reason.length < 20 || reason.length > 1000) return 'INVALID_DUPLICATE_REVIEW_JUSTIFICATION'
+  if (decision !== 'APROVAR' && decision !== 'DESCONSIDERAR') return 'INVALID_DUPLICATE_REVIEW_DECISION'
   return null
 }

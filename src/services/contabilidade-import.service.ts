@@ -12,7 +12,7 @@ export type { ContabilPreviewValueSummary } from '../imports/contabilidade-previ
 
 export class ContabilidadeImportError extends Error { constructor(public readonly statusCode: 400 | 403 | 404 | 409, message: string, public readonly code = 'CONTABILIDADE_ERROR', public readonly blocks?: ManualDecisionBlock[]) { super(message); } }
 export interface ContabilImportResumo { id: string; arquivo_nome: string; hash_arquivo: string; total: number; classificados: number; pendentes: number; pendentes_classificacao: number; pendentes_frota: number; reimportada: boolean; }
-export interface ContabilPreviewItem { linha_original: number; produto_original: string | null; subcentro_original: string | null; classificacao: ContabilClassification; frota: string | null; frota_destino: string | null; identificacao_frota: ContabilFleetMatch; valor_total: number | null; data_conta: string | null; motivo_pendencia: string | null; duplicado_no_arquivo: boolean; linhas_duplicadas: number[]; duplicidade_revisada: boolean; justificativa_duplicidade: string | null; revisada_por: string | null; duplicado_em_importacao_anterior: boolean; fora_periodo_autorizado: boolean; valor_total_invalido: boolean; bloqueios_decisao: ManualDecisionBlock[]; despesa_compartilhada_status: ContabilDespesaCompartilhadaStatus; combustivel_status: 'FORA_ESCOPO_COMBUSTIVEL' | 'AMBIGUO' | null; }
+export interface ContabilPreviewItem { linha_original: number; produto_original: string | null; subcentro_original: string | null; classificacao: ContabilClassification; frota: string | null; frota_destino: string | null; identificacao_frota: ContabilFleetMatch; valor_total: number | null; data_conta: string | null; motivo_pendencia: string | null; duplicado_no_arquivo: boolean; linhas_duplicadas: number[]; duplicidade_revisada: boolean; revisada_por: string | null; duplicado_em_importacao_anterior: boolean; fora_periodo_autorizado: boolean; valor_total_invalido: boolean; bloqueios_decisao: ManualDecisionBlock[]; despesa_compartilhada_status: ContabilDespesaCompartilhadaStatus; combustivel_status: 'FORA_ESCOPO_COMBUSTIVEL' | 'AMBIGUO' | null; }
 export interface ContabilPreview { token: string; arquivo_nome: string; hash_arquivo: string; arquivo_ja_importado: boolean; total: number; periodo: AccountingPeriod; intervalo_observado: { inicio: string | null; fim: string | null }; periodo_operacional_inicio: string; frotas_identificadas: string[]; categorias: Record<ContabilClassification, number>; duplicados: number; valor_duplicado: string; fora_periodo: number; valor_fora_periodo: string; historico_sem_periodo: number; periodo_sobreposto: boolean; inconsistencias: number; pendentes: number; valor_pendente_classificacao: string; valor_compartilhado_aguardando: string; valor_excluido_escopo: string; compartilhadas_aguardando: number; compartilhadas_aprovadas: number; compartilhadas_desconsideradas: number; valor_compartilhado_aprovado: string; confirmacao_bloqueada: boolean; total_elegivel: string; itens: ContabilPreviewItem[]; somente_leitura: true; }
 
 type FleetRef = { id: string; codigo: string };
@@ -48,7 +48,7 @@ function itemParams(importacaoId: string, row: ContabilLancamento, fleet: { id: 
   return [importacaoId, row.fingerprint, row.planilhaOriginal, row.linhaOriginal, JSON.stringify(row.dadosOriginais), row.controleOriginal, row.dataLancamento, row.dataConta, row.notaOriginal, row.codigoProdutoOriginal, row.produtoOriginal, row.tipoMovimentacaoOriginal, row.quantidade, row.valorUnitario, row.valorTotal, row.subcentroCodigoOriginal, row.subcentroOriginal, row.planoContasCodigoOriginal, row.planoContasOriginal, row.categoriaContabil, row.classificacao, fleet.id, fleet.match, pendingReason(row, fleet.match, false, false, status), status, decided ? actorId : null, decided ? new Date() : null];
 }
 
-export type DuplicateReviewDecision = { linhaOriginal: number; linhasRelacionadas: number[]; justificativa: string };
+export type DuplicateReviewDecision = { linhaOriginal: number; linhasRelacionadas: number[] };
 type ContabilDecisionValue = { status: ContabilDespesaCompartilhadaStatus; frotaId?: string | null; duplicateReview?: DuplicateReviewDecision };
 
 async function assertPeriodCanBeImported(client: { query: typeof pool.query }, period: AccountingPeriod): Promise<void> {
@@ -71,7 +71,7 @@ export async function importContabilidade(buffer: Buffer, arquivoNome: string, p
     const review = decisions?.get(line)?.duplicateReview;
     const actualLines = JSON.stringify([...relatedLines].sort((a, b) => a - b));
     const reviewedLines = review ? JSON.stringify([...review.linhasRelacionadas].sort((a, b) => a - b)) : '';
-    if (!review || review.linhaOriginal !== line || reviewedLines !== actualLines || review.justificativa.trim().length < 20) throw new ContabilidadeImportError(409, 'A linha ' + line + ' possui possivel duplicidade no arquivo e exige revisao ADMIN com justificativa.', 'DUPLICATE_IN_FILE');
+    if (!review || review.linhaOriginal !== line || reviewedLines !== actualLines) throw new ContabilidadeImportError(409, 'A linha ' + line + ' possui possível repetição no arquivo e exige uma decisão ADMIN individual.', 'DUPLICATE_IN_FILE');
   }
   const client = await pool.connect();
   let transactionOpen = false;
@@ -128,7 +128,7 @@ export async function analisarContabilidade(buffer: Buffer, arquivoNome: string,
     categories[row.classificacao] += 1;
     const pending = [pendingReason(row, fleet.match, duplicate, duplicatePrevious), outsidePeriod ? 'DATA_CONTA_FORA_DO_PERIODO' : null].filter(Boolean).join(',') || null;
     if (!pending && row.valorTotal !== null && row.despesaCompartilhadaStatus === 'NAO_COMPARTILHADA') eligible += row.valorTotal;
-    const previewItem: ContabilPreviewItem = { linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, subcentro_original: row.subcentroOriginal, classificacao: row.classificacao, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, linhas_duplicadas: repeatedLines.get(row.linhaOriginal) ?? [], duplicidade_revisada: false, justificativa_duplicidade: null, revisada_por: null, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido || row.valorTotal === null, bloqueios_decisao: [], despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus };
+    const previewItem: ContabilPreviewItem = { linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, subcentro_original: row.subcentroOriginal, classificacao: row.classificacao, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, linhas_duplicadas: repeatedLines.get(row.linhaOriginal) ?? [], duplicidade_revisada: false, revisada_por: null, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido || row.valorTotal === null, bloqueios_decisao: [], despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus };
     previewItem.bloqueios_decisao = manualDecisionBlocks(previewItem);
     items.push(previewItem);
   }
@@ -179,34 +179,42 @@ function refreshPreviewSummary(preview: ContabilPreview): void {
   preview.total_elegivel = money(preview.itens.filter(item => !item.motivo_pendencia && item.bloqueios_decisao.length === 0 && ['NAO_COMPARTILHADA', 'APROVADA'].includes(item.despesa_compartilhada_status)).reduce((sum, item) => sum + (item.valor_total ?? 0), 0));
 }
 
-export async function revisarDuplicidadeContabil(token: string, linhaOriginal: number, justificativaInput: unknown, actor?: AuthenticatedRequestUser): Promise<ContabilPreview> {
+export async function revisarDuplicidadeContabil(token: string, linhaOriginal: number, decisaoInput: unknown, frotaId: string | null, actor?: AuthenticatedRequestUser): Promise<ContabilPreview> {
   if (!actor || actor.role !== 'ADMIN') throw new ContabilidadeImportError(403, 'Somente ADMIN pode revisar possiveis duplicidades.', 'DUPLICATE_REVIEW_FORBIDDEN');
   const key = token + ':' + linhaOriginal;
   if (duplicateReviewsInFlight.has(key)) throw new ContabilidadeImportError(409, 'Esta linha ja esta sendo revisada.', 'DUPLICATE_REVIEW_ALREADY_DECIDED');
   duplicateReviewsInFlight.add(key);
-  try { return await performDuplicateReview(token, linhaOriginal, justificativaInput, actor); }
+  try { return await performDuplicateReview(token, linhaOriginal, decisaoInput, frotaId, actor); }
   finally { duplicateReviewsInFlight.delete(key); }
 }
 
-async function performDuplicateReview(token: string, linhaOriginal: number, justificativaInput: unknown, actor: AuthenticatedRequestUser): Promise<ContabilPreview> {
+async function performDuplicateReview(token: string, linhaOriginal: number, decisaoInput: unknown, frotaId: string | null, actor: AuthenticatedRequestUser): Promise<ContabilPreview> {
   const stored = previews.get(token);
   if (!stored || stored.expiresAt <= Date.now()) throw new ContabilidadeImportError(404, 'Previa contabil expirada ou nao encontrada.');
-  const justification = typeof justificativaInput === 'string' ? justificativaInput.trim() : '';
+  const decisao = decisaoInput === 'APROVAR' || decisaoInput === 'DESCONSIDERAR' ? decisaoInput : null;
+  if (!decisao) throw new ContabilidadeImportError(400, 'Escolha Incluir ou Desconsiderar para esta ocorrência.', 'INVALID_DUPLICATE_REVIEW_DECISION');
   if (stored.preview.confirmacao_bloqueada && (stored.preview.arquivo_ja_importado || stored.preview.fora_periodo > 0 || stored.preview.historico_sem_periodo > 0 || stored.preview.periodo_sobreposto)) throw new ContabilidadeImportError(409, 'A previa possui bloqueios gerais de confirmacao e nao pode ser liberada por revisao manual.', 'DUPLICATE_REVIEW_HAS_GLOBAL_BLOCK');
   const item = stored.preview.itens.find(value => value.linha_original === linhaOriginal);
   if (!item || !item.duplicado_no_arquivo || item.linhas_duplicadas.length < 2) throw new ContabilidadeImportError(409, 'A linha nao esta marcada como possivel duplicidade neste arquivo.', 'DUPLICATE_REVIEW_NOT_CANDIDATE');
-  const reviewInputError = duplicateReviewInputError(actor?.role, linhaOriginal, item.linhas_duplicadas, justificativaInput);
-  if (reviewInputError) throw new ContabilidadeImportError(400, 'A justificativa deve conter entre 20 e 1000 caracteres.', reviewInputError);
+  const reviewInputError = duplicateReviewInputError(actor.role, linhaOriginal, item.linhas_duplicadas, decisao);
+  if (reviewInputError) throw new ContabilidadeImportError(reviewInputError === 'DUPLICATE_REVIEW_FORBIDDEN' ? 403 : 400, 'A decisão da possível duplicidade é inválida.', reviewInputError);
   if (item.duplicidade_revisada) throw new ContabilidadeImportError(409, 'Esta linha ja teve sua possivel duplicidade revisada.', 'DUPLICATE_REVIEW_ALREADY_DECIDED');
   if (item.despesa_compartilhada_status !== 'AGUARDANDO_DECISAO') throw new ContabilidadeImportError(409, 'A revisao esta disponivel somente para lancamentos de FROTAS DIVERSAS aguardando decisao.', 'DUPLICATE_REVIEW_NOT_MANUAL_ITEM');
   const otherBlocks = manualDecisionBlocks({ ...item, duplicado_no_arquivo: false });
   if (otherBlocks.length) throw new ContabilidadeImportError(409, 'A linha possui outros bloqueios impeditivos: ' + otherBlocks.map(block => block.mensagem).join(' '), otherBlocks[0]!.codigo, otherBlocks);
-  await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_CONTABEIS', entidade: 'revisao_duplicidade_previa', entidadeId: token + ':' + linhaOriginal, dadosPosteriores: { decisao: 'AUTORIZAR_OCORRENCIA_DISTINTA', justificativa: justification, arquivo_nome: stored.arquivoNome, hash_arquivo: stored.hash, linha_original: linhaOriginal, linhas_envolvidas: item.linhas_duplicadas } });
+  if (decisao === 'APROVAR' && frotaId) {
+    const fleet = await pool.query<{ id: string }>("SELECT id FROM frotas WHERE id=$1 AND status='ATIVO'", [frotaId]);
+    if (!fleet.rows[0]) throw new ContabilidadeImportError(400, 'A frota informada não existe ou está inativa.', 'INVALID_FLEET');
+  }
+  const status = applyContabilSharedDecision(decisao);
+  const destinoFrota = decisao === 'APROVAR' ? frotaId : null;
+  await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_CONTABEIS', entidade: 'revisao_duplicidade_previa', entidadeId: token + ':' + linhaOriginal, dadosPosteriores: { decisao, status, frota_id: destinoFrota, arquivo_nome: stored.arquivoNome, hash_arquivo: stored.hash, linha_original: linhaOriginal, linhas_envolvidas: item.linhas_duplicadas } });
   item.duplicidade_revisada = true;
-  item.justificativa_duplicidade = justification;
   item.revisada_por = actor.username;
+  item.despesa_compartilhada_status = status;
+  item.frota_destino = destinoFrota;
+  item.motivo_pendencia = null;
   item.bloqueios_decisao = manualDecisionBlocks({ ...item, duplicado_no_arquivo: false });
-  item.motivo_pendencia = item.motivo_pendencia?.split(',').filter(reason => reason !== 'POSSIVEL_DUPLICIDADE_NO_ARQUIVO').join(',') || null;
   refreshPreviewSummary(stored.preview);
   return stored.preview;
 }
@@ -247,7 +255,7 @@ async function confirmStoredPreview(stored: StoredPreview, actor?: Authenticated
   const itemBlock = stored.preview.itens.flatMap(item => item.bloqueios_decisao)[0];
   if (itemBlock) throw new ContabilidadeImportError(409, itemBlock.mensagem, itemBlock.codigo, [itemBlock]);
   if (stored.preview.confirmacao_bloqueada) throw new ContabilidadeImportError(409, 'Confirmacao bloqueada por inconsistencias financeiras.', 'ACCOUNTING_CONFIRMATION_BLOCKED');
-  const decisions = new Map(stored.preview.itens.filter(item => item.despesa_compartilhada_status === 'APROVADA' || item.despesa_compartilhada_status === 'DESCONSIDERADA' || item.duplicidade_revisada).map(item => [item.linha_original, { status: item.despesa_compartilhada_status, frotaId: item.frota_destino, ...(item.duplicidade_revisada ? { duplicateReview: { linhaOriginal: item.linha_original, linhasRelacionadas: item.linhas_duplicadas, justificativa: item.justificativa_duplicidade ?? '' } } : {}) }] as [number, ContabilDecisionValue]));
+  const decisions = new Map(stored.preview.itens.filter(item => item.despesa_compartilhada_status === 'APROVADA' || item.despesa_compartilhada_status === 'DESCONSIDERADA' || item.duplicidade_revisada).map(item => [item.linha_original, { status: item.despesa_compartilhada_status, frotaId: item.frota_destino, ...(item.duplicidade_revisada ? { duplicateReview: { linhaOriginal: item.linha_original, linhasRelacionadas: item.linhas_duplicadas } } : {}) }] as [number, ContabilDecisionValue]));
   const result = await importContabilidade(stored.buffer, stored.arquivoNome, stored.preview.periodo, actor, decisions);
   stored.result = result;
   return result;
