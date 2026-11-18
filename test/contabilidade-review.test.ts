@@ -10,6 +10,7 @@ test('sugestoes conservadoras preservam exclusoes e componentes de ARLA', () => 
   assert.deepEqual(suggestContabilReview('ARLA 32 - EXTERNO', 'CUSTO COMBUSTIVEIS / LUBRIFICANTES', 'FROTA FBV- 2B12'), { natureza: 'FORA_ESCOPO', destinacao: 'FORA_DO_ESCOPO', classificacao: 'PENDENTE', confianca: 'ALTA', motivo: 'Exclusão contábil: ARLA_32.' })
   assert.equal(suggestContabilReview('FILTRO ARLA 32', 'CUSTO PECAS / OFICINA', 'FROTA CT31').natureza, 'PECAS_MATERIAIS_MANUTENCAO')
   assert.equal(suggestContabilReview('OLEO 85W140', 'CUSTO COMBUSTIVEIS / LUBRIFICANTES', 'FROTA CT23').destinacao, 'APLICACAO_DIRETA_FROTA')
+  assert.equal(suggestContabilReview('OLEO 85W140', 'CUSTO COMBUSTIVEIS / LUBRIFICANTES', 'FROTA CT23', false).destinacao, 'PENDENTE')
   assert.equal(suggestContabilReview('PARAFUSO', 'CUSTO USO E CONSUMO', 'ALMOXARIFADO').destinacao, 'ESTOQUE_ALMOXARIFADO')
 })
 

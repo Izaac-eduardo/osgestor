@@ -29,13 +29,23 @@ async function resolveFleet(client: { query: typeof pool.query }, subcentro: str
   const normalized = normalizeSubcentro(subcentro);
   if (normalized === 'FROTAS DIVERSAS') return { id: null, match: 'PENDENTE' };
   if (!normalized) return { id: null, match: 'PENDENTE' };
-  const candidates = [normalized, normalized.replace(/^FROTA\s+/, ''), normalizeSubcentro(code)];
+  const fleetKey = (value: string | null): string => normalizeSubcentro(value).replace(/^FROTA\s+/, '').replace(/[\s-]+/g, '');
+  const normalizedKey = fleetKey(normalized);
+  const codeKey = fleetKey(code);
+  const candidates = [...new Set([normalizedKey, codeKey].filter(Boolean))];
   const exact = await client.query<FleetRef>('SELECT id,codigo FROM frotas WHERE upper(regexp_replace(btrim(codigo), \'[[:space:]-]+\', \'\', \'g\')) = ANY($1::text[]) AND status=\'ATIVO\'', [candidates.filter(Boolean).map(value => value.replace(/[\s-]+/g, ''))]);
   if (exact.rows.length === 1) return { id: exact.rows[0]!.id, match: 'EXATA' };
+  if (exact.rows.length > 1) return { id: null, match: 'PENDENTE' };
+  const canonicalAlias = await client.query<AliasRef>(`SELECT a.frota_id,a.identificador_normalizado FROM frota_identificadores_externos a JOIN frotas f ON f.id=a.frota_id AND f.status='ATIVO' WHERE a.origem='CONTABILIDADE' AND regexp_replace(upper(a.identificador_normalizado), '[[:space:]-]+', '', 'g')=$1`, [normalizedKey]);
+  if (canonicalAlias.rows.length === 1) return { id: canonicalAlias.rows[0]!.frota_id, match: 'ALIAS' };
+  if (canonicalAlias.rows.length > 1) return { id: null, match: 'PENDENTE' };
   const alias = await client.query<AliasRef>(`SELECT a.frota_id,a.identificador_normalizado FROM frota_identificadores_externos a JOIN frotas f ON f.id=a.frota_id AND f.status='ATIVO' WHERE a.origem='CONTABILIDADE' AND a.identificador_normalizado=$1`, [normalized]);
   if (alias.rows.length === 1) return { id: alias.rows[0]!.frota_id, match: 'ALIAS' };
   if (alias.rows.length > 1 || exact.rows.length > 1) return { id: null, match: 'PENDENTE' };
   if (code && normalizeSubcentro(code) !== normalized) {
+    const canonicalCodeAlias = await client.query<AliasRef>(`SELECT a.frota_id,a.identificador_normalizado FROM frota_identificadores_externos a JOIN frotas f ON f.id=a.frota_id AND f.status='ATIVO' WHERE a.origem='CONTABILIDADE' AND regexp_replace(upper(a.identificador_normalizado), '[[:space:]-]+', '', 'g')=$1`, [fleetKey(code)]);
+    if (canonicalCodeAlias.rows.length === 1) return { id: canonicalCodeAlias.rows[0]!.frota_id, match: 'ALIAS' };
+    if (canonicalCodeAlias.rows.length > 1) return { id: null, match: 'PENDENTE' };
     const codeAlias = await client.query<AliasRef>(`SELECT a.frota_id,a.identificador_normalizado FROM frota_identificadores_externos a JOIN frotas f ON f.id=a.frota_id AND f.status='ATIVO' WHERE a.origem='CONTABILIDADE' AND a.identificador_normalizado=$1`, [normalizeSubcentro(code)]);
     if (codeAlias.rows.length === 1) return { id: codeAlias.rows[0]!.frota_id, match: 'ALIAS' };
   }
@@ -46,7 +56,7 @@ const pendingReason = (row: ContabilLancamento, match: ContabilFleetMatch, dupli
 
 function itemParams(importacaoId: string, row: ContabilLancamento, fleet: { id: string | null; match: ContabilFleetMatch }, status = row.despesaCompartilhadaStatus, actorId: string | null = null, review?: ContabilReviewDecision) {
   const decided = status === 'APROVADA' || status === 'DESCONSIDERADA';
-  const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
+  const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal, fleet.match !== 'PENDENTE');
   const autoResolved = suggestion.destinacao === 'FORA_DO_ESCOPO' || suggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || (suggestion.classificacao !== 'PENDENTE' && suggestion.destinacao !== 'PENDENTE' && fleet.match !== 'PENDENTE');
   const reviewStatus = review?.status ?? (autoResolved || decided ? 'RESOLVIDA' : 'PENDENTE');
   return [importacaoId, row.fingerprint, row.planilhaOriginal, row.linhaOriginal, JSON.stringify(row.dadosOriginais), row.controleOriginal, row.dataLancamento, row.dataConta, row.notaOriginal, row.codigoProdutoOriginal, row.produtoOriginal, row.tipoMovimentacaoOriginal, row.quantidade, row.valorUnitario, row.valorTotal, row.subcentroCodigoOriginal, row.subcentroOriginal, row.planoContasCodigoOriginal, row.planoContasOriginal, row.categoriaContabil, row.classificacao, fleet.id, fleet.match, pendingReason(row, fleet.match, false, false, status, reviewStatus), status, decided ? actorId : null, decided ? new Date() : null, review?.natureza ?? suggestion.natureza, review?.destinacao ?? suggestion.destinacao, reviewStatus, review?.justificativa ?? null, review ? actorId : null, review ? new Date() : null, review ? 'REVISAO_MANUAL' : 'AUTOMATICA'];
@@ -93,8 +103,8 @@ export async function importContabilidade(buffer: Buffer, arquivoNome: string, p
     for (const row of rows) {
       const decision = decisions?.get(row.linhaOriginal);
       const review = decision?.review;
-      const automaticSuggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
       const fleet = review?.frotaId ? { id: review.frotaId, match: 'MANUAL' as ContabilFleetMatch } : await resolveFleet(client, row.subcentroOriginal, row.subcentroCodigoOriginal);
+      const automaticSuggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal, fleet.match !== 'PENDENTE');
       const automaticClassification: ContabilClassification = automaticSuggestion.classificacao !== 'PENDENTE' && (automaticSuggestion.destinacao === 'FORA_DO_ESCOPO' || automaticSuggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' || fleet.match !== 'PENDENTE') ? automaticSuggestion.classificacao : 'PENDENTE';
       const effectiveRow = review ? { ...row, classificacao: review.classificacao } : { ...row, classificacao: automaticClassification };
       const destination = (review?.frotaId ?? decision?.frotaId) ? { id: review?.frotaId ?? decision?.frotaId ?? null, match: 'MANUAL' as ContabilFleetMatch } : fleet;
@@ -135,7 +145,7 @@ export async function analisarContabilidade(buffer: Buffer, arquivoNome: string,
     if (duplicate || duplicatePrevious) { duplicateCount += 1; duplicateValue += row.valorTotal ?? 0; }
     if (outsidePeriod) { outOfPeriod += 1; outOfPeriodValue += row.valorTotal ?? 0; }
     if (fleet.id && row.subcentroOriginal) fleetNames.add(row.subcentroOriginal);
-    const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
+    const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal, fleet.match !== 'PENDENTE');
     const effectiveClassification = suggestion.classificacao !== 'PENDENTE' && (suggestion.destinacao === 'FORA_DO_ESCOPO' || suggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' || fleet.match !== 'PENDENTE') ? suggestion.classificacao : 'PENDENTE';
     categories[effectiveClassification] += 1;
     const pending = [pendingReason(row, fleet.match, duplicate, duplicatePrevious), outsidePeriod ? 'DATA_CONTA_FORA_DO_PERIODO' : null].filter(Boolean).join(',') || null;
