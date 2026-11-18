@@ -34,6 +34,9 @@ const connection = { host: process.env.DB_HOST ?? 'localhost', port: Number(proc
       INSERT INTO prefixos_frota (codigo,descricao,status)
         VALUES ('TST','Fixtures automatizadas','ATIVO')
         ON CONFLICT (codigo) DO NOTHING;
+      INSERT INTO prefixos_frota (codigo,descricao,status)
+        VALUES ('IT','Fixture de integração contábil','ATIVO')
+        ON CONFLICT (codigo) DO NOTHING;
       INSERT INTO frotas (prefixo_frota_id,numero,codigo,placa,status)
         SELECT id,'01','TST01','TST0101','ATIVO' FROM prefixos_frota WHERE codigo='TST'
         ON CONFLICT (codigo) DO NOTHING;
@@ -43,6 +46,15 @@ const connection = { host: process.env.DB_HOST ?? 'localhost', port: Number(proc
       INSERT INTO frotas (prefixo_frota_id,numero,codigo,placa,status)
         SELECT id,'03','TST03','TST0303','ATIVO' FROM prefixos_frota WHERE codigo='TST'
         ON CONFLICT (codigo) DO NOTHING;
+      INSERT INTO frotas (prefixo_frota_id,numero,codigo,placa,status)
+        SELECT id,'99','IT01','ITA0101','ATIVO' FROM prefixos_frota WHERE codigo='TST'
+        ON CONFLICT (codigo) DO NOTHING;
+      INSERT INTO frotas (prefixo_frota_id,numero,codigo,placa,status)
+        SELECT id,'01','IT01','ITX0101','ATIVO' FROM prefixos_frota WHERE codigo='IT'
+        ON CONFLICT (codigo) DO NOTHING;
+      INSERT INTO usuarios (username,email,password_hash,role,status,must_change_password)
+        VALUES ('integration.admin','integration@example.invalid','test-only-placeholder','ADMIN','ATIVO',false)
+        ON CONFLICT (lower(btrim(username))) DO NOTHING;
       INSERT INTO abastecimento_terceiros (codigo,nome,status)
         VALUES ('TEST-TERCEIRO-001','Terceiro de Teste 001','ATIVO')
         ON CONFLICT (codigo) DO NOTHING;

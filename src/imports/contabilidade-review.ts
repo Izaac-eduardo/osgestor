@@ -1,43 +1,35 @@
 import { getAccountingMaintenanceExclusionReason } from '../services/maintenance-accounting-eligibility.js'
 import { normalizeSearchText } from '../utils/text.js'
 
-export const contabilReviewNatures = [
-  'PECAS_MATERIAIS_MANUTENCAO', 'SERVICOS_TERCEIRIZADOS', 'PNEUS', 'OLEOS_LUBRIFICANTES',
-  'MATERIAIS_ELETRICOS', 'FERRAGENS_PARAFUSOS', 'USO_E_CONSUMO', 'ESTOQUE_ALMOXARIFADO', 'FORA_ESCOPO', 'PENDENTE',
-] as const
+export const contabilReviewNatures = ['PECAS_MATERIAIS_MANUTENCAO', 'SERVICOS_TERCEIRIZADOS', 'PNEUS', 'OLEOS_LUBRIFICANTES', 'MATERIAIS_ELETRICOS', 'FERRAGENS_PARAFUSOS', 'USO_E_CONSUMO', 'ESTOQUE_ALMOXARIFADO', 'FORA_ESCOPO', 'PENDENTE'] as const
 export type ContabilReviewNature = typeof contabilReviewNatures[number]
 export const contabilReviewDestinations = ['APLICACAO_DIRETA_FROTA', 'ESTOQUE_ALMOXARIFADO', 'FORA_DO_ESCOPO', 'PENDENTE', 'NAO_APLICAVEL'] as const
 export type ContabilReviewDestination = typeof contabilReviewDestinations[number]
 export const contabilReviewStatuses = ['PENDENTE', 'RESOLVIDA'] as const
 export type ContabilReviewStatus = typeof contabilReviewStatuses[number]
 export type ContabilReviewConfidence = 'ALTA' | 'MEDIA' | 'BAIXA'
-
-export type ContabilReviewSuggestion = {
-  natureza: ContabilReviewNature
-  destinacao: ContabilReviewDestination
-  confianca: ContabilReviewConfidence
-  motivo: string
-}
+export type ContabilReviewClassification = 'PECAS_EXTERNAS' | 'SERVICOS_TERCEIRIZADOS' | 'PENDENTE'
+export type ContabilReviewSuggestion = { natureza: ContabilReviewNature; destinacao: ContabilReviewDestination; classificacao: ContabilReviewClassification; confianca: ContabilReviewConfidence; motivo: string }
 
 const normalize = (value: string | null | undefined): string => normalizeSearchText(value ?? '').replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim()
-const hasFleet = (subcentro: string | null | undefined): boolean => /^FROTA\s+/.test(normalize(subcentro))
-const stockWords = /(?:ALMOXARIFADO|ESTOQUE|DEPOSITO|DEPÓSITO|ARMAZEM|ARMAZÉM)/
+const hasFleet = (subcentro: string | null | undefined): boolean => { const value = normalize(subcentro); return Boolean(value) && value !== 'FROTAS DIVERSAS' && !stockWords.test(value) }
+const stockWords = /(?:ALMOXARIFADO|ESTOQUE|DEPOSITO|ARMAZEM)/
+const directMaterial = (natureza: ContabilReviewNature, subcentro: string | null, motivo: string, confianca: ContabilReviewConfidence = 'ALTA'): ContabilReviewSuggestion => ({ natureza, destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', classificacao: 'PECAS_EXTERNAS', confianca, motivo: hasFleet(subcentro) ? `${motivo} Frota identificada; aplicação direta sugerida.` : `${motivo} Frota não identificada; revisão necessária.` })
 
 export function suggestContabilReview(product: string | null, plan: string | null, subcentro: string | null): ContabilReviewSuggestion {
-  const p = normalize(product)
-  const c = normalize(plan)
-  const s = normalize(subcentro)
-  const exclusion = getAccountingMaintenanceExclusionReason(product)
-  if (exclusion || /^(?:OLEO DIESEL|GASOLINA|ETANOL)(?:\s|$)/.test(p)) return { natureza: 'FORA_ESCOPO', destinacao: 'FORA_DO_ESCOPO', confianca: 'ALTA', motivo: exclusion ? `Exclusão contábil: ${exclusion}.` : 'Combustível fora do custo de manutenção.' }
-  if (stockWords.test(`${p} ${s}`)) return { natureza: 'ESTOQUE_ALMOXARIFADO', destinacao: 'ESTOQUE_ALMOXARIFADO', confianca: 'ALTA', motivo: 'Descrição ou destinação indica estoque/almoxarifado.' }
-  if (c === 'CUSTO SERVICOS') return { natureza: 'SERVICOS_TERCEIRIZADOS', destinacao: 'NAO_APLICAVEL', confianca: 'ALTA', motivo: 'Plano de contas reconhecido como serviço terceirizado.' }
-  if (c === 'CUSTO PNEUS' || /\bPNEU(?:S)?\b/.test(p)) return { natureza: 'PNEUS', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: hasFleet(subcentro) ? 'MEDIA' : 'BAIXA', motivo: 'Produto/plano indica pneu; confirmar aplicação direta ou estoque.' }
-  if (/\b(?:OLEO|LUBRIFICANTE|GRAXA)\b/.test(p) || c === 'CUSTO COMBUSTIVEIS LUBRIFICANTES') return { natureza: 'OLEOS_LUBRIFICANTES', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: hasFleet(subcentro) ? 'MEDIA' : 'BAIXA', motivo: 'Produto/plano indica óleo ou lubrificante; confirmar aplicação direta.' }
-  if (c === 'CUSTO MATERIAIS ELETRICOS' || /\b(?:ELETRIC|LAMPADA|CABO|FUSIVEL|CHICOTE)\b/.test(p)) return { natureza: 'MATERIAIS_ELETRICOS', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: 'BAIXA', motivo: 'Material elétrico pode ser aplicado diretamente ou mantido em estoque.' }
-  if (c === 'CUSTO FERRAGEM' || c === 'CUSTO PARAFUSOS PORCAS ARRUELAS' || /\b(?:PARAFUSO|PORCA|ARRUELA|FERRAGEM)\b/.test(p)) return { natureza: 'FERRAGENS_PARAFUSOS', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: 'BAIXA', motivo: 'Ferragem pode ser aplicada diretamente ou mantida em estoque.' }
-  if (c === 'CUSTO USO E CONSUMO') return { natureza: 'USO_E_CONSUMO', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: 'BAIXA', motivo: 'Uso e consumo exige confirmação da aplicação direta.' }
-  if (c === 'CUSTO PECAS OFICINA') return { natureza: 'PECAS_MATERIAIS_MANUTENCAO', destinacao: hasFleet(subcentro) ? 'APLICACAO_DIRETA_FROTA' : 'PENDENTE', confianca: 'MEDIA', motivo: 'Plano indica peça de manutenção; confirmar aplicação direta ou estoque.' }
-  return { natureza: 'PENDENTE', destinacao: 'PENDENTE', confianca: 'BAIXA', motivo: 'Não há evidência suficiente para classificar com segurança.' }
+  const p = normalize(product); const c = normalize(plan); const exclusion = getAccountingMaintenanceExclusionReason(product)
+  if (exclusion || /^(?:OLEO DIESEL|GASOLINA|ETANOL)(?:\s|$)/.test(p)) return { natureza: 'FORA_ESCOPO', destinacao: 'FORA_DO_ESCOPO', classificacao: 'PENDENTE', confianca: 'ALTA', motivo: exclusion ? `Exclusão contábil: ${exclusion}.` : 'Combustível fora do custo de manutenção.' }
+  if (stockWords.test(`${p} ${normalize(subcentro)}`)) return { natureza: 'ESTOQUE_ALMOXARIFADO', destinacao: 'ESTOQUE_ALMOXARIFADO', classificacao: 'PENDENTE', confianca: 'ALTA', motivo: 'Descrição ou destinação indica estoque/almoxarifado.' }
+  if (c === 'CUSTO SERVICOS') return { natureza: 'SERVICOS_TERCEIRIZADOS', destinacao: 'NAO_APLICAVEL', classificacao: 'SERVICOS_TERCEIRIZADOS', confianca: 'ALTA', motivo: 'Plano de contas reconhecido como serviço terceirizado.' }
+  if (c === 'CUSTO PNEUS' || /\bPNEU(?:S)?\b/.test(p)) return directMaterial('PNEUS', subcentro, 'Produto/plano indica pneu.')
+  if (/\b(?:FILTRO|BOMBA|SENSOR|REPARO|REPARACAO|MANUTENCAO|CONSERTO|KIT REPARO|PECA)\b/.test(p)) return directMaterial('PECAS_MATERIAIS_MANUTENCAO', subcentro, 'Produto indica componente ou reparo de manutenção.')
+  if (/\b(?:OLEO|LUBRIFICANTE|GRAXA)\b/.test(p) || (c === 'CUSTO COMBUSTIVEIS LUBRIFICANTES' && /\b(?:MOTOR|HIDRAULICO|TRANSMISSAO|DIFERENCIAL|85W140|GRAXA)\b/.test(p))) return directMaterial('OLEOS_LUBRIFICANTES', subcentro, 'Produto indica óleo ou lubrificante.')
+  if (c === 'CUSTO COMBUSTIVEIS LUBRIFICANTES' && /\bARLA\b/.test(p)) return { natureza: 'FORA_ESCOPO', destinacao: 'FORA_DO_ESCOPO', classificacao: 'PENDENTE', confianca: 'ALTA', motivo: 'ARLA 32 consumível fica fora do custo contábil; componentes e reparos são tratados como manutenção.' }
+  if (c === 'CUSTO MATERIAIS ELETRICOS' || /\b(?:ELETRIC|LAMPADA|CABO|FUSIVEL|CHICOTE)\b/.test(p)) return directMaterial('MATERIAIS_ELETRICOS', subcentro, 'Produto/plano indica material elétrico.', 'MEDIA')
+  if (c === 'CUSTO FERRAGEM' || c === 'CUSTO PARAFUSOS PORCAS ARRUELAS' || /\b(?:PARAFUSO|PORCA|ARRUELA|FERRAGEM)\b/.test(p)) return directMaterial('FERRAGENS_PARAFUSOS', subcentro, 'Produto/plano indica ferragem ou fixador.', 'MEDIA')
+  if (c === 'CUSTO USO E CONSUMO') return directMaterial('USO_E_CONSUMO', subcentro, 'Plano indica uso e consumo; frota identificada permite sugerir aplicação direta.', 'MEDIA')
+  if (c === 'CUSTO PECAS OFICINA') return directMaterial('PECAS_MATERIAIS_MANUTENCAO', subcentro, 'Plano indica peça de manutenção.')
+  return { natureza: 'PENDENTE', destinacao: 'PENDENTE', classificacao: 'PENDENTE', confianca: 'BAIXA', motivo: 'Não há evidência suficiente para classificar com segurança.' }
 }
 
 export function isReviewResolved(status: ContabilReviewStatus | undefined): boolean { return status === 'RESOLVIDA' }

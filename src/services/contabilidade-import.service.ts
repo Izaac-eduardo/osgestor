@@ -46,8 +46,10 @@ const pendingReason = (row: ContabilLancamento, match: ContabilFleetMatch, dupli
 
 function itemParams(importacaoId: string, row: ContabilLancamento, fleet: { id: string | null; match: ContabilFleetMatch }, status = row.despesaCompartilhadaStatus, actorId: string | null = null, review?: ContabilReviewDecision) {
   const decided = status === 'APROVADA' || status === 'DESCONSIDERADA';
-  const reviewStatus = review?.status ?? (row.classificacao !== 'PENDENTE' && (fleet.match !== 'PENDENTE' || decided) ? 'RESOLVIDA' : 'PENDENTE');
-  return [importacaoId, row.fingerprint, row.planilhaOriginal, row.linhaOriginal, JSON.stringify(row.dadosOriginais), row.controleOriginal, row.dataLancamento, row.dataConta, row.notaOriginal, row.codigoProdutoOriginal, row.produtoOriginal, row.tipoMovimentacaoOriginal, row.quantidade, row.valorUnitario, row.valorTotal, row.subcentroCodigoOriginal, row.subcentroOriginal, row.planoContasCodigoOriginal, row.planoContasOriginal, row.categoriaContabil, row.classificacao, fleet.id, fleet.match, pendingReason(row, fleet.match, false, false, status, reviewStatus), status, decided ? actorId : null, decided ? new Date() : null, review?.natureza ?? null, review?.destinacao ?? null, reviewStatus, review?.justificativa ?? null, review ? actorId : null, review ? new Date() : null, review ? 'REVISAO_MANUAL' : null];
+  const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
+  const autoResolved = suggestion.destinacao === 'FORA_DO_ESCOPO' || suggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || (suggestion.classificacao !== 'PENDENTE' && suggestion.destinacao !== 'PENDENTE' && fleet.match !== 'PENDENTE');
+  const reviewStatus = review?.status ?? (autoResolved || decided ? 'RESOLVIDA' : 'PENDENTE');
+  return [importacaoId, row.fingerprint, row.planilhaOriginal, row.linhaOriginal, JSON.stringify(row.dadosOriginais), row.controleOriginal, row.dataLancamento, row.dataConta, row.notaOriginal, row.codigoProdutoOriginal, row.produtoOriginal, row.tipoMovimentacaoOriginal, row.quantidade, row.valorUnitario, row.valorTotal, row.subcentroCodigoOriginal, row.subcentroOriginal, row.planoContasCodigoOriginal, row.planoContasOriginal, row.categoriaContabil, row.classificacao, fleet.id, fleet.match, pendingReason(row, fleet.match, false, false, status, reviewStatus), status, decided ? actorId : null, decided ? new Date() : null, review?.natureza ?? suggestion.natureza, review?.destinacao ?? suggestion.destinacao, reviewStatus, review?.justificativa ?? null, review ? actorId : null, review ? new Date() : null, review ? 'REVISAO_MANUAL' : 'AUTOMATICA'];
 }
 
 export type DuplicateReviewDecision = { linhaOriginal: number; linhasRelacionadas: number[] };
@@ -91,8 +93,10 @@ export async function importContabilidade(buffer: Buffer, arquivoNome: string, p
     for (const row of rows) {
       const decision = decisions?.get(row.linhaOriginal);
       const review = decision?.review;
-      const effectiveRow = review ? { ...row, classificacao: review.classificacao } : row;
+      const automaticSuggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
       const fleet = review?.frotaId ? { id: review.frotaId, match: 'MANUAL' as ContabilFleetMatch } : await resolveFleet(client, row.subcentroOriginal, row.subcentroCodigoOriginal);
+      const automaticClassification: ContabilClassification = automaticSuggestion.classificacao !== 'PENDENTE' && (automaticSuggestion.destinacao === 'FORA_DO_ESCOPO' || automaticSuggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' || fleet.match !== 'PENDENTE') ? automaticSuggestion.classificacao : 'PENDENTE';
+      const effectiveRow = review ? { ...row, classificacao: review.classificacao } : { ...row, classificacao: automaticClassification };
       const destination = (review?.frotaId ?? decision?.frotaId) ? { id: review?.frotaId ?? decision?.frotaId ?? null, match: 'MANUAL' as ContabilFleetMatch } : fleet;
       const insertedItem = await client.query<{ id: string }>('INSERT INTO lancamentos_contabeis(importacao_id,fingerprint,planilha_original,linha_original,dados_originais,controle_original,data_lancamento,data_conta,nota_original,codigo_produto_original,produto_original,tipo_movimentacao_original,quantidade,valor_unitario,valor_total,subcentro_codigo_original,subcentro_original,plano_contas_codigo_original,plano_contas_original,categoria_contabil,classificacao,frota_id,identificacao_frota,motivo_pendencia,despesa_compartilhada_status,decidido_por,decidido_em,natureza_revisao,destinacao_revisao,status_revisao,justificativa_revisao,revisado_por,revisado_em,origem_revisao) VALUES (' + Array.from({ length: 34 }, (_, index) => '$' + (index + 1)).join(',') + ') RETURNING id', itemParams(importacaoId, effectiveRow, destination, decision?.status, actor?.id ?? null, review));
       if (review) await client.query('INSERT INTO lancamentos_contabeis_revisoes(lancamento_id,importacao_id,natureza_nova,destinacao_nova,classificacao_nova,frota_nova,justificativa,decidido_por,origem) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [insertedItem.rows[0]!.id, importacaoId, review.natureza, review.destinacao, review.classificacao, review.frotaId ?? destination.id, review.justificativa, actor?.id ?? null, 'REVISAO_MANUAL']);
@@ -131,16 +135,18 @@ export async function analisarContabilidade(buffer: Buffer, arquivoNome: string,
     if (duplicate || duplicatePrevious) { duplicateCount += 1; duplicateValue += row.valorTotal ?? 0; }
     if (outsidePeriod) { outOfPeriod += 1; outOfPeriodValue += row.valorTotal ?? 0; }
     if (fleet.id && row.subcentroOriginal) fleetNames.add(row.subcentroOriginal);
-    categories[row.classificacao] += 1;
-    const pending = [pendingReason(row, fleet.match, duplicate, duplicatePrevious), outsidePeriod ? 'DATA_CONTA_FORA_DO_PERIODO' : null].filter(Boolean).join(',') || null;
     const suggestion = suggestContabilReview(row.produtoOriginal, row.planoContasOriginal, row.subcentroOriginal);
-    if (!pending && row.valorTotal !== null && row.despesaCompartilhadaStatus === 'NAO_COMPARTILHADA' && suggestion.destinacao !== 'FORA_DO_ESCOPO') eligible += row.valorTotal;
-    const reviewStatus: ContabilReviewStatus = row.classificacao === 'PENDENTE' || (fleet.match === 'PENDENTE' && row.despesaCompartilhadaStatus !== 'AGUARDANDO_DECISAO') ? 'PENDENTE' : 'RESOLVIDA';
-    const previewItem: ContabilPreviewItem = { linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, plano_contas_original: row.planoContasOriginal, subcentro_original: row.subcentroOriginal, classificacao: row.classificacao, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_id: fleet.id, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, linhas_duplicadas: repeatedLines.get(row.linhaOriginal) ?? [], duplicidade_revisada: false, revisada_por: null, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido || row.valorTotal === null, bloqueios_decisao: [], despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus, revisao_status: reviewStatus, natureza_revisao: suggestion.natureza, destinacao_revisao: suggestion.destinacao, sugestao_revisao: suggestion.motivo, confianca_revisao: suggestion.confianca, justificativa_revisao: null, revisado_por: null, revisado_em: null };
+    const effectiveClassification = suggestion.classificacao !== 'PENDENTE' && (suggestion.destinacao === 'FORA_DO_ESCOPO' || suggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' || fleet.match !== 'PENDENTE') ? suggestion.classificacao : 'PENDENTE';
+    categories[effectiveClassification] += 1;
+    const pending = [pendingReason(row, fleet.match, duplicate, duplicatePrevious), outsidePeriod ? 'DATA_CONTA_FORA_DO_PERIODO' : null].filter(Boolean).join(',') || null;
+    const autoResolved = suggestion.destinacao === 'FORA_DO_ESCOPO' || suggestion.destinacao === 'ESTOQUE_ALMOXARIFADO' || (suggestion.classificacao !== 'PENDENTE' && suggestion.destinacao !== 'PENDENTE' && fleet.match !== 'PENDENTE');
+    const reviewStatus: ContabilReviewStatus = autoResolved || row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? 'RESOLVIDA' : 'PENDENTE';
+    const previewItem: ContabilPreviewItem = { linha_original: row.linhaOriginal, produto_original: row.produtoOriginal, plano_contas_original: row.planoContasOriginal, subcentro_original: row.subcentroOriginal, classificacao: effectiveClassification, frota: row.despesaCompartilhadaStatus === 'AGUARDANDO_DECISAO' ? null : row.subcentroOriginal, frota_id: fleet.id, frota_destino: null, identificacao_frota: fleet.match, valor_total: row.valorTotal, data_conta: row.dataConta, motivo_pendencia: pending, duplicado_no_arquivo: duplicate, linhas_duplicadas: repeatedLines.get(row.linhaOriginal) ?? [], duplicidade_revisada: false, revisada_por: null, duplicado_em_importacao_anterior: duplicatePrevious, fora_periodo_autorizado: outsidePeriod, valor_total_invalido: row.valorTotalInvalido || row.valorTotal === null, bloqueios_decisao: [], despesa_compartilhada_status: row.despesaCompartilhadaStatus, combustivel_status: row.combustivelStatus, revisao_status: reviewStatus, natureza_revisao: suggestion.natureza, destinacao_revisao: suggestion.destinacao, sugestao_revisao: suggestion.motivo, confianca_revisao: suggestion.confianca, justificativa_revisao: null, revisado_por: null, revisado_em: null };
     previewItem.motivo_pendencia = [pendingReason(row, fleet.match, duplicate, duplicatePrevious, undefined, reviewStatus), outsidePeriod ? 'DATA_CONTA_FORA_DO_PERIODO' : null].filter(Boolean).join(',') || null;
     previewItem.bloqueios_decisao = manualDecisionBlocks(previewItem);
     items.push(previewItem);
   }
+  eligible = items.filter(item => !item.motivo_pendencia && item.bloqueios_decisao.length === 0 && item.classificacao !== 'PENDENTE' && !['ESTOQUE_ALMOXARIFADO', 'FORA_DO_ESCOPO'].includes(item.destinacao_revisao) && ['NAO_COMPARTILHADA', 'APROVADA'].includes(item.despesa_compartilhada_status)).reduce((sum, item) => sum + (item.valor_total ?? 0), 0);
   const dates = rows.map(row => row.dataConta).filter((value): value is string => Boolean(value)).sort();
   const history = await pool.query<{ total: number }>("SELECT count(*)::int total FROM importacoes_contabeis WHERE status <> 'CANCELADA' AND (periodo_inicio IS NULL OR periodo_fim IS NULL)");
   const overlap = await pool.query<{ has_overlap: boolean }>("SELECT EXISTS(SELECT 1 FROM importacoes_contabeis WHERE status <> 'CANCELADA' AND periodo_inicio <= $2::date AND periodo_fim >= $1::date) AS has_overlap", [declaredPeriod.inicio, declaredPeriod.fim]);
@@ -204,6 +210,7 @@ async function performDuplicateReview(token: string, linhaOriginal: number, deci
   if (!decisao) throw new ContabilidadeImportError(400, 'Escolha Incluir ou Desconsiderar para esta ocorrência.', 'INVALID_DUPLICATE_REVIEW_DECISION');
   if (stored.preview.confirmacao_bloqueada && (stored.preview.arquivo_ja_importado || stored.preview.fora_periodo > 0 || stored.preview.historico_sem_periodo > 0 || stored.preview.periodo_sobreposto)) throw new ContabilidadeImportError(409, 'A previa possui bloqueios gerais de confirmacao e nao pode ser liberada por revisao manual.', 'DUPLICATE_REVIEW_HAS_GLOBAL_BLOCK');
   const item = stored.preview.itens.find(value => value.linha_original === linhaOriginal);
+  if (frotaId) throw new ContabilidadeImportError(400, 'Despesas compartilhadas nao podem ser atribuidas a uma frota.', 'SHARED_EXPENSE_FLEET_FORBIDDEN');
   if (!item || !item.duplicado_no_arquivo || item.linhas_duplicadas.length < 2) throw new ContabilidadeImportError(409, 'A linha nao esta marcada como possivel duplicidade neste arquivo.', 'DUPLICATE_REVIEW_NOT_CANDIDATE');
   const reviewInputError = duplicateReviewInputError(actor.role, linhaOriginal, item.linhas_duplicadas, decisao);
   if (reviewInputError) throw new ContabilidadeImportError(reviewInputError === 'DUPLICATE_REVIEW_FORBIDDEN' ? 403 : 400, 'A decisão da possível duplicidade é inválida.', reviewInputError);
@@ -211,12 +218,8 @@ async function performDuplicateReview(token: string, linhaOriginal: number, deci
   if (item.despesa_compartilhada_status !== 'AGUARDANDO_DECISAO') throw new ContabilidadeImportError(409, 'A revisao esta disponivel somente para lancamentos de FROTAS DIVERSAS aguardando decisao.', 'DUPLICATE_REVIEW_NOT_MANUAL_ITEM');
   const otherBlocks = manualDecisionBlocks({ ...item, duplicado_no_arquivo: false });
   if (otherBlocks.length) throw new ContabilidadeImportError(409, 'A linha possui outros bloqueios impeditivos: ' + otherBlocks.map(block => block.mensagem).join(' '), otherBlocks[0]!.codigo, otherBlocks);
-  if (decisao === 'APROVAR' && frotaId) {
-    const fleet = await pool.query<{ id: string }>("SELECT id FROM frotas WHERE id=$1 AND status='ATIVO'", [frotaId]);
-    if (!fleet.rows[0]) throw new ContabilidadeImportError(400, 'A frota informada não existe ou está inativa.', 'INVALID_FLEET');
-  }
   const status = applyContabilSharedDecision(decisao);
-  const destinoFrota = decisao === 'APROVAR' ? frotaId : null;
+  const destinoFrota = null;
   await recordAudit({ actor, acao: 'EDITAR', modulo: 'IMPORTACOES_CONTABEIS', entidade: 'revisao_duplicidade_previa', entidadeId: token + ':' + linhaOriginal, dadosPosteriores: { decisao, status, frota_id: destinoFrota, arquivo_nome: stored.arquivoNome, hash_arquivo: stored.hash, linha_original: linhaOriginal, linhas_envolvidas: item.linhas_duplicadas } });
   item.duplicidade_revisada = true;
   item.revisada_por = actor.username;
@@ -233,6 +236,7 @@ export async function decidirDespesaCompartilhada(token: string, linhaOriginal: 
   const stored = previews.get(token);
   if (!stored || stored.expiresAt <= Date.now()) throw new ContabilidadeImportError(404, 'Previa contabil expirada ou nao encontrada.');
   const item = stored.preview.itens.find(value => value.linha_original === linhaOriginal);
+  if (frotaId) throw new ContabilidadeImportError(400, 'Despesas compartilhadas nao podem ser atribuidas a uma frota.', 'SHARED_EXPENSE_FLEET_FORBIDDEN');
   if (!item || item.despesa_compartilhada_status === 'FORA_ESCOPO_COMBUSTIVEL') throw new ContabilidadeImportError(400, 'Item nao e uma despesa compartilhada elegivel para decisao.');
   const decisionBlocks = manualDecisionBlocks({ ...item, duplicado_no_arquivo: item.duplicado_no_arquivo && !item.duplicidade_revisada });
   if (decisionBlocks.length) {
@@ -240,9 +244,8 @@ export async function decidirDespesaCompartilhada(token: string, linhaOriginal: 
     throw new ContabilidadeImportError(409, 'Decisao manual bloqueada: ' + decisionBlocks.map(block => block.mensagem).join(' '), code, decisionBlocks);
   }
   if (item.despesa_compartilhada_status !== 'AGUARDANDO_DECISAO') throw new ContabilidadeImportError(409, 'Este lancamento ja possui uma decisao manual.', 'MANUAL_DECISION_ALREADY_SET');
-  if (frotaId) { const fleet = await pool.query('SELECT 1 FROM frotas WHERE id=$1 AND status=\'ATIVO\'', [frotaId]); if (!fleet.rows[0]) throw new ContabilidadeImportError(400, 'A frota informada nao existe ou esta inativa.'); }
   item.despesa_compartilhada_status = applyContabilSharedDecision(decisao);
-  item.frota_destino = decisao === 'APROVAR' && frotaId ? frotaId : null;
+  item.frota_destino = null;
   item.motivo_pendencia = item.despesa_compartilhada_status === 'AGUARDANDO_DECISAO' ? 'DESPESA_COMPARTILHADA_AGUARDANDO_DECISAO' : null;
   item.bloqueios_decisao = [];
   refreshPreviewSummary(stored.preview);
