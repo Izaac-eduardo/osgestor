@@ -13,4 +13,5 @@ contabilidadeImportRoutes.post('/:id/confirmar', controller.confirm);
 contabilidadeImportRoutes.get('/:id', controller.get);
 contabilidadeImportRoutes.patch('/:id/itens/:itemId', controller.update);
 contabilidadeImportRoutes.patch('/:id/itens/:linhaOriginal/decisao', controller.decideShared);
+contabilidadeImportRoutes.patch('/:id/itens/:linhaOriginal/revisao', requireRole('ADMIN'), controller.reviewItem);
 contabilidadeImportRoutes.patch('/:id/itens/:linhaOriginal/revisar-duplicidade', requireRole('ADMIN'), controller.reviewDuplicate);

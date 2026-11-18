@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyMigration, allowedVersions, migrationChecksum, validateArguments, validateAppliedChecksum, validateControlColumns } from '../scripts/deploy-migration.js';
 
-test('migrations 039-043 resolvem o nome completo do arquivo SQL', () => {
+test('migrations 039-044 resolvem o nome completo do arquivo SQL', () => {
   assert.equal(validateArguments({ mode: 'preview', database: 'oficina', version: '039' }), '039_os_manutencao_sem_obra.sql');
   assert.equal(allowedVersions.get('042'), '042_contabilidade_despesas_compartilhadas.sql');
   assert.equal(allowedVersions.get('043'), '043_contabilidade_periodos_e_sobreposicao.sql');
+  assert.equal(allowedVersions.get('044'), '044_revisao_importacao_contabil.sql');
 });
 
 test('valida schema real com cinco colunas de controle', () => {

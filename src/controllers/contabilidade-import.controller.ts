@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
-import { analisarContabilidade, ContabilidadeImportError, confirmarContabilidade, decidirDespesaCompartilhada, revisarDuplicidadeContabil, getContabilidadeImport, listContabilidadeImports, listContabilidadeItems, updateContabilidadeItem } from '../services/contabilidade-import.service.js';
+import { analisarContabilidade, ContabilidadeImportError, confirmarContabilidade, decidirDespesaCompartilhada, revisarDuplicidadeContabil, revisarItemContabil, getContabilidadeImport, listContabilidadeImports, listContabilidadeItems, updateContabilidadeItem } from '../services/contabilidade-import.service.js';
 import { serializeContabilidadeError } from '../imports/contabilidade-error-response.js';
+
+export async function reviewItem(request: Request, response: Response): Promise<void> { try { const line = Number(request.params.linhaOriginal); if (!Number.isInteger(line) || line < 1) throw new ContabilidadeImportError(400, 'linha_original invalida.'); response.json(await revisarItemContabil(previewToken(request.params.id), line, request.body ?? {}, request.authUser)); } catch (error) { sendError(response, error); } }
 
 const previewToken = (value: string | string[] | undefined): string => { if (typeof value !== 'string' || !/^[0-9a-f]{64}$/i.test(value)) throw new ContabilidadeImportError(400, 'token de prévia inválido.'); return value; };
 
