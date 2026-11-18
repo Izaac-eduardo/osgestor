@@ -57,7 +57,7 @@ test('ADMIN pode decidir uma possível repetição sem justificativa e vê data 
     assert.equal(view.container.querySelector('textarea'), null)
     const user = userEvent.setup({ document })
     const buttons = Array.from(view.container.querySelectorAll('button'))
-    assert.deepEqual(buttons.map(button => button.textContent), ['Incluir', 'Desconsiderar'])
+    assert.deepEqual(buttons.map(button => button.textContent), ['Aprovar como compartilhada', 'Desconsiderar'])
     await act(async () => user.click(buttons[0]!))
     await act(async () => user.click(buttons[1]!))
     assert.deepEqual(decisions, ['APROVAR', 'DESCONSIDERAR'])
