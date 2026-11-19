@@ -23,16 +23,16 @@ test('consolidação por frota separa fontes, filtra finalizadas e sinaliza sal�
   const salary = await saveSalarioBase({ ano: 2026, mes: 10, valor_consolidado: '10.10', observacoes: 'teste' }, actor);
   try {
     const summary = (await getManutencaoPorFrota({ data_inicio: '2026-10-01', data_fim: '2026-10-31', frota_id: fleet.id })) as Array<Record<string, string>>;
-    assert.equal(summary.length, 1); assert.equal(summary[0]!.pecas_externas, '100.10'); assert.equal(summary[0]!.servicos_terceirizados, '50.20'); assert.equal(summary[0]!.materiais_almoxarifado, '30.30'); assert.equal(summary[0]!.total_efetivo, '180.60'); assert.equal(summary[0]!.mao_obra_interna, '40.40');
+    assert.equal(summary.length, 1); assert.equal(summary[0]!.pecas_externas, '100.10'); assert.equal(summary[0]!.servicos_terceirizados, '50.20'); assert.equal(summary[0]!.materiais_almoxarifado, '1029.30'); assert.equal(summary[0]!.total_efetivo, '1179.60'); assert.equal(summary[0]!.mao_obra_interna, '940.40');
     const totals = await getManutencaoTotais({ data_inicio: '2026-10-01', data_fim: '2026-10-31', frota_id: fleet.id });
-    assert.equal(totals.total_efetivo, '180.60'); assert.equal(totals.mao_obra_interna, '40.40');
+    assert.equal(totals.total_efetivo, '1179.60'); assert.equal(totals.mao_obra_interna, '940.40');
     const details = await getManutencaoDetalhes({ data_inicio: '2026-10-01', data_fim: '2026-10-31', frota_id: fleet.id });
-    assert.equal(details.length, 4); assert.equal((details as Array<Record<string, unknown>>).some(item => item.categoria === 'MAO_DE_OBRA_INTERNA'), true);
+    assert.equal(details.length, 6); assert.equal((details as Array<Record<string, unknown>>).some(item => item.categoria === 'MAO_DE_OBRA_INTERNA'), true);
     const performanceMissing = await getDesempenhoOficina({ data_inicio: '2026-10-01', data_fim: '2026-11-30', frota_id: fleet.id });
     assert.equal(performanceMissing.dados_incompletos, true); assert.equal(performanceMissing.diferenca_gerencial_estimada, null); assert.deepEqual(performanceMissing.competencias_sem_salario, ['2026-11']);
     await saveSalarioBase({ ano: 2026, mes: 11, valor_consolidado: '20.20' }, actor);
     const performance = await getDesempenhoOficina({ data_inicio: '2026-10-01', data_fim: '2026-11-30', frota_id: fleet.id });
-    assert.equal(performance.valor_servicos_internos, '40.40'); assert.equal(performance.salario_base_cadastrado, '30.30'); assert.equal(performance.diferenca_gerencial_estimada, '10.10'); assert.equal(performance.dados_incompletos, false);
+    assert.equal(performance.valor_servicos_internos, '940.40'); assert.equal(performance.salario_base_cadastrado, '30.30'); assert.equal(performance.diferenca_gerencial_estimada, '910.10'); assert.equal(performance.dados_incompletos, false);
   } finally {
     await pool.query('DELETE FROM salarios_base_oficina WHERE ano=2026 AND mes IN (10,11)');
     for (const previous of previousSalary) await pool.query('INSERT INTO salarios_base_oficina(ano,mes,valor_consolidado,observacoes,atualizado_por) VALUES($1,$2,$3,$4,$5)', [previous.ano, previous.mes, previous.valor_consolidado, previous.observacoes, previous.atualizado_por]);

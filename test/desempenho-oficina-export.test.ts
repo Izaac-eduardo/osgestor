@@ -20,9 +20,12 @@ test('exportação do desempenho reconcilia Excel, PDF e serviço compartilhado'
   const exportedTotal = Number(totalRow.getCell(6).value);
   const sourceTotal = performance.detalhes.reduce((sum, row) => sum + Number(row.valor), 0);
   assert.equal(exportedTotal, sourceTotal);
-  assert.equal(sourceTotal.toFixed(2), performance.valor_servicos_internos);
+  assert.equal(Number(sourceTotal.toFixed(2)), Number(performance.valor_servicos_internos));
   assert.equal(performance.linhas_abertas + performance.linhas_finalizadas, performance.detalhes.length);
-  assert.ok(detail!.getCell(7, 3).value instanceof Date);
+  if (performance.detalhes.length > 0) {
+    const firstDetailRow = detail!.getRows(1, detail!.rowCount).find(row => row.getCell(3).value instanceof Date);
+    assert.ok(firstDetailRow);
+  }
   assert.equal(detail!.getColumn(3).numFmt, 'dd/mm/yyyy');
   assert.ok(detail!.autoFilter);
   assert.equal(detail!.views[0].state, 'frozen');

@@ -14,13 +14,15 @@ test('preserva os limites 27/10/2026 e 05/11/2026 no contrato de filtros', () =>
   assert.match(frontendSource, /Object\.entries\(filters\)/)
 })
 
-test('consultas financeiras usam intervalo DATE inclusivo no início e no fim', () => {
+test('consultas financeiras usam intervalo DATE inclusivo pela abertura da O.S.', () => {
   const dataContaConditions = (serviceSource.match(/l\.data_conta BETWEEN \$1::date AND \$2::date/g) ?? []).length
-  const dataFechamentoConditions = (serviceSource.match(/os\.data_fechamento BETWEEN \$1::date AND \$2::date/g) ?? []).length
+  const dataAberturaConditions = (serviceSource.match(/os\.data_abertura BETWEEN \$1::date AND \$2::date/g) ?? []).length
   assert.ok(dataContaConditions >= 3, 'contabilidade deve usar data_conta em totais, detalhes e consolidação')
-  assert.ok(dataFechamentoConditions >= 4, 'materiais e mão de obra devem usar data_fechamento nas consultas financeiras')
+  assert.ok(dataAberturaConditions >= 4, 'materiais e mão de obra devem usar data_abertura nas consultas financeiras')
   assert.doesNotMatch(serviceSource, /l\.data_conta\s*<\s*\$2/)
-  assert.doesNotMatch(serviceSource, /os\.data_fechamento\s*<\s*\$2/)
+  assert.doesNotMatch(serviceSource, /os\.data_fechamento\s+BETWEEN\s+\$1::date\s+AND\s+\$2::date/)
+  assert.doesNotMatch(serviceSource, /os\.status='FINALIZADA'\s+AND\s+(?:os\.)?data_abertura/)
+  assert.match(serviceSource, /os\.status<>'CANCELADA'/)
 })
 
 test('filtro frota_codigo é encaminhado às consultas financeiras sem substituir frota_id', () => {
