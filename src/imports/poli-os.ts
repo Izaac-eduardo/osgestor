@@ -16,6 +16,7 @@ import {
   type PoliImport,
 } from './poli-canonical.js';
 import { resolvePoliItemCategory, type PoliItemCategoryResolution } from '../services/poli-item-categorization.service.js';
+import { fleetCodesEquivalent } from '../services/frota-resolver.service.js';
 
 export type PreviewStatus = 'PRONTA' | 'REQUER_REVISAO' | 'JA_CADASTRADA' | 'ATUALIZACAO_DISPONIVEL' | 'SEM_ALTERACOES' | 'NOVA' | 'ERRO';
 export type Natureza = 'INTERNA' | 'MATERIAL' | 'TERCEIRO';
@@ -61,12 +62,12 @@ export function resolveManualStatus(item: ParsedOs, status: string): boolean {
 }
 const ocorrencias = 'ocorr' + String.fromCharCode(234) + 'ncia';
 export function addPending(pendencias:string[],code:string){if(code==='FORNECEDOR_PENDENTE')return;const index=pendencias.findIndex(x=>x===code||x.startsWith(`${code} (`));if(index<0){pendencias.push(code);return}const match=new RegExp(`\\((\\d+) ${ocorrencias}s?\\)$`).exec(pendencias[index]!);const count=(match?Number(match[1]):1)+1;pendencias[index]=`${code} (${count} ${ocorrencias}${count===1?'':'s'})`;}
-export function findFleetId(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>){if(!original)return undefined;const key=normalizeFleetCode(original);const matches=fleets.filter(x=>normalizeFleetCode(x.codigo)===key||normalizeFleetCode(x.placa??'')===key);return matches.length===1?matches[0]!.id:undefined;}
+export function findFleetId(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>){if(!original)return undefined;const key=normalizeFleetCode(original);const matches=fleets.filter(x=>fleetCodesEquivalent(original,x.codigo)||normalizeFleetCode(x.placa??'')===key);return matches.length===1?matches[0]!.id:undefined;}
 export function findFleetIdWithAliases(original:string|null,fleets:Array<{id:string;codigo:string;placa:string|null}>,aliases:ExternalFleetIdentifier[],origem=POLIFROTA_ORIGIN){
  if(!original)return undefined;
  const directKey=normalizeFleetCode(original),externalKey=normalizeExternalFleetIdentifier(original);
  const candidates=new Set<string>();
- for(const fleet of fleets) if(normalizeFleetCode(fleet.codigo)===directKey||normalizeFleetCode(fleet.placa??'')===directKey)candidates.add(fleet.id);
+ for(const fleet of fleets) if(fleetCodesEquivalent(original,fleet.codigo)||normalizeFleetCode(fleet.placa??'')===directKey)candidates.add(fleet.id);
  for(const alias of aliases) if(alias.origem===origem&&alias.identificador_normalizado===externalKey)candidates.add(alias.frota_id);
  return candidates.size===1?[...candidates][0]:undefined;
 }
@@ -78,7 +79,7 @@ export function findFleetMatchWithAliasPrecedence(original:string|null,fleets:Fl
  const directKey=normalizeFleetCode(original),externalKey=normalizeExternalFleetIdentifier(original);
  const direct=new Set<string>();
  const activeFleetIds=new Set(fleets.filter(isActiveFleet).map(fleet=>fleet.id));
- for(const fleet of fleets) if(isActiveFleet(fleet)&&(normalizeFleetCode(fleet.codigo)===directKey||normalizeFleetCode(fleet.placa??'')===directKey))direct.add(fleet.id);
+ for(const fleet of fleets) if(isActiveFleet(fleet)&&(fleetCodesEquivalent(original, fleet.codigo)||normalizeFleetCode(fleet.placa??'')===directKey))direct.add(fleet.id);
  const matches=origins.flatMap(origem=>aliases.filter(alias=>alias.origem===origem&&alias.identificador_normalizado===externalKey));
  if(matches.some(alias=>!activeFleetIds.has(alias.frota_id)))return undefined;
  const candidates=new Set([...direct,...matches.map(alias=>alias.frota_id)]);

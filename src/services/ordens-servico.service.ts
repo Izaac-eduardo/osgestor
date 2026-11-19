@@ -1,9 +1,11 @@
 import { pool } from '../config/database.js';
+import type { PoolClient } from 'pg';
 import { normalizeFleetCode } from '../utils/frotas.js';
 import { upsertOverride } from './ordens-servico-overrides.service.js';
 import { recordAudit } from './audit.service.js';
 import type { AuthenticatedRequestUser } from '../types/auth.js';
 import { addCategoriaPredicate, ordemServicoCategorias, parseCategoriaFiltro } from './categorias-filtro.service.js';
+import { resolveFleetByPrefixAndNumber } from './frota-resolver.service.js';
 
 export const ordemServicoNaturezas = ['INTERNA', 'TERCEIRO', 'MATERIAL'] as const;
 export { ordemServicoCategorias } from './categorias-filtro.service.js';
@@ -215,12 +217,19 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
     throw new OrdemServicoServiceError(400, 'prestador_terceiro deve ter no máximo 255 caracteres.');
   }
 
+  const frotaId = body.frota_id === undefined || body.frota_id === null || body.frota_id === '' ? null : requiredUuid(body.frota_id, 'frota_id');
+  const prefixoFrotaId = body.prefixo_frota_id === undefined || body.prefixo_frota_id === null || body.prefixo_frota_id === '' ? null : requiredUuid(body.prefixo_frota_id, 'prefixo_frota_id');
+  const frotaNumero = body.frota_numero === undefined || body.frota_numero === null || body.frota_numero === '' ? null : requiredPositiveInteger(body.frota_numero, 'frota_numero', 2147483647);
+  if (!frotaId && (!prefixoFrotaId || frotaNumero === null)) {
+    throw new OrdemServicoServiceError(400, 'Informe uma frota ou o prefixo e número da frota.');
+  }
+
   return {
     numero_os: requiredPositiveInteger(body.numero_os, 'numero_os'),
     obra_id: body.obra_id === undefined || body.obra_id === null || body.obra_id === '' ? null : requiredUuid(body.obra_id, 'obra_id'),
-    frota_id: body.frota_id === undefined || body.frota_id === null || body.frota_id === '' ? null : requiredUuid(body.frota_id, 'frota_id'),
-    prefixo_frota_id: body.frota_id ? null : requiredUuid(body.prefixo_frota_id, 'prefixo_frota_id'),
-    frota_numero: body.frota_id ? null : requiredPositiveInteger(body.frota_numero, 'frota_numero', 2147483647),
+    frota_id: frotaId,
+    prefixo_frota_id: prefixoFrotaId,
+    frota_numero: frotaNumero,
     natureza_os: body.natureza_os,
     categoria_servico: categoria,
     prestador_terceiro: prestadorTerceiro,
@@ -231,8 +240,8 @@ const parseFields = (body: unknown, requireStatus: boolean): OrdemServicoFields 
   };
 };
 
-const validateRelationships = async (obraId: string | null, frotaId: string | null, prefixoFrotaId: string | null): Promise<void> => {
-  const result = await pool.query<RelationshipResult>(
+const validateRelationships = async (obraId: string | null, frotaId: string | null, prefixoFrotaId: string | null, db: typeof pool | PoolClient = pool): Promise<void> => {
+  const result = await db.query<RelationshipResult>(
     `SELECT
        EXISTS (SELECT 1 FROM obras WHERE id = $1) AS obra_existe,
        EXISTS (SELECT 1 FROM frotas WHERE id = $2) AS frota_existe,
@@ -351,10 +360,14 @@ export async function getOrdemServico(id: string): Promise<OrdemServicoResumo> {
 
 export async function createOrdemServico(body: unknown, actor?: AuthenticatedRequestUser): Promise<OrdemServico> {
   const fields = parseFields(body, false);
-  await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (!fields.frota_id && fields.prefixo_frota_id && fields.frota_numero !== null) {
+      const resolution = await resolveFleetByPrefixAndNumber(client, fields.prefixo_frota_id, fields.frota_numero);
+      if (resolution.status === 'UNIQUE') fields.frota_id = resolution.frotaId;
+    }
+    await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id, client);
     const result = await client.query<OrdemServico>(
       `INSERT INTO ordens_servico (
          numero_os, obra_id, frota_id, prefixo_frota_id, frota_numero, natureza_os,
@@ -398,10 +411,14 @@ const auditOrdem = (row: Partial<OrdemServico> | undefined): Record<string, unkn
 
 export async function updateOrdemServico(id: string, body: unknown, actor?: AuthenticatedRequestUser): Promise<OrdemServico> {
   const fields = parseFields(body, true);
-  await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (!fields.frota_id && fields.prefixo_frota_id && fields.frota_numero !== null) {
+      const resolution = await resolveFleetByPrefixAndNumber(client, fields.prefixo_frota_id, fields.frota_numero);
+      if (resolution.status === 'UNIQUE') fields.frota_id = resolution.frotaId;
+    }
+    await validateRelationships(fields.obra_id, fields.frota_id, fields.prefixo_frota_id, client);
     const currentResult = await client.query<OrdemServico & NaturezaChangeResult>(
       `SELECT *,
          EXISTS (SELECT 1 FROM ordens_servico_funcionarios WHERE ordem_servico_id = $1) AS possui_funcionarios,
